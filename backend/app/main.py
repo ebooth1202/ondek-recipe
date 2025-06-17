@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 import os
 from dotenv import load_dotenv
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from enum import Enum
 import re
 
@@ -98,7 +98,7 @@ class Ingredient(BaseModel):
 
 class UserCreate(BaseModel):
     username: str
-    email: EmailStr
+    email: str  # Changed from EmailStr to str
     password: str
     role: UserRole = UserRole.USER
 
@@ -111,13 +111,13 @@ class UserLogin(BaseModel):
 class UserResponse(BaseModel):
     id: str
     username: str
-    email: EmailStr
+    email: str  # Changed from EmailStr to str
     role: UserRole
     created_at: datetime
 
 
 class UserUpdate(BaseModel):
-    email: Optional[EmailStr] = None
+    email: Optional[str] = None  # Changed from EmailStr to str
     password: Optional[str] = None
 
 
@@ -210,6 +210,12 @@ def require_role(allowed_roles: List[UserRole]):
     return role_checker
 
 
+# Simple email validation function
+def validate_email(email: str) -> bool:
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None
+
+
 # Routes
 @app.get("/")
 async def root():
@@ -224,6 +230,10 @@ async def health_check():
 # Authentication routes
 @app.post("/auth/register", response_model=UserResponse)
 async def register(user: UserCreate):
+    # Basic email validation
+    if not validate_email(user.email):
+        raise HTTPException(status_code=400, detail="Invalid email format")
+
     # Check if user already exists
     if db.users.find_one({"username": user.username}):
         raise HTTPException(status_code=400, detail="Username already registered")
@@ -498,6 +508,10 @@ async def update_user(
     update_doc = {"updated_at": datetime.now()}
 
     if user_update.email is not None:
+        # Basic email validation
+        if not validate_email(user_update.email):
+            raise HTTPException(status_code=400, detail="Invalid email format")
+
         # Check if email already exists
         existing_user = db.users.find_one({"email": user_update.email, "_id": {"$ne": ObjectId(user_id)}})
         if existing_user:
