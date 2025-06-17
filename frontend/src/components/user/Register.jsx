@@ -72,7 +72,7 @@ const Register = () => {
     const result = await register(formData.username, formData.email, formData.password);
 
     if (result.success) {
-      navigate('/recipes');
+      navigate('/dashboard');
     } else {
       setErrors({ submit: result.error });
     }
@@ -81,19 +81,56 @@ const Register = () => {
   };
 
   return (
-    <div className="page-container">
-      <div className="form-container">
-        <h1 className="page-title">Create Account</h1>
+    <div style={{
+      padding: '2rem',
+      backgroundColor: '#f0f8ff',
+      minHeight: 'calc(100vh - 80px)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    }}>
+      <div style={{
+        maxWidth: '500px',
+        width: '100%',
+        background: 'white',
+        border: '2px solid #003366',
+        borderRadius: '15px',
+        padding: '2rem',
+        boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)'
+      }}>
+        <h1 style={{
+          textAlign: 'center',
+          color: '#003366',
+          fontSize: '2rem',
+          marginBottom: '2rem'
+        }}>
+          👤 Create Account
+        </h1>
 
         {errors.submit && (
-          <div className="error">
+          <div style={{
+            background: '#f8d7da',
+            color: '#721c24',
+            padding: '1rem',
+            borderRadius: '8px',
+            marginBottom: '1rem',
+            border: '1px solid #f5c6cb'
+          }}>
             {errors.submit}
           </div>
         )}
 
         <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="username" className="form-label">
+          <div style={{ marginBottom: '1.5rem' }}>
+            <label
+              htmlFor="username"
+              style={{
+                display: 'block',
+                marginBottom: '0.5rem',
+                color: '#003366',
+                fontWeight: '500'
+              }}
+            >
               Username
             </label>
             <input
@@ -102,19 +139,38 @@ const Register = () => {
               name="username"
               value={formData.username}
               onChange={handleChange}
-              className={`form-control ${errors.username ? 'error' : ''}`}
+              style={{
+                width: '100%',
+                padding: '12px',
+                border: `2px solid ${errors.username ? '#dc3545' : '#003366'}`,
+                borderRadius: '10px',
+                fontSize: '16px',
+                backgroundColor: 'white'
+              }}
               placeholder="Choose a username"
               required
             />
             {errors.username && (
-              <div className="error" style={{ marginTop: '0.5rem', padding: '0.5rem' }}>
+              <div style={{
+                color: '#dc3545',
+                fontSize: '0.9rem',
+                marginTop: '0.5rem'
+              }}>
                 {errors.username}
               </div>
             )}
           </div>
 
-          <div className="form-group">
-            <label htmlFor="email" className="form-label">
+          <div style={{ marginBottom: '1.5rem' }}>
+            <label
+              htmlFor="email"
+              style={{
+                display: 'block',
+                marginBottom: '0.5rem',
+                color: '#003366',
+                fontWeight: '500'
+              }}
+            >
               Email
             </label>
             <input
@@ -123,19 +179,38 @@ const Register = () => {
               name="email"
               value={formData.email}
               onChange={handleChange}
-              className={`form-control ${errors.email ? 'error' : ''}`}
+              style={{
+                width: '100%',
+                padding: '12px',
+                border: `2px solid ${errors.email ? '#dc3545' : '#003366'}`,
+                borderRadius: '10px',
+                fontSize: '16px',
+                backgroundColor: 'white'
+              }}
               placeholder="Enter your email"
               required
             />
             {errors.email && (
-              <div className="error" style={{ marginTop: '0.5rem', padding: '0.5rem' }}>
+              <div style={{
+                color: '#dc3545',
+                fontSize: '0.9rem',
+                marginTop: '0.5rem'
+              }}>
                 {errors.email}
               </div>
             )}
           </div>
 
-          <div className="form-group">
-            <label htmlFor="password" className="form-label">
+          <div style={{ marginBottom: '1.5rem' }}>
+            <label
+              htmlFor="password"
+              style={{
+                display: 'block',
+                marginBottom: '0.5rem',
+                color: '#003366',
+                fontWeight: '500'
+              }}
+            >
               Password
             </label>
             <input
@@ -144,19 +219,38 @@ const Register = () => {
               name="password"
               value={formData.password}
               onChange={handleChange}
-              className={`form-control ${errors.password ? 'error' : ''}`}
+              style={{
+                width: '100%',
+                padding: '12px',
+                border: `2px solid ${errors.password ? '#dc3545' : '#003366'}`,
+                borderRadius: '10px',
+                fontSize: '16px',
+                backgroundColor: 'white'
+              }}
               placeholder="Create a password"
               required
             />
             {errors.password && (
-              <div className="error" style={{ marginTop: '0.5rem', padding: '0.5rem' }}>
+              <div style={{
+                color: '#dc3545',
+                fontSize: '0.9rem',
+                marginTop: '0.5rem'
+              }}>
                 {errors.password}
               </div>
             )}
           </div>
 
-          <div className="form-group">
-            <label htmlFor="confirmPassword" className="form-label">
+          <div style={{ marginBottom: '1.5rem' }}>
+            <label
+              htmlFor="confirmPassword"
+              style={{
+                display: 'block',
+                marginBottom: '0.5rem',
+                color: '#003366',
+                fontWeight: '500'
+              }}
+            >
               Confirm Password
             </label>
             <input
@@ -165,23 +259,44 @@ const Register = () => {
               name="confirmPassword"
               value={formData.confirmPassword}
               onChange={handleChange}
-              className={`form-control ${errors.confirmPassword ? 'error' : ''}`}
+              style={{
+                width: '100%',
+                padding: '12px',
+                border: `2px solid ${errors.confirmPassword ? '#dc3545' : '#003366'}`,
+                borderRadius: '10px',
+                fontSize: '16px',
+                backgroundColor: 'white'
+              }}
               placeholder="Confirm your password"
               required
             />
             {errors.confirmPassword && (
-              <div className="error" style={{ marginTop: '0.5rem', padding: '0.5rem' }}>
+              <div style={{
+                color: '#dc3545',
+                fontSize: '0.9rem',
+                marginTop: '0.5rem'
+              }}>
                 {errors.confirmPassword}
               </div>
             )}
           </div>
 
-          <div className="form-group">
+          <div style={{ marginBottom: '1.5rem' }}>
             <button
               type="submit"
-              className="btn btn-primary"
               disabled={loading}
-              style={{ width: '100%' }}
+              style={{
+                width: '100%',
+                padding: '12px 24px',
+                border: 'none',
+                borderRadius: '10px',
+                fontSize: '16px',
+                fontWeight: '500',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                backgroundColor: loading ? '#ccc' : '#003366',
+                color: 'white',
+                transition: 'all 0.3s ease'
+              }}
             >
               {loading ? 'Creating Account...' : 'Create Account'}
             </button>
@@ -191,7 +306,14 @@ const Register = () => {
         <div style={{ textAlign: 'center', marginTop: '2rem' }}>
           <p>
             Already have an account?{' '}
-            <Link to="/login" style={{ color: '#0066cc', textDecoration: 'none' }}>
+            <Link
+              to="/login"
+              style={{
+                color: '#0066cc',
+                textDecoration: 'none',
+                fontWeight: '500'
+              }}
+            >
               Login here
             </Link>
           </p>

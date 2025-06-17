@@ -3,15 +3,9 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import Navbar from './components/common/Navbar';
 import Home from './pages/Home';
-import Recipes from './pages/Recipes';
-import AddRecipe from './pages/AddRecipe';
-import RecipeDetail from './pages/RecipeDetail';
-import Users from './pages/Users';
-import AIChat from './pages/AIChat';
 import Login from './components/user/Login';
 import Register from './components/user/Register';
-import AIWidget from './components/common/AIWidget';
-import './styles/globals.css';
+import Dashboard from './pages/Dashboard';
 
 function App() {
   return (
@@ -24,14 +18,9 @@ function App() {
               <Route path="/" element={<Home />} />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
-              <Route path="/recipes" element={<Recipes />} />
-              <Route path="/recipes/:id" element={<RecipeDetail />} />
-              <Route path="/add-recipe" element={<AddRecipe />} />
-              <Route path="/users" element={<Users />} />
-              <Route path="/ai-chat" element={<AIChat />} />
+              <Route path="/dashboard" element={<Dashboard />} />
             </Routes>
           </main>
-          <AIWidget />
         </div>
       </Router>
     </AuthProvider>

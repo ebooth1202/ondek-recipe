@@ -17,60 +17,131 @@ const Navbar = () => {
   };
 
   return (
-    <nav className="navbar">
-      <div className="navbar-container">
-        <Link to="/" className="navbar-brand">
+    <nav style={{
+      backgroundColor: '#003366',
+      color: 'white',
+      padding: '1rem 0',
+      boxShadow: '0 2px 4px rgba(0, 51, 102, 0.3)'
+    }}>
+      <div style={{
+        maxWidth: '1200px',
+        margin: '0 auto',
+        padding: '0 20px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+      }}>
+        <Link
+          to="/"
+          style={{
+            fontSize: '1.5rem',
+            fontWeight: 'bold',
+            textDecoration: 'none',
+            color: 'white'
+          }}
+        >
           🍳 onDEK Recipe
         </Link>
 
-        <ul className="navbar-nav">
+        <ul style={{
+          display: 'flex',
+          listStyle: 'none',
+          gap: '2rem',
+          alignItems: 'center',
+          margin: 0,
+          padding: 0
+        }}>
           {isAuthenticated() ? (
             <>
               <li>
                 <Link
-                  to="/recipes"
-                  className={`nav-link ${isActive('/recipes') ? 'active' : ''}`}
+                  to="/dashboard"
+                  style={{
+                    color: 'white',
+                    textDecoration: 'none',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '8px',
+                    transition: 'background-color 0.3s ease',
+                    backgroundColor: isActive('/dashboard') ? '#0066cc' : 'transparent'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive('/dashboard')) {
+                      e.target.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive('/dashboard')) {
+                      e.target.style.backgroundColor = 'transparent';
+                    }
+                  }}
                 >
-                  Search Recipes
+                  🏠 Dashboard
                 </Link>
               </li>
-              <li>
-                <Link
-                  to="/add-recipe"
-                  className={`nav-link ${isActive('/add-recipe') ? 'active' : ''}`}
-                >
-                  Add Recipe
-                </Link>
-              </li>
+
               {hasRole(['admin', 'owner']) && (
                 <li>
                   <Link
                     to="/users"
-                    className={`nav-link ${isActive('/users') ? 'active' : ''}`}
+                    style={{
+                      color: 'white',
+                      textDecoration: 'none',
+                      padding: '0.5rem 1rem',
+                      borderRadius: '8px',
+                      transition: 'background-color 0.3s ease',
+                      backgroundColor: isActive('/users') ? '#0066cc' : 'transparent'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isActive('/users')) {
+                        e.target.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isActive('/users')) {
+                        e.target.style.backgroundColor = 'transparent';
+                      }
+                    }}
                   >
-                    Users
+                    👥 Users
                   </Link>
                 </li>
               )}
+
               <li>
-                <Link
-                  to="/ai-chat"
-                  className={`nav-link ${isActive('/ai-chat') ? 'active' : ''}`}
-                >
-                  AI Chat
-                </Link>
-              </li>
-              <li>
-                <span className="nav-link" style={{ color: '#ccc' }}>
-                  Welcome, {user?.username}!
+                <span style={{
+                  color: '#ccc',
+                  fontSize: '0.9rem'
+                }}>
+                  Welcome, {user?.username}! ({user?.role})
                 </span>
               </li>
+
               <li>
                 <button
                   onClick={handleLogout}
-                  className="btn btn-secondary btn-small"
+                  style={{
+                    backgroundColor: '#f0f8ff',
+                    color: '#003366',
+                    border: '2px solid #f0f8ff',
+                    borderRadius: '8px',
+                    padding: '0.5rem 1rem',
+                    cursor: 'pointer',
+                    fontSize: '0.9rem',
+                    fontWeight: '500',
+                    transition: 'all 0.3s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = '#003366';
+                    e.target.style.color = 'white';
+                    e.target.style.borderColor = 'white';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = '#f0f8ff';
+                    e.target.style.color = '#003366';
+                    e.target.style.borderColor = '#f0f8ff';
+                  }}
                 >
-                  Logout
+                  🚪 Logout
                 </button>
               </li>
             </>
@@ -79,17 +150,51 @@ const Navbar = () => {
               <li>
                 <Link
                   to="/login"
-                  className={`nav-link ${isActive('/login') ? 'active' : ''}`}
+                  style={{
+                    color: 'white',
+                    textDecoration: 'none',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '8px',
+                    transition: 'background-color 0.3s ease',
+                    backgroundColor: isActive('/login') ? '#0066cc' : 'transparent'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive('/login')) {
+                      e.target.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive('/login')) {
+                      e.target.style.backgroundColor = 'transparent';
+                    }
+                  }}
                 >
-                  Login
+                  🔑 Login
                 </Link>
               </li>
               <li>
                 <Link
                   to="/register"
-                  className={`nav-link ${isActive('/register') ? 'active' : ''}`}
+                  style={{
+                    color: '#003366',
+                    textDecoration: 'none',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '8px',
+                    backgroundColor: '#f0f8ff',
+                    border: '2px solid #f0f8ff',
+                    transition: 'all 0.3s ease',
+                    fontWeight: '500'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = 'white';
+                    e.target.style.borderColor = 'white';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = '#f0f8ff';
+                    e.target.style.borderColor = '#f0f8ff';
+                  }}
                 >
-                  Register
+                  👤 Register
                 </Link>
               </li>
             </>
