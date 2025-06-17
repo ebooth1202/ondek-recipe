@@ -1,0 +1,116 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  background-color: #f0f8ff; /* Very light blue */
+  color: #333;
+  line-height: 1.6;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/* Base styling for all boxes */
+.box {
+  background: white;
+  border: 2px solid #003366; /* Dark blue */
+  border-radius: 15px;
+  padding: 20px;
+  margin: 10px 0;
+  box-shadow: 0 2px 8px rgba(0, 51, 102, 0.1);
+}
+
+/* Input styling */
+.input {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid #003366;
+  border-radius: 10px;
+  font-size: 16px;
+  margin: 5px 0;
+  background: white;
+}
+
+.input:focus {
+  outline: none;
+  border-color: #0066cc;
+  box-shadow: 0 0 5px rgba(0, 102, 204, 0.3);
+}
+
+/* Button styling */
+.btn {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-primary {
+  background-color: #003366;
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: #0066cc;
+  transform: translateY(-2px);
+}
+
+.btn-secondary {
+  background-color: #f0f8ff;
+  color: #003366;
+  border: 2px solid #003366;
+}
+
+.btn-secondary:hover {
+  background-color: #003366;
+  color: white;
+}
+
+/* Card styling */
+.card {
+  background: white;
+  border: 2px solid #003366;
+  border-radius: 15px;
+  padding: 20px;
+  margin: 15px;
+  box-shadow: 0 4px 12px rgba(0, 51, 102, 0.1);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 20px rgba(0, 51, 102, 0.2);
+}
+
+/* AI Widget styling */
+.ai-widget {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 60px;
+  height: 60px;
+  background: #003366;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 51, 102, 0.3);
+  z-index: 1000;
+}
+
+.ai-widget:hover {
+  background: #0066cc;
+  transform: scale(1.1);
+}
