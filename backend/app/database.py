@@ -17,7 +17,7 @@ class Database:
                 settings.mongo_uri,
                 server_api=ServerApi('1')
             )
-            cls.database = cls.client.ondek_recipes
+            cls.database = cls.client.ondek_recipe  # Fixed: changed from ondek_recipes
 
             # Test connection
             cls.client.admin.command('ping')
@@ -38,6 +38,7 @@ class Database:
             cls.database.recipes.create_index("recipe_name")
             cls.database.recipes.create_index("genre")
             cls.database.recipes.create_index("created_by")
+            cls.database.recipes.create_index([("recipe_name", "text"), ("instructions", "text")])
 
             # User indexes
             cls.database.users.create_index("username", unique=True)
