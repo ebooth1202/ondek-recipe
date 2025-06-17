@@ -1,204 +1,323 @@
-// File: frontend/src/components/RatingsAndReviews.js
 import React, { useState, useEffect } from 'react';
-import { MessageCircle, Star } from 'lucide-react';
-import StarRating from './StarRating';
-import RatingForm from './RatingForm';
-import ReviewItem from './ReviewItem';
+import axios from 'axios';
 
 const RatingsAndReviews = ({ recipeId, currentUserId }) => {
-  const [reviews, setReviews] = useState([]);
-  const [ratingsSummary, setRatingsSummary] = useState(null);
-  const [showRatingForm, setShowRatingForm] = useState(false);
-  const [editingRating, setEditingRating] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [ratings, setRatings] = useState([]);
+  const [summary, setSummary] = useState({ average_rating: 0, total_ratings: 0, rating_breakdown: {} });
+  const [userRating, setUserRating] = useState(0);
+  const [userReview, setUserReview] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [userHasRated, setUserHasRated] = useState(false);
+  const [userRatingId, setUserRatingId] = useState(null);
 
-  // Fetch ratings summary
-  const fetchRatingsSummary = async () => {
-    try {
-      const response = await fetch(`http://localhost:8000/recipes/${recipeId}/ratings/summary`);
-      if (response.ok) {
-        const summary = await response.json();
-        setRatingsSummary(summary);
-      }
-    } catch (error) {
-      console.error('Error fetching ratings summary:', error);
-    }
-  };
-
-  // Fetch reviews
-  const fetchReviews = async () => {
-    try {
-      const response = await fetch(`http://localhost:8000/recipes/${recipeId}/ratings`);
-      if (response.ok) {
-        const reviewsData = await response.json();
-        setReviews(reviewsData);
-      }
-    } catch (error) {
-      console.error('Error fetching reviews:', error);
-      setError('Failed to load reviews');
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Fetch ratings and summary on component mount
   useEffect(() => {
-    fetchRatingsSummary();
-    fetchReviews();
+    if (recipeId) {
+      fetchRatings();
+      fetchSummary();
+    }
   }, [recipeId]);
 
-  const handleRatingSubmit = (newRating) => {
-    // Refresh data after submitting rating
-    fetchRatingsSummary();
-    fetchReviews();
-    setShowRatingForm(false);
-    setEditingRating(null);
+  const fetchRatings = async () => {
+    try {
+      const response = await axios.get(`http://127.0.0.1:8000/recipes/${recipeId}/ratings`);
+      setRatings(response.data);
+
+      // Check if current user has already rated
+      const userRating = response.data.find(rating => rating.user_id === currentUserId);
+      if (userRating) {
+        setUserHasRated(true);
+        setUserRating(userRating.rating);
+        setUserReview(userRating.review || '');
+        setUserRatingId(userRating.id);
+      }
+    } catch (err) {
+      console.error('Error fetching ratings:', err);
+      setError('Failed to load ratings');
+    }
   };
 
-  const handleEditRating = (rating) => {
-    setEditingRating(rating);
-    setShowRatingForm(true);
+  const fetchSummary = async () => {
+    try {
+      const response = await axios.get(`http://127.0.0.1:8000/recipes/${recipeId}/ratings/summary`);
+      setSummary(response.data);
+    } catch (err) {
+      console.error('Error fetching rating summary:', err);
+    }
   };
 
-  const handleDeleteRating = async (rating) => {
-    if (!window.confirm('Are you sure you want to delete your review?')) {
+  const submitRating = async () => {
+    if (userRating === 0) {
+      setError('Please select a star rating');
       return;
     }
 
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(
-        `http://localhost:8000/recipes/${recipeId}/ratings/${rating.id}`,
-        {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          }
-        }
-      );
+    setIsSubmitting(true);
+    setError('');
+    setSuccess('');
 
-      if (response.ok) {
-        fetchRatingsSummary();
-        fetchReviews();
+    try {
+      let response;
+
+      if (userHasRated) {
+        // Update existing rating
+        response = await axios.put(`http://127.0.0.1:8000/recipes/${recipeId}/ratings/${userRatingId}`, {
+          rating: userRating,
+          review: userReview
+        });
       } else {
-        const error = await response.json();
-        alert(error.detail || 'Error deleting review');
+        // Create new rating
+        response = await axios.post(`http://127.0.0.1:8000/recipes/${recipeId}/ratings`, {
+          recipe_id: recipeId,
+          rating: userRating,
+          review: userReview
+        });
       }
-    } catch (error) {
-      console.error('Error deleting rating:', error);
-      alert('Network error. Please try again.');
+
+      setSuccess(userHasRated ? 'Your rating was updated successfully!' : 'Your rating was submitted successfully!');
+      fetchRatings();
+      fetchSummary();
+    } catch (err) {
+      console.error('Error submitting rating:', err);
+      setError(err.response?.data?.detail || 'Failed to submit rating');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const userHasRated = reviews.some(review => review.user_id === currentUserId);
-  const userRating = reviews.find(review => review.user_id === currentUserId);
-
-  if (loading) {
+  // Styled Star Rating component
+  const StarRating = ({ value, onChange, readOnly = false }) => {
     return (
-      <div className="bg-white rounded-lg p-6">
-        <div className="animate-pulse">
-          <div className="h-6 bg-gray-200 rounded w-1/4 mb-4"></div>
-          <div className="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
-          <div className="h-4 bg-gray-200 rounded w-1/3"></div>
-        </div>
+      <div style={{ display: 'flex' }}>
+        {[1, 2, 3, 4, 5].map((star) => (
+          <button
+            key={star}
+            type="button"
+            onClick={() => !readOnly && onChange(star)}
+            style={{
+              background: 'none',
+              border: 'none',
+              fontSize: '2rem',
+              color: star <= value ? '#ffc107' : '#e4e5e9',
+              cursor: readOnly ? 'default' : 'pointer',
+              padding: '0 5px'
+            }}
+          >
+            ★
+          </button>
+        ))}
       </div>
     );
-  }
+  };
 
   return (
-    <div className="bg-white rounded-lg p-6">
-      <div className="mb-6">
-        <h3 className="text-xl font-semibold mb-4 flex items-center gap-2">
-          <MessageCircle className="w-5 h-5" />
-          Ratings & Reviews
-        </h3>
+    <div style={{ padding: '1rem' }}>
+      {/* Rating Summary */}
+      <div style={{
+        background: '#f0f8ff',
+        padding: '1.5rem',
+        borderRadius: '10px',
+        marginBottom: '2rem',
+        boxShadow: '0 2px 5px rgba(0, 51, 102, 0.1)'
+      }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '1rem'
+        }}>
+          <div>
+            <h3 style={{
+              color: '#003366',
+              fontSize: '2rem',
+              marginBottom: '0.5rem'
+            }}>
+              {summary.average_rating ? summary.average_rating.toFixed(1) : "0.0"}
+              <span style={{ fontSize: '1rem', color: '#666', marginLeft: '0.5rem' }}>/ 5</span>
+            </h3>
+            <StarRating value={Math.round(summary.average_rating)} readOnly={true} />
+            <p style={{
+              color: '#666',
+              marginTop: '0.5rem',
+              fontSize: '0.9rem'
+            }}>
+              Based on {summary.total_ratings} {summary.total_ratings === 1 ? 'rating' : 'ratings'}
+            </p>
+          </div>
 
-        {ratingsSummary && ratingsSummary.total_ratings > 0 ? (
-          <div className="mb-4">
-            <div className="flex items-center gap-4 mb-2">
-              <StarRating rating={ratingsSummary.average_rating} size="lg" />
-              <span className="text-2xl font-bold">{ratingsSummary.average_rating}</span>
-              <span className="text-gray-600">
-                ({ratingsSummary.total_ratings} review{ratingsSummary.total_ratings !== 1 ? 's' : ''})
-              </span>
-            </div>
-
-            {/* Rating breakdown */}
-            <div className="space-y-1">
-              {[5, 4, 3, 2, 1].map(stars => (
-                <div key={stars} className="flex items-center gap-2 text-sm">
-                  <span className="w-4">{stars}</span>
-                  <Star className="w-4 h-4 text-yellow-400 fill-current" />
-                  <div className="flex-1 bg-gray-200 rounded-full h-2">
-                    <div
-                      className="bg-yellow-400 h-2 rounded-full"
-                      style={{
-                        width: `${ratingsSummary.total_ratings > 0 
-                          ? (ratingsSummary.rating_breakdown[stars] / ratingsSummary.total_ratings) * 100 
-                          : 0}%`
-                      }}
-                    ></div>
-                  </div>
-                  <span className="w-8 text-right">{ratingsSummary.rating_breakdown[stars] || 0}</span>
+          <div style={{ width: '200px' }}>
+            {[5, 4, 3, 2, 1].map((num) => (
+              <div key={num} style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                marginBottom: '0.3rem'
+              }}>
+                <span style={{ width: '10px', color: '#666' }}>{num}</span>
+                <div style={{
+                  flex: 1,
+                  height: '8px',
+                  background: '#e4e5e9',
+                  borderRadius: '4px',
+                  overflow: 'hidden'
+                }}>
+                  <div style={{
+                    height: '100%',
+                    width: `${summary.total_ratings ? (summary.rating_breakdown[num] / summary.total_ratings) * 100 : 0}%`,
+                    background: '#ffc107',
+                    borderRadius: '4px'
+                  }} />
                 </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="mb-4 text-gray-600">
-            No ratings yet. Be the first to rate this recipe!
-          </div>
-        )}
-
-        {/* Add/Edit Rating Button */}
-        {!showRatingForm && (
-          <button
-            onClick={() => setShowRatingForm(true)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            {userHasRated ? 'Edit Your Review' : 'Write a Review'}
-          </button>
-        )}
-
-        {/* Rating Form */}
-        {showRatingForm && (
-          <div className="mt-4">
-            <RatingForm
-              recipeId={recipeId}
-              existingRating={editingRating || userRating}
-              onSubmit={handleRatingSubmit}
-              onCancel={() => {
-                setShowRatingForm(false);
-                setEditingRating(null);
-              }}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Reviews List */}
-      {reviews.length > 0 && (
-        <div>
-          <h4 className="font-medium mb-4">Reviews</h4>
-          <div className="space-y-4">
-            {reviews.map((review) => (
-              <ReviewItem
-                key={review.id}
-                review={review}
-                currentUserId={currentUserId}
-                onEdit={handleEditRating}
-                onDelete={handleDeleteRating}
-              />
+                <span style={{ width: '30px', textAlign: 'right', color: '#666', fontSize: '0.8rem' }}>
+                  {summary.rating_breakdown[num] || 0}
+                </span>
+              </div>
             ))}
           </div>
         </div>
-      )}
+      </div>
 
-      {error && (
-        <div className="text-red-600 text-center py-4">
-          {error}
+      {/* Add Rating Section */}
+      <div style={{
+        background: 'white',
+        padding: '1.5rem',
+        borderRadius: '10px',
+        marginBottom: '2rem',
+        border: '1px solid #e4e5e9'
+      }}>
+        <h3 style={{ color: '#003366', marginBottom: '1rem' }}>
+          {userHasRated ? 'Update Your Rating' : 'Add Your Rating'}
+        </h3>
+
+        {error && (
+          <div style={{
+            background: '#f8d7da',
+            color: '#721c24',
+            padding: '0.75rem',
+            borderRadius: '5px',
+            marginBottom: '1rem'
+          }}>
+            {error}
+          </div>
+        )}
+
+        {success && (
+          <div style={{
+            background: '#d4edda',
+            color: '#155724',
+            padding: '0.75rem',
+            borderRadius: '5px',
+            marginBottom: '1rem'
+          }}>
+            {success}
+          </div>
+        )}
+
+        <div style={{ marginBottom: '1rem' }}>
+          <label style={{
+            display: 'block',
+            marginBottom: '0.5rem',
+            fontWeight: '500',
+            color: '#003366'
+          }}>
+            Your Rating
+          </label>
+          <StarRating value={userRating} onChange={setUserRating} />
         </div>
-      )}
+
+        <div style={{ marginBottom: '1.5rem' }}>
+          <label style={{
+            display: 'block',
+            marginBottom: '0.5rem',
+            fontWeight: '500',
+            color: '#003366'
+          }}>
+            Your Review (Optional)
+          </label>
+          <textarea
+            value={userReview}
+            onChange={(e) => setUserReview(e.target.value)}
+            placeholder="Share your experience with this recipe..."
+            style={{
+              width: '100%',
+              padding: '0.75rem',
+              borderRadius: '5px',
+              border: '1px solid #ccc',
+              minHeight: '100px',
+              resize: 'vertical'
+            }}
+          />
+        </div>
+
+        <button
+          onClick={submitRating}
+          disabled={isSubmitting || userRating === 0}
+          style={{
+            padding: '0.75rem 1.5rem',
+            background: isSubmitting || userRating === 0 ? '#ccc' : '#003366',
+            color: 'white',
+            border: 'none',
+            borderRadius: '5px',
+            cursor: isSubmitting || userRating === 0 ? 'not-allowed' : 'pointer',
+            fontWeight: '500'
+          }}
+        >
+          {isSubmitting ? 'Submitting...' : userHasRated ? 'Update Rating' : 'Submit Rating'}
+        </button>
+      </div>
+
+      {/* Reviews List */}
+      <div>
+        <h3 style={{ color: '#003366', marginBottom: '1.5rem' }}>
+          User Reviews ({ratings.length})
+        </h3>
+
+        {ratings.length === 0 ? (
+          <div style={{
+            textAlign: 'center',
+            padding: '2rem',
+            background: '#f0f8ff',
+            borderRadius: '10px',
+            color: '#666'
+          }}>
+            <p>No reviews yet. Be the first to review this recipe!</p>
+          </div>
+        ) : (
+          <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+            {ratings.map((rating) => (
+              <div key={rating.id} style={{
+                padding: '1.5rem',
+                borderBottom: '1px solid #e4e5e9',
+                marginBottom: '1rem'
+              }}>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  marginBottom: '0.5rem'
+                }}>
+                  <h4 style={{ color: '#003366', margin: 0 }}>{rating.username}</h4>
+                  <span style={{ color: '#666', fontSize: '0.9rem' }}>
+                    {new Date(rating.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+
+                <div style={{ marginBottom: '0.5rem' }}>
+                  <StarRating value={rating.rating} readOnly={true} />
+                </div>
+
+                {rating.review && (
+                  <p style={{ margin: '0.5rem 0 0 0', lineHeight: '1.5' }}>
+                    {rating.review}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

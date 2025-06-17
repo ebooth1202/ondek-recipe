@@ -9,6 +9,8 @@ import Dashboard from './pages/Dashboard';
 import Recipes from './pages/Recipes';
 import AddRecipe from './pages/AddRecipe';
 import RecipeDetail from './pages/RecipeDetail';
+import Users from './pages/Users';
+import UserManagement from './components/user/UserManagement';
 
 function App() {
   return (
@@ -25,6 +27,8 @@ function App() {
               <Route path="/recipes" element={<Recipes />} />
               <Route path="/add-recipe" element={<AddRecipe />} />
               <Route path="/recipes/:id" element={<RecipeDetail />} />
+              <Route path="/users" element={<Users />} />
+              <Route path="/user-management" element={<UserManagement />} />
             </Routes>
           </main>
         </div>

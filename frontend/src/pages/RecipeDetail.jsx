@@ -21,6 +21,7 @@ const RecipeDetail = () => {
   const [checkedIngredients, setCheckedIngredients] = useState(new Set());
   const [completedSteps, setCompletedSteps] = useState(new Set());
   const [favoriteStatus, setFavoriteStatus] = useState(false);
+  const [showRatingsModal, setShowRatingsModal] = useState(false);
 
   // Fetch recipe and favorite status on component mount
   useEffect(() => {
@@ -646,12 +647,6 @@ const RecipeDetail = () => {
           </div>
         </div>
 
-        {/* Ratings and Reviews Section */}
-        <RatingsAndReviews
-          recipeId={recipe.id}
-          currentUserId={user?.id}
-        />
-
         {/* Additional Recipe Actions */}
         <div style={{
           background: 'white',
@@ -713,9 +708,84 @@ const RecipeDetail = () => {
             >
               🖨️ Print Recipe
             </button>
+
+            <button
+              onClick={() => setShowRatingsModal(true)}
+              style={{
+                padding: '12px 24px',
+                backgroundColor: '#ffc107',
+                color: 'white',
+                border: 'none',
+                borderRadius: '10px',
+                cursor: 'pointer',
+                fontWeight: '500',
+                fontSize: '16px'
+              }}
+            >
+              ⭐ Ratings & Reviews
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Ratings Modal */}
+      {showRatingsModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          zIndex: 1000,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center'
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            width: '90%',
+            maxWidth: '800px',
+            borderRadius: '15px',
+            padding: '2rem',
+            maxHeight: '90vh',
+            overflow: 'auto',
+            position: 'relative'
+          }}>
+            <button
+              onClick={() => setShowRatingsModal(false)}
+              style={{
+                position: 'absolute',
+                top: '15px',
+                right: '15px',
+                background: 'none',
+                border: 'none',
+                fontSize: '1.5rem',
+                cursor: 'pointer',
+                color: '#003366'
+              }}
+            >
+              ✕
+            </button>
+
+            <h2 style={{
+              color: '#003366',
+              marginBottom: '1.5rem',
+              textAlign: 'center'
+            }}>
+              Ratings & Reviews for {recipe.recipe_name}
+            </h2>
+
+            {/* The actual ratings component */}
+            <div id="ratings-container">
+              <RatingsAndReviews
+                recipeId={recipe.id}
+                currentUserId={user?.id}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add CSS animation for loading spinner */}
       <style>{`

@@ -1,8 +1,42 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom'; // Import useNavigate
 import { useAuth } from '../context/AuthContext';
+import axios from 'axios';
 
 const Dashboard = () => {
+  const navigate = useNavigate(); // Initialize useNavigate
   const { user, hasRole } = useAuth();
+  const [stats, setStats] = useState({
+    totalRecipes: 0,
+    favoriteRecipes: 0
+  });
+  const [loading, setLoading] = useState(true);
+
+  // Fetch recipe stats when component mounts
+  useEffect(() => {
+    fetchRecipeStats();
+  }, []);
+
+  const fetchRecipeStats = async () => {
+    try {
+      // Get total recipes count
+      const recipesResponse = await axios.get('http://127.0.0.1:8000/recipes');
+      const totalRecipes = recipesResponse.data.length;
+
+      // Get user's favorite recipes
+      const favoritesResponse = await axios.get('http://127.0.0.1:8000/users/me/favorites');
+      const favoriteRecipes = favoritesResponse.data.length;
+
+      setStats({
+        totalRecipes,
+        favoriteRecipes
+      });
+    } catch (error) {
+      console.error('Error fetching recipe stats:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div style={{
@@ -75,7 +109,7 @@ const Dashboard = () => {
           onMouseLeave={(e) => {
             e.currentTarget.style.transform = 'translateY(0)';
           }}
-          onClick={() => alert('Recipe browsing coming soon! 🍳')}>
+          onClick={() => navigate('/recipes')}>
             <h3 style={{ color: '#003366', marginBottom: '1rem' }}>
               🔍 Browse Recipes
             </h3>
@@ -89,7 +123,7 @@ const Dashboard = () => {
               marginTop: '1rem',
               fontSize: '0.9rem'
             }}>
-              Coming Soon
+              Explore Now
             </div>
           </div>
 
@@ -109,7 +143,7 @@ const Dashboard = () => {
           onMouseLeave={(e) => {
             e.currentTarget.style.transform = 'translateY(0)';
           }}
-          onClick={() => alert('Add recipe form coming soon! ➕')}>
+          onClick={() => navigate('/add-recipe')}>
             <h3 style={{ color: '#003366', marginBottom: '1rem' }}>
               ➕ Add Recipe
             </h3>
@@ -123,7 +157,7 @@ const Dashboard = () => {
               marginTop: '1rem',
               fontSize: '0.9rem'
             }}>
-              Coming Soon
+              Create Now
             </div>
           </div>
 
@@ -191,7 +225,9 @@ const Dashboard = () => {
               textAlign: 'center',
               border: '1px solid #003366'
             }}>
-              <h3 style={{ color: '#003366', fontSize: '2rem', margin: '0' }}>0</h3>
+              <h3 style={{ color: '#003366', fontSize: '2rem', margin: '0' }}>
+                {loading ? '...' : stats.totalRecipes}
+              </h3>
               <p style={{ color: '#666', margin: '0.5rem 0 0 0' }}>Total Recipes</p>
             </div>
 
@@ -202,7 +238,9 @@ const Dashboard = () => {
               textAlign: 'center',
               border: '1px solid #003366'
             }}>
-              <h3 style={{ color: '#003366', fontSize: '2rem', margin: '0' }}>0</h3>
+              <h3 style={{ color: '#003366', fontSize: '2rem', margin: '0' }}>
+                {loading ? '...' : stats.favoriteRecipes}
+              </h3>
               <p style={{ color: '#666', margin: '0.5rem 0 0 0' }}>Favorite Recipes</p>
             </div>
 
@@ -260,7 +298,7 @@ const Dashboard = () => {
                 border: '1px solid #856404',
                 cursor: 'pointer'
               }}
-              onClick={() => alert('User management coming soon! 👥')}>
+              onClick={() => navigate('/user-management')}> {/* Update this line to navigate to user-management */}
                 <h4 style={{ color: '#856404', marginBottom: '0.5rem' }}>
                   👥 Manage Users
                 </h4>

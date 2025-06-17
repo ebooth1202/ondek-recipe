@@ -1,11 +1,57 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 
-const RecipeCard = ({ recipe }) => {
+const RecipeCard = ({ recipe, onFavoriteToggle }) => {
   const navigate = useNavigate();
+  const [isFavorited, setIsFavorited] = useState(recipe.is_favorited || false);
+  const [isToggling, setIsToggling] = useState(false);
+
+  // Check favorite status when component mounts
+  useEffect(() => {
+    const checkFavoriteStatus = async () => {
+      try {
+        const response = await axios.get(`http://127.0.0.1:8000/recipes/${recipe.id}/favorite-status`);
+        setIsFavorited(response.data.is_favorited);
+      } catch (error) {
+        console.error('Error checking favorite status:', error);
+      }
+    };
+
+    if (recipe.id) {
+      checkFavoriteStatus();
+    }
+  }, [recipe.id]);
 
   const handleClick = () => {
     navigate(`/recipes/${recipe.id}`);
+  };
+
+  const handleFavoriteClick = async (e) => {
+    e.stopPropagation(); // Prevent navigating to recipe detail
+
+    if (isToggling) return; // Prevent multiple clicks
+
+    setIsToggling(true);
+    try {
+      if (isFavorited) {
+        // Remove from favorites
+        await axios.delete(`http://127.0.0.1:8000/recipes/${recipe.id}/favorite`);
+      } else {
+        // Add to favorites
+        await axios.post(`http://127.0.0.1:8000/recipes/${recipe.id}/favorite`);
+      }
+
+      setIsFavorited(!isFavorited);
+      // Call the callback if provided
+      if (onFavoriteToggle) {
+        onFavoriteToggle(recipe.id, !isFavorited);
+      }
+    } catch (error) {
+      console.error('Error toggling favorite status:', error);
+    } finally {
+      setIsToggling(false);
+    }
   };
 
   const getGenreEmoji = (genre) => {
@@ -43,7 +89,8 @@ const RecipeCard = ({ recipe }) => {
     transition: 'all 0.3s ease',
     minHeight: '250px',
     display: 'flex',
-    flexDirection: 'column'
+    flexDirection: 'column',
+    position: 'relative' // For absolute positioning of favorite button
   };
 
   const headerStyle = {
@@ -133,6 +180,28 @@ const RecipeCard = ({ recipe }) => {
     fontWeight: '500'
   };
 
+  // Favorite button style - positioned absolutely at the top center
+  const favoriteButtonStyle = {
+    position: 'absolute',
+    top: '-15px',  // Position slightly above the card
+    left: '50%',
+    transform: 'translateX(-50%)', // Center horizontally
+    width: '36px',
+    height: '36px',
+    borderRadius: '50%',
+    backgroundColor: isFavorited ? '#ffc107' : 'white',
+    color: isFavorited ? 'white' : '#666',
+    border: '2px solid ' + (isFavorited ? '#ffc107' : '#e0e0e0'),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    zIndex: 2,
+    boxShadow: '0 2px 5px rgba(0, 0, 0, 0.1)',
+    transition: 'all 0.2s ease',
+    fontSize: '18px'
+  };
+
   return (
     <div
       onClick={handleClick}
@@ -146,6 +215,19 @@ const RecipeCard = ({ recipe }) => {
         e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 51, 102, 0.1)';
       }}
     >
+      {/* Favorite Button - Absolutely positioned at top center */}
+      <button
+        onClick={handleFavoriteClick}
+        style={favoriteButtonStyle}
+        disabled={isToggling}
+      >
+        {isToggling ? (
+          <span>⏳</span>
+        ) : (
+          <span>{isFavorited ? '★' : '☆'}</span>
+        )}
+      </button>
+
       {/* Header */}
       <div style={headerStyle}>
         <h3 style={titleStyle}>{recipe.recipe_name}</h3>
