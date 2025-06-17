@@ -143,4 +143,128 @@ class AIHelper:
 
         # Add conversation history if provided
         if conversation_history:
-            messages.exten
+            messages.extend(conversation_history)
+
+        # Add current message
+        messages.append({"role": "user", "content": message})
+
+        try:
+            response = openai.ChatCompletion.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=400,
+                temperature=0.7
+            )
+
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            return f"Sorry, I couldn't respond right now. Error: {str(e)}"
+
+    def parse_recipe_from_text(self, text: str) -> Optional[Dict]:
+        """
+        Parse a recipe from natural language text
+        Returns a dictionary with recipe components
+        """
+        try:
+            # Simple regex patterns to extract recipe components
+            recipe_data = {
+                "recipe_name": "",
+                "ingredients": [],
+                "instructions": [],
+                "serving_size": 1,
+                "genre": "dinner"
+            }
+
+            # Extract recipe name (usually first line or after "Recipe:")
+            name_patterns = [
+                r"Recipe Name?:\s*(.+)",
+                r"^(.+?)(?:\n|Ingredients)",
+                r"# (.+)"
+            ]
+
+            for pattern in name_patterns:
+                match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+                if match:
+                    recipe_data["recipe_name"] = match.group(1).strip()
+                    break
+
+            # Extract ingredients
+            ingredients_section = re.search(
+                r"Ingredients?:?\s*\n(.*?)(?=Instructions?:|Directions?:|Steps?:|\n\n|\Z)",
+                text,
+                re.IGNORECASE | re.DOTALL
+            )
+
+            if ingredients_section:
+                ingredient_lines = ingredients_section.group(1).strip().split('\n')
+                for line in ingredient_lines:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        # Try to parse quantity, unit, and name
+                        ingredient_match = re.match(
+                            r'[\-\*]?\s*(\d+(?:\.\d+)?)\s*(\w+)?\s+(.+)',
+                            line
+                        )
+                        if ingredient_match:
+                            quantity = float(ingredient_match.group(1))
+                            unit = ingredient_match.group(2) or "piece"
+                            name = ingredient_match.group(3).strip()
+
+                            recipe_data["ingredients"].append({
+                                "name": name,
+                                "quantity": quantity,
+                                "unit": unit
+                            })
+
+            # Extract instructions
+            instructions_section = re.search(
+                r"(?:Instructions?|Directions?|Steps?):?\s*\n(.*?)(?=Notes?:|\n\n|\Z)",
+                text,
+                re.IGNORECASE | re.DOTALL
+            )
+
+            if instructions_section:
+                instruction_lines = instructions_section.group(1).strip().split('\n')
+                for line in instruction_lines:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        # Remove numbering and bullets
+                        cleaned_line = re.sub(r'^\d+\.\s*|^\-\s*|\*\s*', '', line)
+                        if cleaned_line:
+                            recipe_data["instructions"].append(cleaned_line)
+
+            # Extract serving size
+            serving_match = re.search(r"Serves?:?\s*(\d+)", text, re.IGNORECASE)
+            if serving_match:
+                recipe_data["serving_size"] = int(serving_match.group(1))
+
+            return recipe_data
+
+        except Exception as e:
+            print(f"Error parsing recipe: {e}")
+            return None
+
+        def suggest_ingredient_substitutions(self, ingredient_name: str) -> List[str]:
+            """Suggest common substitutions for an ingredient"""
+            substitutions = {
+                "butter": ["margarine", "coconut oil", "vegetable oil", "applesauce"],
+                "milk": ["almond milk", "soy milk", "coconut milk", "oat milk"],
+                "eggs": ["applesauce", "banana", "flax eggs", "chia eggs"],
+                "flour": ["almond flour", "coconut flour", "oat flour", "rice flour"],
+                "sugar": ["honey", "maple syrup", "stevia", "brown sugar"],
+                "salt": ["sea salt", "kosher salt", "herb salt", "garlic salt"],
+                "onion": ["shallots", "green onions", "leeks", "onion powder"],
+                "garlic": ["garlic powder", "shallots", "garlic scapes"],
+                "lemon juice": ["lime juice", "vinegar", "white wine"],
+                "heavy cream": ["coconut cream", "evaporated milk", "cashew cream"]
+            }
+
+            ingredient_lower = ingredient_name.lower()
+            for key, subs in substitutions.items():
+                if key in ingredient_lower:
+                    return subs
+
+            return ["Check online for substitutions for this ingredient"]
+
+        # Global AI helper instance
+        ai_helper = AIHelper()
