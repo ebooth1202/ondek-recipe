@@ -79,6 +79,58 @@ const Navbar = () => {
                 </Link>
               </li>
 
+              <li>
+                <Link
+                  to="/recipes"
+                  style={{
+                    color: 'white',
+                    textDecoration: 'none',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '8px',
+                    transition: 'background-color 0.3s ease',
+                    backgroundColor: isActive('/recipes') ? '#0066cc' : 'transparent'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive('/recipes')) {
+                      e.target.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive('/recipes')) {
+                      e.target.style.backgroundColor = 'transparent';
+                    }
+                  }}
+                >
+                  🔍 Recipes
+                </Link>
+              </li>
+
+              <li>
+                <Link
+                  to="/add-recipe"
+                  style={{
+                    color: 'white',
+                    textDecoration: 'none',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '8px',
+                    transition: 'background-color 0.3s ease',
+                    backgroundColor: isActive('/add-recipe') ? '#0066cc' : 'transparent'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive('/add-recipe')) {
+                      e.target.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive('/add-recipe')) {
+                      e.target.style.backgroundColor = 'transparent';
+                    }
+                  }}
+                >
+                  ➕ Add Recipe
+                </Link>
+              </li>
+
               {hasRole(['admin', 'owner']) && (
                 <li>
                   <Link

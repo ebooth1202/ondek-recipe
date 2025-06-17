@@ -6,6 +6,9 @@ import Home from './pages/Home';
 import Login from './components/user/Login';
 import Register from './components/user/Register';
 import Dashboard from './pages/Dashboard';
+import Recipes from './pages/Recipes';
+import AddRecipe from './pages/AddRecipe';
+import RecipeDetail from './pages/RecipeDetail';
 
 function App() {
   return (
@@ -19,6 +22,9 @@ function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/recipes" element={<Recipes />} />
+              <Route path="/add-recipe" element={<AddRecipe />} />
+              <Route path="/recipes/:id" element={<RecipeDetail />} />
             </Routes>
           </main>
         </div>

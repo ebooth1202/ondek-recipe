@@ -1,0 +1,728 @@
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import axios from 'axios';
+
+const RecipeDetail = () => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { isAuthenticated, user, hasRole } = useAuth();
+
+  // State management
+  const [recipe, setRecipe] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [showIngredients, setShowIngredients] = useState(true);
+  const [showInstructions, setShowInstructions] = useState(true);
+  const [servingMultiplier, setServingMultiplier] = useState(1);
+  const [checkedIngredients, setCheckedIngredients] = useState(new Set());
+  const [completedSteps, setCompletedSteps] = useState(new Set());
+
+  // Fetch recipe on component mount
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      navigate('/login');
+      return;
+    }
+
+    const fetchRecipe = async () => {
+      try {
+        setLoading(true);
+        console.log(`Fetching recipe with ID: ${id}`);
+        const response = await axios.get(`http://127.0.0.1:8000/recipes/${id}`);
+        console.log('Recipe received:', response.data);
+        setRecipe(response.data);
+      } catch (error) {
+        console.error('Error fetching recipe:', error);
+        setError('Recipe not found or failed to load');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRecipe();
+  }, [id, isAuthenticated, navigate]);
+
+  // Helper functions
+  const getGenreEmoji = (genre) => {
+    const emojis = {
+      breakfast: '🥞',
+      lunch: '🥪',
+      dinner: '🍽️',
+      snack: '🍿',
+      dessert: '🍰',
+      appetizer: '🥗'
+    };
+    return emojis[genre] || '🍳';
+  };
+
+  const getGenreColor = (genre) => {
+    const colors = {
+      breakfast: '#ffc107',
+      lunch: '#28a745',
+      dinner: '#dc3545',
+      snack: '#17a2b8',
+      dessert: '#e83e8c',
+      appetizer: '#6f42c1'
+    };
+    return colors[genre] || '#003366';
+  };
+
+  const canEditOrDelete = () => {
+    if (!recipe || !user) return false;
+    return recipe.created_by === user.username || hasRole(['admin', 'owner']);
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm(`Are you sure you want to delete "${recipe.recipe_name}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      setDeleting(true);
+      await axios.delete(`http://127.0.0.1:8000/recipes/${id}`);
+      navigate('/recipes');
+    } catch (error) {
+      console.error('Error deleting recipe:', error);
+      alert('Failed to delete recipe. Please try again.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const toggleIngredient = (index) => {
+    const newChecked = new Set(checkedIngredients);
+    if (newChecked.has(index)) {
+      newChecked.delete(index);
+    } else {
+      newChecked.add(index);
+    }
+    setCheckedIngredients(newChecked);
+  };
+
+  const toggleStep = (index) => {
+    const newCompleted = new Set(completedSteps);
+    if (newCompleted.has(index)) {
+      newCompleted.delete(index);
+    } else {
+      newCompleted.add(index);
+    }
+    setCompletedSteps(newCompleted);
+  };
+
+  const adjustServings = (multiplier) => {
+    setServingMultiplier(multiplier);
+  };
+
+  const calculateQuantity = (originalQuantity) => {
+    return (originalQuantity * servingMultiplier).toFixed(2).replace(/\.?0+$/, '');
+  };
+
+  // Render guards
+  if (!isAuthenticated()) {
+    return null;
+  }
+
+  if (loading) {
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        height: 'calc(100vh - 80px)',
+        backgroundColor: '#f0f8ff'
+      }}>
+        <div style={{
+          padding: '3rem',
+          backgroundColor: 'white',
+          borderRadius: '15px',
+          border: '2px solid #003366',
+          textAlign: 'center',
+          boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)'
+        }}>
+          <div style={{
+            width: '50px',
+            height: '50px',
+            border: '4px solid #f0f8ff',
+            borderTop: '4px solid #003366',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 1rem'
+          }}></div>
+          <h2 style={{ color: '#003366', marginBottom: '1rem' }}>Loading Recipe...</h2>
+          <p style={{ color: '#666' }}>Fetching delicious details 🍳</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{
+        padding: '2rem',
+        backgroundColor: '#f0f8ff',
+        minHeight: 'calc(100vh - 80px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}>
+        <div style={{
+          background: 'white',
+          border: '2px solid #dc3545',
+          borderRadius: '15px',
+          padding: '3rem',
+          textAlign: 'center',
+          maxWidth: '500px',
+          boxShadow: '0 4px 12px rgba(220, 53, 69, 0.1)'
+        }}>
+          <h2 style={{ color: '#dc3545', marginBottom: '1rem' }}>😕 Recipe Not Found</h2>
+          <p style={{ color: '#666', marginBottom: '2rem' }}>{error}</p>
+          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+            <button
+              onClick={() => navigate('/recipes')}
+              style={{
+                padding: '12px 24px',
+                backgroundColor: '#003366',
+                color: 'white',
+                border: 'none',
+                borderRadius: '10px',
+                cursor: 'pointer',
+                fontWeight: '500'
+              }}
+            >
+              ← Back to Recipes
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              style={{
+                padding: '12px 24px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '10px',
+                cursor: 'pointer',
+                fontWeight: '500'
+              }}
+            >
+              🔄 Try Again
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Styles
+  const containerStyle = {
+    padding: '2rem',
+    backgroundColor: '#f0f8ff',
+    minHeight: 'calc(100vh - 80px)'
+  };
+
+  const backButtonStyle = {
+    padding: '8px 16px',
+    backgroundColor: '#f0f8ff',
+    color: '#003366',
+    border: '2px solid #003366',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    marginBottom: '2rem',
+    fontSize: '14px',
+    fontWeight: '500',
+    transition: 'all 0.3s ease'
+  };
+
+  const headerContainerStyle = {
+    background: 'white',
+    border: '2px solid #003366',
+    borderRadius: '15px',
+    padding: '2rem',
+    marginBottom: '2rem',
+    boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)',
+    textAlign: 'center'
+  };
+
+  const titleStyle = {
+    color: '#003366',
+    fontSize: '2.5rem',
+    marginBottom: '1rem',
+    lineHeight: '1.2'
+  };
+
+  const badgeContainerStyle = {
+    display: 'flex',
+    justifyContent: 'center',
+    gap: '1rem',
+    flexWrap: 'wrap',
+    marginBottom: '1.5rem'
+  };
+
+  const genreBadgeStyle = {
+    backgroundColor: getGenreColor(recipe?.genre),
+    color: 'white',
+    padding: '8px 16px',
+    borderRadius: '20px',
+    fontSize: '1rem',
+    fontWeight: '500'
+  };
+
+  const servingBadgeStyle = {
+    backgroundColor: '#003366',
+    color: 'white',
+    padding: '8px 16px',
+    borderRadius: '20px',
+    fontSize: '1rem'
+  };
+
+  const metaStyle = {
+    display: 'flex',
+    justifyContent: 'center',
+    gap: '2rem',
+    fontSize: '0.9rem',
+    color: '#666',
+    marginBottom: '1.5rem'
+  };
+
+  const contentGridStyle = {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '2rem',
+    marginBottom: '2rem'
+  };
+
+  const sectionStyle = {
+    background: 'white',
+    border: '2px solid #003366',
+    borderRadius: '15px',
+    padding: '2rem',
+    boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)'
+  };
+
+  const sectionHeaderStyle = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '1.5rem',
+    paddingBottom: '0.5rem',
+    borderBottom: '2px solid #f0f8ff'
+  };
+
+  const sectionTitleStyle = {
+    color: '#003366',
+    fontSize: '1.5rem',
+    margin: 0
+  };
+
+  const toggleButtonStyle = {
+    background: 'none',
+    border: 'none',
+    color: '#003366',
+    cursor: 'pointer',
+    fontSize: '1.2rem',
+    padding: '4px'
+  };
+
+  return (
+    <div style={containerStyle}>
+      <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+        {/* Back Button */}
+        <button
+          onClick={() => navigate('/recipes')}
+          style={backButtonStyle}
+          onMouseEnter={(e) => {
+            e.target.style.backgroundColor = '#003366';
+            e.target.style.color = 'white';
+          }}
+          onMouseLeave={(e) => {
+            e.target.style.backgroundColor = '#f0f8ff';
+            e.target.style.color = '#003366';
+          }}
+        >
+          ← Back to Recipes
+        </button>
+
+        {/* Recipe Header */}
+        <div style={headerContainerStyle}>
+          <h1 style={titleStyle}>{recipe.recipe_name}</h1>
+
+          <div style={badgeContainerStyle}>
+            <div style={genreBadgeStyle}>
+              {getGenreEmoji(recipe.genre)} {recipe.genre.charAt(0).toUpperCase() + recipe.genre.slice(1)}
+            </div>
+            <div style={servingBadgeStyle}>
+              👥 Serves {Math.round(recipe.serving_size * servingMultiplier)}
+            </div>
+          </div>
+
+          <div style={metaStyle}>
+            <span>👨‍🍳 Created by {recipe.created_by}</span>
+            <span>📅 {new Date(recipe.created_at).toLocaleDateString()}</span>
+            <span>🕒 {new Date(recipe.created_at).toLocaleTimeString()}</span>
+          </div>
+
+          {/* Serving Size Adjuster */}
+          <div style={{
+            background: '#f0f8ff',
+            padding: '1rem',
+            borderRadius: '10px',
+            margin: '1rem 0',
+            border: '1px solid #003366'
+          }}>
+            <h4 style={{ color: '#003366', marginBottom: '0.5rem' }}>🍽️ Adjust Serving Size</h4>
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}>
+              {[0.5, 1, 1.5, 2, 3, 4].map(multiplier => (
+                <button
+                  key={multiplier}
+                  onClick={() => adjustServings(multiplier)}
+                  style={{
+                    padding: '6px 12px',
+                    border: '2px solid #003366',
+                    borderRadius: '8px',
+                    backgroundColor: servingMultiplier === multiplier ? '#003366' : 'white',
+                    color: servingMultiplier === multiplier ? 'white' : '#003366',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '500'
+                  }}
+                >
+                  {multiplier}x
+                </button>
+              ))}
+            </div>
+            <p style={{ fontSize: '0.8rem', color: '#666', margin: '0.5rem 0 0 0' }}>
+              Original recipe serves {recipe.serving_size} • Currently showing {Math.round(recipe.serving_size * servingMultiplier)} servings
+            </p>
+          </div>
+
+          {/* Action Buttons */}
+          {canEditOrDelete() && (
+            <div style={{
+              display: 'flex',
+              justifyContent: 'center',
+              gap: '1rem',
+              marginTop: '1.5rem'
+            }}>
+              <button
+                onClick={() => alert('Edit functionality coming soon! ✏️')}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: '#28a745',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500'
+                }}
+              >
+                ✏️ Edit Recipe
+              </button>
+
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: deleting ? '#ccc' : '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: deleting ? 'not-allowed' : 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500'
+                }}
+              >
+                {deleting ? 'Deleting...' : '🗑️ Delete Recipe'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Recipe Content */}
+        <div style={contentGridStyle}>
+          {/* Ingredients */}
+          <div style={sectionStyle}>
+            <div style={sectionHeaderStyle}>
+              <h2 style={sectionTitleStyle}>
+                🛒 Ingredients ({recipe.ingredients.length})
+              </h2>
+              <button
+                style={toggleButtonStyle}
+                onClick={() => setShowIngredients(!showIngredients)}
+              >
+                {showIngredients ? '▼' : '▶'}
+              </button>
+            </div>
+
+            {showIngredients && (
+              <div>
+                <div style={{
+                  marginBottom: '1rem',
+                  padding: '0.5rem',
+                  background: '#f0f8ff',
+                  borderRadius: '8px',
+                  fontSize: '0.9rem',
+                  color: '#666'
+                }}>
+                  💡 Click ingredients to check them off as you gather them!
+                </div>
+
+                {recipe.ingredients.map((ingredient, index) => (
+                  <div
+                    key={index}
+                    onClick={() => toggleIngredient(index)}
+                    style={{
+                      padding: '0.75rem',
+                      borderBottom: index < recipe.ingredients.length - 1 ? '1px solid #f0f8ff' : 'none',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      backgroundColor: checkedIngredients.has(index) ? '#f0f8ff' : 'transparent',
+                      borderRadius: '6px',
+                      margin: '2px 0',
+                      transition: 'all 0.3s ease'
+                    }}
+                  >
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}>
+                      <span style={{
+                        fontSize: '1.2rem',
+                        color: checkedIngredients.has(index) ? '#28a745' : '#ccc'
+                      }}>
+                        {checkedIngredients.has(index) ? '✅' : '⭕'}
+                      </span>
+                      <span style={{
+                        fontWeight: '500',
+                        color: '#003366',
+                        textDecoration: checkedIngredients.has(index) ? 'line-through' : 'none'
+                      }}>
+                        {ingredient.name}
+                      </span>
+                    </div>
+                    <span style={{
+                      color: '#666',
+                      fontSize: '0.9rem',
+                      fontWeight: '500'
+                    }}>
+                      {calculateQuantity(ingredient.quantity)} {ingredient.unit}
+                    </span>
+                  </div>
+                ))}
+
+                <div style={{
+                  marginTop: '1rem',
+                  padding: '0.5rem',
+                  background: '#e8f5e8',
+                  borderRadius: '8px',
+                  fontSize: '0.8rem',
+                  color: '#155724',
+                  textAlign: 'center'
+                }}>
+                  {checkedIngredients.size} of {recipe.ingredients.length} ingredients gathered
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Instructions */}
+          <div style={sectionStyle}>
+            <div style={sectionHeaderStyle}>
+              <h2 style={sectionTitleStyle}>
+                📝 Instructions ({recipe.instructions.length} steps)
+              </h2>
+              <button
+                style={toggleButtonStyle}
+                onClick={() => setShowInstructions(!showInstructions)}
+              >
+                {showInstructions ? '▼' : '▶'}
+              </button>
+            </div>
+
+            {showInstructions && (
+              <div>
+                <div style={{
+                  marginBottom: '1rem',
+                  padding: '0.5rem',
+                  background: '#f0f8ff',
+                  borderRadius: '8px',
+                  fontSize: '0.9rem',
+                  color: '#666'
+                }}>
+                  💡 Click steps to mark them as completed!
+                </div>
+
+                {recipe.instructions.map((instruction, index) => (
+                  <div
+                    key={index}
+                    onClick={() => toggleStep(index)}
+                    style={{
+                      marginBottom: '1.5rem',
+                      padding: '1rem',
+                      background: completedSteps.has(index) ? '#e8f5e8' : '#f0f8ff',
+                      borderRadius: '10px',
+                      borderLeft: `4px solid ${completedSteps.has(index) ? '#28a745' : '#003366'}`,
+                      cursor: 'pointer',
+                      transition: 'all 0.3s ease'
+                    }}
+                  >
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '1rem'
+                    }}>
+                      <span style={{
+                        backgroundColor: completedSteps.has(index) ? '#28a745' : '#003366',
+                        color: 'white',
+                        borderRadius: '50%',
+                        width: '28px',
+                        height: '28px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '14px',
+                        fontWeight: 'bold',
+                        flexShrink: 0
+                      }}>
+                        {completedSteps.has(index) ? '✓' : index + 1}
+                      </span>
+                      <p style={{
+                        margin: 0,
+                        lineHeight: '1.5',
+                        color: '#333',
+                        textDecoration: completedSteps.has(index) ? 'line-through' : 'none'
+                      }}>
+                        {instruction}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+
+                <div style={{
+                  marginTop: '1rem',
+                  padding: '0.5rem',
+                  background: '#e8f5e8',
+                  borderRadius: '8px',
+                  fontSize: '0.8rem',
+                  color: '#155724',
+                  textAlign: 'center'
+                }}>
+                  {completedSteps.size} of {recipe.instructions.length} steps completed
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Recipe Actions Footer */}
+        <div style={{
+          background: 'white',
+          border: '2px solid #003366',
+          borderRadius: '15px',
+          padding: '2rem',
+          textAlign: 'center',
+          boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)'
+        }}>
+          <h3 style={{ color: '#003366', marginBottom: '1rem' }}>
+            🍳 Ready to Cook?
+          </h3>
+          <p style={{ color: '#666', marginBottom: '1.5rem' }}>
+            {completedSteps.size === recipe.instructions.length && checkedIngredients.size === recipe.ingredients.length
+              ? "🎉 All ingredients gathered and steps completed! Time to enjoy your delicious creation!"
+              : "Follow the steps above and enjoy making this delicious recipe!"
+            }
+          </p>
+
+          <div style={{
+            display: 'flex',
+            justifyContent: 'center',
+            gap: '1rem',
+            flexWrap: 'wrap'
+          }}>
+            <button
+              onClick={() => alert('Rating feature coming soon! ⭐')}
+              style={{
+                padding: '12px 24px',
+                backgroundColor: '#ffc107',
+                color: '#000',
+                border: 'none',
+                borderRadius: '10px',
+                cursor: 'pointer',
+                fontWeight: '500',
+                fontSize: '16px'
+              }}
+            >
+              ⭐ Rate Recipe
+            </button>
+
+            <button
+              onClick={() => alert('Favorites feature coming soon! ❤️')}
+              style={{
+                padding: '12px 24px',
+                backgroundColor: '#dc3545',
+                color: 'white',
+                border: 'none',
+                borderRadius: '10px',
+                cursor: 'pointer',
+                fontWeight: '500',
+                fontSize: '16px'
+              }}
+            >
+              ❤️ Add to Favorites
+            </button>
+
+            <button
+              onClick={() => {
+                const url = window.location.href;
+                navigator.clipboard.writeText(url);
+                alert('Recipe link copied to clipboard! 📋');
+              }}
+              style={{
+                padding: '12px 24px',
+                backgroundColor: '#17a2b8',
+                color: 'white',
+                border: 'none',
+                borderRadius: '10px',
+                cursor: 'pointer',
+                fontWeight: '500',
+                fontSize: '16px'
+              }}
+            >
+              📤 Share Recipe
+            </button>
+
+            <button
+              onClick={() => window.print()}
+              style={{
+                padding: '12px 24px',
+                backgroundColor: '#6c757d',
+                color: 'white',
+                border: 'none',
+                borderRadius: '10px',
+                cursor: 'pointer',
+                fontWeight: '500',
+                fontSize: '16px'
+              }}
+            >
+              🖨️ Print Recipe
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Add CSS animation for loading spinner */}
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  );
+};
+
+export default RecipeDetail;
