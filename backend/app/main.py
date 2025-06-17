@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 import os
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from enum import Enum
 import re
 from statistics import mean
@@ -99,7 +99,7 @@ class Ingredient(BaseModel):
 
 class UserCreate(BaseModel):
     username: str
-    email: str  # Changed from EmailStr to str
+    email: str
     password: str
     role: UserRole = UserRole.USER
 
@@ -112,13 +112,13 @@ class UserLogin(BaseModel):
 class UserResponse(BaseModel):
     id: str
     username: str
-    email: str  # Changed from EmailStr to str
+    email: str
     role: UserRole
     created_at: datetime
 
 
 class UserUpdate(BaseModel):
-    email: Optional[str] = None  # Changed from EmailStr to str
+    email: Optional[str] = None
     password: Optional[str] = None
 
 
@@ -161,6 +161,62 @@ class AIMessage(BaseModel):
 
 class AIResponse(BaseModel):
     response: str
+
+
+# RATINGS AND FAVORITES MODELS
+class RatingCreate(BaseModel):
+    recipe_id: str
+    rating: int = Field(..., ge=1, le=5, description="Rating from 1 to 5 stars")
+    review: Optional[str] = Field(None, max_length=1000, description="Optional review text")
+
+
+class RatingUpdate(BaseModel):
+    rating: Optional[int] = Field(None, ge=1, le=5, description="Rating from 1 to 5 stars")
+    review: Optional[str] = Field(None, max_length=1000, description="Optional review text")
+
+
+class RatingResponse(BaseModel):
+    id: str
+    recipe_id: str
+    user_id: str
+    username: str
+    rating: int
+    review: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RecipeRatingsSummary(BaseModel):
+    recipe_id: str
+    average_rating: float
+    total_ratings: int
+    rating_breakdown: dict
+
+
+class FavoriteCreate(BaseModel):
+    recipe_id: str
+
+
+class FavoriteResponse(BaseModel):
+    id: str
+    recipe_id: str
+    user_id: str
+    created_at: datetime
+
+
+class EnhancedRecipeResponse(BaseModel):
+    id: str
+    recipe_name: str
+    ingredients: List[Ingredient]
+    instructions: List[str]
+    serving_size: int
+    genre: Genre
+    created_by: str
+    created_at: datetime
+    average_rating: Optional[float] = None
+    total_ratings: int = 0
+    user_has_favorited: bool = False
+    user_rating: Optional[int] = None
 
 
 # Utility functions
@@ -211,13 +267,12 @@ def require_role(allowed_roles: List[UserRole]):
     return role_checker
 
 
-# Simple email validation function
 def validate_email(email: str) -> bool:
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
 
 
-# Routes
+# BASIC ROUTES
 @app.get("/")
 async def root():
     return {"message": "Welcome to the Ondek Recipe API! 🍳"}
@@ -228,25 +283,21 @@ async def health_check():
     return {"status": "healthy", "timestamp": datetime.now()}
 
 
-# Authentication routes
+# AUTHENTICATION ROUTES
 @app.post("/auth/register", response_model=UserResponse)
 async def register(user: UserCreate):
-    # Basic email validation
     if not validate_email(user.email):
         raise HTTPException(status_code=400, detail="Invalid email format")
 
-    # Check if user already exists
     if db.users.find_one({"username": user.username}):
         raise HTTPException(status_code=400, detail="Username already registered")
 
     if db.users.find_one({"email": user.email}):
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    # Only allow owner/admin to create admin users
     if user.role in [UserRole.OWNER, UserRole.ADMIN]:
         raise HTTPException(status_code=403, detail="Cannot create admin users through registration")
 
-    # Hash password and create user
     hashed_password = hash_password(user.password)
     user_doc = {
         "username": user.username,
@@ -309,7 +360,7 @@ async def get_current_user_info(current_user: dict = Depends(get_current_user)):
     )
 
 
-# Recipe routes
+# RECIPE ROUTES
 @app.post("/recipes", response_model=RecipeResponse)
 async def create_recipe(recipe: RecipeCreate, current_user: dict = Depends(get_current_user)):
     recipe_doc = {
@@ -344,7 +395,6 @@ async def get_recipes(
         skip: int = Query(0, ge=0, description="Number of recipes to skip"),
         limit: int = Query(100, ge=1, le=100, description="Number of recipes to return")
 ):
-    # Build query
     query = {}
 
     if search:
@@ -356,7 +406,6 @@ async def get_recipes(
     if genre:
         query["genre"] = genre.value
 
-    # Execute query
     cursor = db.recipes.find(query).skip(skip).limit(limit).sort("recipe_name", 1)
     recipes = []
 
@@ -414,12 +463,10 @@ async def update_recipe(
     if not recipe_doc:
         raise HTTPException(status_code=404, detail="Recipe not found")
 
-    # Check if user can edit this recipe
     if (recipe_doc["created_by"] != current_user["username"] and
             current_user["role"] not in ["admin", "owner"]):
         raise HTTPException(status_code=403, detail="Not authorized to edit this recipe")
 
-    # Build update document
     update_doc = {"updated_at": datetime.now()}
 
     if recipe_update.recipe_name is not None:
@@ -433,10 +480,8 @@ async def update_recipe(
     if recipe_update.genre is not None:
         update_doc["genre"] = recipe_update.genre.value
 
-    # Update recipe
     db.recipes.update_one({"_id": ObjectId(recipe_id)}, {"$set": update_doc})
 
-    # Return updated recipe
     updated_recipe = db.recipes.find_one({"_id": ObjectId(recipe_id)})
     ingredients = [Ingredient(**ing) for ing in updated_recipe["ingredients"]]
 
@@ -462,7 +507,6 @@ async def delete_recipe(recipe_id: str, current_user: dict = Depends(get_current
     if not recipe_doc:
         raise HTTPException(status_code=404, detail="Recipe not found")
 
-    # Check if user can delete this recipe
     if (recipe_doc["created_by"] != current_user["username"] and
             current_user["role"] not in ["admin", "owner"]):
         raise HTTPException(status_code=403, detail="Not authorized to delete this recipe")
@@ -471,7 +515,317 @@ async def delete_recipe(recipe_id: str, current_user: dict = Depends(get_current
     return {"message": "Recipe deleted successfully"}
 
 
-# User management routes
+# RATING ROUTES
+@app.post("/recipes/{recipe_id}/ratings", response_model=RatingResponse)
+async def create_rating(
+        recipe_id: str,
+        rating_data: RatingCreate,
+        current_user: dict = Depends(get_current_user)
+):
+    try:
+        recipe = db.recipes.find_one({"_id": ObjectId(recipe_id)})
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="Invalid recipe ID")
+
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    existing_rating = db.ratings.find_one({
+        "recipe_id": recipe_id,
+        "user_id": str(current_user["_id"])
+    })
+
+    if existing_rating:
+        raise HTTPException(status_code=400, detail="You have already rated this recipe")
+
+    rating_doc = {
+        "recipe_id": recipe_id,
+        "user_id": str(current_user["_id"]),
+        "username": current_user["username"],
+        "rating": rating_data.rating,
+        "review": rating_data.review,
+        "created_at": datetime.now(),
+        "updated_at": datetime.now()
+    }
+
+    result = db.ratings.insert_one(rating_doc)
+
+    return RatingResponse(
+        id=str(result.inserted_id),
+        recipe_id=recipe_id,
+        user_id=str(current_user["_id"]),
+        username=current_user["username"],
+        rating=rating_data.rating,
+        review=rating_data.review,
+        created_at=rating_doc["created_at"],
+        updated_at=rating_doc["updated_at"]
+    )
+
+
+@app.get("/recipes/{recipe_id}/ratings", response_model=List[RatingResponse])
+async def get_recipe_ratings(
+        recipe_id: str,
+        skip: int = Query(0, ge=0),
+        limit: int = Query(20, ge=1, le=100)
+):
+    try:
+        recipe = db.recipes.find_one({"_id": ObjectId(recipe_id)})
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="Invalid recipe ID")
+
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    ratings = []
+    cursor = db.ratings.find({"recipe_id": recipe_id}).skip(skip).limit(limit).sort("created_at", -1)
+
+    for rating_doc in cursor:
+        ratings.append(RatingResponse(
+            id=str(rating_doc["_id"]),
+            recipe_id=rating_doc["recipe_id"],
+            user_id=rating_doc["user_id"],
+            username=rating_doc["username"],
+            rating=rating_doc["rating"],
+            review=rating_doc.get("review"),
+            created_at=rating_doc["created_at"],
+            updated_at=rating_doc["updated_at"]
+        ))
+
+    return ratings
+
+
+@app.get("/recipes/{recipe_id}/ratings/summary", response_model=RecipeRatingsSummary)
+async def get_recipe_ratings_summary(recipe_id: str):
+    try:
+        recipe = db.recipes.find_one({"_id": ObjectId(recipe_id)})
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="Invalid recipe ID")
+
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    ratings = list(db.ratings.find({"recipe_id": recipe_id}))
+
+    if not ratings:
+        return RecipeRatingsSummary(
+            recipe_id=recipe_id,
+            average_rating=0.0,
+            total_ratings=0,
+            rating_breakdown={1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+        )
+
+    rating_values = [r["rating"] for r in ratings]
+    average_rating = mean(rating_values)
+
+    breakdown = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+    for rating in rating_values:
+        breakdown[rating] += 1
+
+    return RecipeRatingsSummary(
+        recipe_id=recipe_id,
+        average_rating=round(average_rating, 1),
+        total_ratings=len(ratings),
+        rating_breakdown=breakdown
+    )
+
+
+@app.put("/recipes/{recipe_id}/ratings/{rating_id}", response_model=RatingResponse)
+async def update_rating(
+        recipe_id: str,
+        rating_id: str,
+        rating_update: RatingUpdate,
+        current_user: dict = Depends(get_current_user)
+):
+    try:
+        rating_doc = db.ratings.find_one({"_id": ObjectId(rating_id)})
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="Invalid rating ID")
+
+    if not rating_doc:
+        raise HTTPException(status_code=404, detail="Rating not found")
+
+    if rating_doc["user_id"] != str(current_user["_id"]):
+        raise HTTPException(status_code=403, detail="Not authorized to edit this rating")
+
+    update_doc = {"updated_at": datetime.now()}
+    if rating_update.rating is not None:
+        update_doc["rating"] = rating_update.rating
+    if rating_update.review is not None:
+        update_doc["review"] = rating_update.review
+
+    db.ratings.update_one({"_id": ObjectId(rating_id)}, {"$set": update_doc})
+
+    updated_rating = db.ratings.find_one({"_id": ObjectId(rating_id)})
+    return RatingResponse(
+        id=str(updated_rating["_id"]),
+        recipe_id=updated_rating["recipe_id"],
+        user_id=updated_rating["user_id"],
+        username=updated_rating["username"],
+        rating=updated_rating["rating"],
+        review=updated_rating.get("review"),
+        created_at=updated_rating["created_at"],
+        updated_at=updated_rating["updated_at"]
+    )
+
+
+@app.delete("/recipes/{recipe_id}/ratings/{rating_id}")
+async def delete_rating(
+        recipe_id: str,
+        rating_id: str,
+        current_user: dict = Depends(get_current_user)
+):
+    try:
+        rating_doc = db.ratings.find_one({"_id": ObjectId(rating_id)})
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="Invalid rating ID")
+
+    if not rating_doc:
+        raise HTTPException(status_code=404, detail="Rating not found")
+
+    if (rating_doc["user_id"] != str(current_user["_id"]) and
+            current_user["role"] not in ["admin", "owner"]):
+        raise HTTPException(status_code=403, detail="Not authorized to delete this rating")
+
+    db.ratings.delete_one({"_id": ObjectId(rating_id)})
+    return {"message": "Rating deleted successfully"}
+
+
+# FAVORITES ROUTES
+@app.post("/recipes/{recipe_id}/favorite", response_model=FavoriteResponse)
+async def add_to_favorites(recipe_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        recipe = db.recipes.find_one({"_id": ObjectId(recipe_id)})
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="Invalid recipe ID")
+
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    existing_favorite = db.favorites.find_one({
+        "recipe_id": recipe_id,
+        "user_id": str(current_user["_id"])
+    })
+
+    if existing_favorite:
+        raise HTTPException(status_code=400, detail="Recipe already in favorites")
+
+    favorite_doc = {
+        "recipe_id": recipe_id,
+        "user_id": str(current_user["_id"]),
+        "created_at": datetime.now()
+    }
+
+    result = db.favorites.insert_one(favorite_doc)
+
+    return FavoriteResponse(
+        id=str(result.inserted_id),
+        recipe_id=recipe_id,
+        user_id=str(current_user["_id"]),
+        created_at=favorite_doc["created_at"]
+    )
+
+
+@app.delete("/recipes/{recipe_id}/favorite")
+async def remove_from_favorites(recipe_id: str, current_user: dict = Depends(get_current_user)):
+    result = db.favorites.delete_one({
+        "recipe_id": recipe_id,
+        "user_id": str(current_user["_id"])
+    })
+
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Recipe not in favorites")
+
+    return {"message": "Recipe removed from favorites"}
+
+
+@app.get("/users/me/favorites", response_model=List[RecipeResponse])
+async def get_user_favorites(current_user: dict = Depends(get_current_user)):
+    favorites = list(db.favorites.find({"user_id": str(current_user["_id"])}))
+    favorite_recipe_ids = [fav["recipe_id"] for fav in favorites]
+
+    if not favorite_recipe_ids:
+        return []
+
+    recipes = []
+    for recipe_id in favorite_recipe_ids:
+        try:
+            recipe_doc = db.recipes.find_one({"_id": ObjectId(recipe_id)})
+            if recipe_doc:
+                ingredients = [Ingredient(**ing) for ing in recipe_doc["ingredients"]]
+                recipes.append(RecipeResponse(
+                    id=str(recipe_doc["_id"]),
+                    recipe_name=recipe_doc["recipe_name"],
+                    ingredients=ingredients,
+                    instructions=recipe_doc["instructions"],
+                    serving_size=recipe_doc["serving_size"],
+                    genre=Genre(recipe_doc["genre"]),
+                    created_by=recipe_doc["created_by"],
+                    created_at=recipe_doc["created_at"]
+                ))
+        except InvalidId:
+            continue
+
+    return recipes
+
+
+@app.get("/recipes/{recipe_id}/favorite-status")
+async def check_favorite_status(recipe_id: str, current_user: dict = Depends(get_current_user)):
+    favorite = db.favorites.find_one({
+        "recipe_id": recipe_id,
+        "user_id": str(current_user["_id"])
+    })
+
+    return {"is_favorited": favorite is not None}
+
+
+@app.get("/recipes/{recipe_id}/enhanced", response_model=EnhancedRecipeResponse)
+async def get_enhanced_recipe(recipe_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        recipe_doc = db.recipes.find_one({"_id": ObjectId(recipe_id)})
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="Invalid recipe ID")
+
+    if not recipe_doc:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    ratings = list(db.ratings.find({"recipe_id": recipe_id}))
+    average_rating = None
+    total_ratings = len(ratings)
+    user_rating = None
+
+    if ratings:
+        rating_values = [r["rating"] for r in ratings]
+        average_rating = round(mean(rating_values), 1)
+
+        user_rating_doc = next((r for r in ratings if r["user_id"] == str(current_user["_id"])), None)
+        if user_rating_doc:
+            user_rating = user_rating_doc["rating"]
+
+    favorite = db.favorites.find_one({
+        "recipe_id": recipe_id,
+        "user_id": str(current_user["_id"])
+    })
+    user_has_favorited = favorite is not None
+
+    ingredients = [Ingredient(**ing) for ing in recipe_doc["ingredients"]]
+
+    return EnhancedRecipeResponse(
+        id=str(recipe_doc["_id"]),
+        recipe_name=recipe_doc["recipe_name"],
+        ingredients=ingredients,
+        instructions=recipe_doc["instructions"],
+        serving_size=recipe_doc["serving_size"],
+        genre=Genre(recipe_doc["genre"]),
+        created_by=recipe_doc["created_by"],
+        created_at=recipe_doc["created_at"],
+        average_rating=average_rating,
+        total_ratings=total_ratings,
+        user_has_favorited=user_has_favorited,
+        user_rating=user_rating
+    )
+
+
+# USER MANAGEMENT ROUTES
 @app.get("/users", response_model=List[UserResponse])
 async def get_users(current_user: dict = Depends(require_role([UserRole.ADMIN, UserRole.OWNER]))):
     users = []
@@ -500,20 +854,16 @@ async def update_user(
     if not user_doc:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Check permissions
     if (str(user_doc["_id"]) != str(current_user["_id"]) and
             current_user["role"] not in ["admin", "owner"]):
         raise HTTPException(status_code=403, detail="Not authorized to edit this user")
 
-    # Build update document
     update_doc = {"updated_at": datetime.now()}
 
     if user_update.email is not None:
-        # Basic email validation
         if not validate_email(user_update.email):
             raise HTTPException(status_code=400, detail="Invalid email format")
 
-        # Check if email already exists
         existing_user = db.users.find_one({"email": user_update.email, "_id": {"$ne": ObjectId(user_id)}})
         if existing_user:
             raise HTTPException(status_code=400, detail="Email already registered")
@@ -522,10 +872,8 @@ async def update_user(
     if user_update.password is not None:
         update_doc["password"] = hash_password(user_update.password)
 
-    # Update user
     db.users.update_one({"_id": ObjectId(user_id)}, {"$set": update_doc})
 
-    # Return updated user
     updated_user = db.users.find_one({"_id": ObjectId(user_id)})
     return UserResponse(
         id=str(updated_user["_id"]),
@@ -549,11 +897,9 @@ async def delete_user(
     if not user_doc:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Prevent deletion of owner
     if user_doc["role"] == "owner":
         raise HTTPException(status_code=403, detail="Cannot delete owner user")
 
-    # Prevent admin from deleting another admin unless they're owner
     if user_doc["role"] == "admin" and current_user["role"] != "owner":
         raise HTTPException(status_code=403, detail="Only owner can delete admin users")
 
@@ -561,16 +907,14 @@ async def delete_user(
     return {"message": "User deleted successfully"}
 
 
-# AI Agent routes
+# AI AGENT ROUTES
 @app.post("/ai/chat", response_model=AIResponse)
 async def ai_chat(message: AIMessage, current_user: dict = Depends(get_current_user)):
-    # Simple AI response for now - you can integrate with OpenAI later
     response_text = f"Thanks for your message: '{message.message}'. This is a placeholder response. AI integration coming soon!"
-
     return AIResponse(response=response_text)
 
 
-# Utility routes
+# UTILITY ROUTES
 @app.get("/measuring-units")
 async def get_measuring_units():
     return {"units": [unit.value for unit in MeasuringUnit]}
@@ -583,404 +927,4 @@ async def get_genres():
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
-
-
-
-    # Add these new Pydantic models to your existing ones
-    class RatingCreate(BaseModel):
-        recipe_id: str
-        rating: int = Field(..., ge=1, le=5, description="Rating from 1 to 5 stars")
-        review: Optional[str] = Field(None, max_length=1000, description="Optional review text")
-
-
-    class RatingUpdate(BaseModel):
-        rating: Optional[int] = Field(None, ge=1, le=5, description="Rating from 1 to 5 stars")
-        review: Optional[str] = Field(None, max_length=1000, description="Optional review text")
-
-
-    class RatingResponse(BaseModel):
-        id: str
-        recipe_id: str
-        user_id: str
-        username: str
-        rating: int
-        review: Optional[str] = None
-        created_at: datetime
-        updated_at: datetime
-
-
-    class RecipeRatingsSummary(BaseModel):
-        recipe_id: str
-        average_rating: float
-        total_ratings: int
-        rating_breakdown: dict
-
-
-    class FavoriteCreate(BaseModel):
-        recipe_id: str
-
-
-    class FavoriteResponse(BaseModel):
-        id: str
-        recipe_id: str
-        user_id: str
-        created_at: datetime
-
-
-    # Enhanced RecipeResponse to include ratings summary
-    class EnhancedRecipeResponse(BaseModel):
-        id: str
-        recipe_name: str
-        ingredients: List[Ingredient]
-        instructions: List[str]
-        serving_size: int
-        genre: Genre
-        created_by: str
-        created_at: datetime
-        average_rating: Optional[float] = None
-        total_ratings: int = 0
-        user_has_favorited: bool = False
-        user_rating: Optional[int] = None
-
-
-    # RATING ROUTES
-
-    @app.post("/recipes/{recipe_id}/ratings", response_model=RatingResponse)
-    async def create_rating(
-            recipe_id: str,
-            rating_data: RatingCreate,
-            current_user: dict = Depends(get_current_user)
-    ):
-        # Verify recipe exists
-        try:
-            recipe = db.recipes.find_one({"_id": ObjectId(recipe_id)})
-        except InvalidId:
-            raise HTTPException(status_code=400, detail="Invalid recipe ID")
-
-        if not recipe:
-            raise HTTPException(status_code=404, detail="Recipe not found")
-
-        # Check if user already rated this recipe
-        existing_rating = db.ratings.find_one({
-            "recipe_id": recipe_id,
-            "user_id": str(current_user["_id"])
-        })
-
-        if existing_rating:
-            raise HTTPException(status_code=400, detail="You have already rated this recipe")
-
-        # Create rating
-        rating_doc = {
-            "recipe_id": recipe_id,
-            "user_id": str(current_user["_id"]),
-            "username": current_user["username"],
-            "rating": rating_data.rating,
-            "review": rating_data.review,
-            "created_at": datetime.now(),
-            "updated_at": datetime.now()
-        }
-
-        result = db.ratings.insert_one(rating_doc)
-
-        return RatingResponse(
-            id=str(result.inserted_id),
-            recipe_id=recipe_id,
-            user_id=str(current_user["_id"]),
-            username=current_user["username"],
-            rating=rating_data.rating,
-            review=rating_data.review,
-            created_at=rating_doc["created_at"],
-            updated_at=rating_doc["updated_at"]
-        )
-
-
-    @app.get("/recipes/{recipe_id}/ratings", response_model=List[RatingResponse])
-    async def get_recipe_ratings(
-            recipe_id: str,
-            skip: int = Query(0, ge=0),
-            limit: int = Query(20, ge=1, le=100)
-    ):
-        # Verify recipe exists
-        try:
-            recipe = db.recipes.find_one({"_id": ObjectId(recipe_id)})
-        except InvalidId:
-            raise HTTPException(status_code=400, detail="Invalid recipe ID")
-
-        if not recipe:
-            raise HTTPException(status_code=404, detail="Recipe not found")
-
-        # Get ratings
-        ratings = []
-        cursor = db.ratings.find({"recipe_id": recipe_id}).skip(skip).limit(limit).sort("created_at", -1)
-
-        for rating_doc in cursor:
-            ratings.append(RatingResponse(
-                id=str(rating_doc["_id"]),
-                recipe_id=rating_doc["recipe_id"],
-                user_id=rating_doc["user_id"],
-                username=rating_doc["username"],
-                rating=rating_doc["rating"],
-                review=rating_doc.get("review"),
-                created_at=rating_doc["created_at"],
-                updated_at=rating_doc["updated_at"]
-            ))
-
-        return ratings
-
-
-    @app.get("/recipes/{recipe_id}/ratings/summary", response_model=RecipeRatingsSummary)
-    async def get_recipe_ratings_summary(recipe_id: str):
-        # Verify recipe exists
-        try:
-            recipe = db.recipes.find_one({"_id": ObjectId(recipe_id)})
-        except InvalidId:
-            raise HTTPException(status_code=400, detail="Invalid recipe ID")
-
-        if not recipe:
-            raise HTTPException(status_code=404, detail="Recipe not found")
-
-        # Get all ratings for this recipe
-        ratings = list(db.ratings.find({"recipe_id": recipe_id}))
-
-        if not ratings:
-            return RecipeRatingsSummary(
-                recipe_id=recipe_id,
-                average_rating=0.0,
-                total_ratings=0,
-                rating_breakdown={1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-            )
-
-        # Calculate statistics
-        rating_values = [r["rating"] for r in ratings]
-        average_rating = mean(rating_values)
-
-        # Rating breakdown
-        breakdown = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-        for rating in rating_values:
-            breakdown[rating] += 1
-
-        return RecipeRatingsSummary(
-            recipe_id=recipe_id,
-            average_rating=round(average_rating, 1),
-            total_ratings=len(ratings),
-            rating_breakdown=breakdown
-        )
-
-
-    @app.put("/recipes/{recipe_id}/ratings/{rating_id}", response_model=RatingResponse)
-    async def update_rating(
-            recipe_id: str,
-            rating_id: str,
-            rating_update: RatingUpdate,
-            current_user: dict = Depends(get_current_user)
-    ):
-        # Find the rating
-        try:
-            rating_doc = db.ratings.find_one({"_id": ObjectId(rating_id)})
-        except InvalidId:
-            raise HTTPException(status_code=400, detail="Invalid rating ID")
-
-        if not rating_doc:
-            raise HTTPException(status_code=404, detail="Rating not found")
-
-        # Check ownership
-        if rating_doc["user_id"] != str(current_user["_id"]):
-            raise HTTPException(status_code=403, detail="Not authorized to edit this rating")
-
-        # Build update
-        update_doc = {"updated_at": datetime.now()}
-        if rating_update.rating is not None:
-            update_doc["rating"] = rating_update.rating
-        if rating_update.review is not None:
-            update_doc["review"] = rating_update.review
-
-        # Update rating
-        db.ratings.update_one({"_id": ObjectId(rating_id)}, {"$set": update_doc})
-
-        # Return updated rating
-        updated_rating = db.ratings.find_one({"_id": ObjectId(rating_id)})
-        return RatingResponse(
-            id=str(updated_rating["_id"]),
-            recipe_id=updated_rating["recipe_id"],
-            user_id=updated_rating["user_id"],
-            username=updated_rating["username"],
-            rating=updated_rating["rating"],
-            review=updated_rating.get("review"),
-            created_at=updated_rating["created_at"],
-            updated_at=updated_rating["updated_at"]
-        )
-
-
-    @app.delete("/recipes/{recipe_id}/ratings/{rating_id}")
-    async def delete_rating(
-            recipe_id: str,
-            rating_id: str,
-            current_user: dict = Depends(get_current_user)
-    ):
-        # Find the rating
-        try:
-            rating_doc = db.ratings.find_one({"_id": ObjectId(rating_id)})
-        except InvalidId:
-            raise HTTPException(status_code=400, detail="Invalid rating ID")
-
-        if not rating_doc:
-            raise HTTPException(status_code=404, detail="Rating not found")
-
-        # Check ownership or admin privileges
-        if (rating_doc["user_id"] != str(current_user["_id"]) and
-                current_user["role"] not in ["admin", "owner"]):
-            raise HTTPException(status_code=403, detail="Not authorized to delete this rating")
-
-        db.ratings.delete_one({"_id": ObjectId(rating_id)})
-        return {"message": "Rating deleted successfully"}
-
-
-    # FAVORITES ROUTES
-
-    @app.post("/recipes/{recipe_id}/favorite", response_model=FavoriteResponse)
-    async def add_to_favorites(recipe_id: str, current_user: dict = Depends(get_current_user)):
-        # Verify recipe exists
-        try:
-            recipe = db.recipes.find_one({"_id": ObjectId(recipe_id)})
-        except InvalidId:
-            raise HTTPException(status_code=400, detail="Invalid recipe ID")
-
-        if not recipe:
-            raise HTTPException(status_code=404, detail="Recipe not found")
-
-        # Check if already favorited
-        existing_favorite = db.favorites.find_one({
-            "recipe_id": recipe_id,
-            "user_id": str(current_user["_id"])
-        })
-
-        if existing_favorite:
-            raise HTTPException(status_code=400, detail="Recipe already in favorites")
-
-        # Create favorite
-        favorite_doc = {
-            "recipe_id": recipe_id,
-            "user_id": str(current_user["_id"]),
-            "created_at": datetime.now()
-        }
-
-        result = db.favorites.insert_one(favorite_doc)
-
-        return FavoriteResponse(
-            id=str(result.inserted_id),
-            recipe_id=recipe_id,
-            user_id=str(current_user["_id"]),
-            created_at=favorite_doc["created_at"]
-        )
-
-
-    @app.delete("/recipes/{recipe_id}/favorite")
-    async def remove_from_favorites(recipe_id: str, current_user: dict = Depends(get_current_user)):
-        # Find and delete favorite
-        result = db.favorites.delete_one({
-            "recipe_id": recipe_id,
-            "user_id": str(current_user["_id"])
-        })
-
-        if result.deleted_count == 0:
-            raise HTTPException(status_code=404, detail="Recipe not in favorites")
-
-        return {"message": "Recipe removed from favorites"}
-
-
-    @app.get("/users/me/favorites", response_model=List[RecipeResponse])
-    async def get_user_favorites(current_user: dict = Depends(get_current_user)):
-        # Get user's favorite recipe IDs
-        favorites = list(db.favorites.find({"user_id": str(current_user["_id"])}))
-        favorite_recipe_ids = [fav["recipe_id"] for fav in favorites]
-
-        if not favorite_recipe_ids:
-            return []
-
-        # Get the actual recipes
-        recipes = []
-        for recipe_id in favorite_recipe_ids:
-            try:
-                recipe_doc = db.recipes.find_one({"_id": ObjectId(recipe_id)})
-                if recipe_doc:
-                    ingredients = [Ingredient(**ing) for ing in recipe_doc["ingredients"]]
-                    recipes.append(RecipeResponse(
-                        id=str(recipe_doc["_id"]),
-                        recipe_name=recipe_doc["recipe_name"],
-                        ingredients=ingredients,
-                        instructions=recipe_doc["instructions"],
-                        serving_size=recipe_doc["serving_size"],
-                        genre=Genre(recipe_doc["genre"]),
-                        created_by=recipe_doc["created_by"],
-                        created_at=recipe_doc["created_at"]
-                    ))
-            except InvalidId:
-                continue  # Skip invalid IDs
-
-        return recipes
-
-
-    @app.get("/recipes/{recipe_id}/favorite-status")
-    async def check_favorite_status(recipe_id: str, current_user: dict = Depends(get_current_user)):
-        favorite = db.favorites.find_one({
-            "recipe_id": recipe_id,
-            "user_id": str(current_user["_id"])
-        })
-
-        return {"is_favorited": favorite is not None}
-
-
-    # ENHANCED RECIPE ROUTE (with ratings and favorites info)
-
-    @app.get("/recipes/{recipe_id}/enhanced", response_model=EnhancedRecipeResponse)
-    async def get_enhanced_recipe(recipe_id: str, current_user: dict = Depends(get_current_user)):
-        try:
-            recipe_doc = db.recipes.find_one({"_id": ObjectId(recipe_id)})
-        except InvalidId:
-            raise HTTPException(status_code=400, detail="Invalid recipe ID")
-
-        if not recipe_doc:
-            raise HTTPException(status_code=404, detail="Recipe not found")
-
-        # Get ratings summary
-        ratings = list(db.ratings.find({"recipe_id": recipe_id}))
-        average_rating = None
-        total_ratings = len(ratings)
-        user_rating = None
-
-        if ratings:
-            rating_values = [r["rating"] for r in ratings]
-            average_rating = round(mean(rating_values), 1)
-
-            # Find user's rating
-            user_rating_doc = next((r for r in ratings if r["user_id"] == str(current_user["_id"])), None)
-            if user_rating_doc:
-                user_rating = user_rating_doc["rating"]
-
-        # Check if user has favorited
-        favorite = db.favorites.find_one({
-            "recipe_id": recipe_id,
-            "user_id": str(current_user["_id"])
-        })
-        user_has_favorited = favorite is not None
-
-        ingredients = [Ingredient(**ing) for ing in recipe_doc["ingredients"]]
-
-        return EnhancedRecipeResponse(
-            id=str(recipe_doc["_id"]),
-            recipe_name=recipe_doc["recipe_name"],
-            ingredients=ingredients,
-            instructions=recipe_doc["instructions"],
-            serving_size=recipe_doc["serving_size"],
-            genre=Genre(recipe_doc["genre"]),
-            created_by=recipe_doc["created_by"],
-            created_at=recipe_doc["created_at"],
-            average_rating=average_rating,
-            total_ratings=total_ratings,
-            user_has_favorited=user_has_favorited,
-            user_rating=user_rating
-        )

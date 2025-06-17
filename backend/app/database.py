@@ -49,14 +49,16 @@ class Database:
             # Rating indexes
             cls.database.ratings.create_index("recipe_id")
             cls.database.ratings.create_index("user_id")
-            cls.database.ratings.create_index([("recipe_id", 1), ("user_id", 1)], unique=True)  # Prevent duplicate ratings
+            cls.database.ratings.create_index([("recipe_id", 1), ("user_id", 1)],
+                                              unique=True)  # Prevent duplicate ratings
             cls.database.ratings.create_index("rating")
             cls.database.ratings.create_index("created_at")
 
             # Favorite indexes
             cls.database.favorites.create_index("recipe_id")
             cls.database.favorites.create_index("user_id")
-            cls.database.favorites.create_index([("recipe_id", 1), ("user_id", 1)], unique=True)  # Prevent duplicate favorites
+            cls.database.favorites.create_index([("recipe_id", 1), ("user_id", 1)],
+                                                unique=True)  # Prevent duplicate favorites
             cls.database.favorites.create_index("created_at")
 
             logger.info("Database indexes created successfully")

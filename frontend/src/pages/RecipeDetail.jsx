@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import RatingsAndReviews from '../components/RatingsAndReviews';
+import FavoriteButton from '../components/FavoriteButton';
 import axios from 'axios';
 
 const RecipeDetail = () => {
@@ -18,30 +20,40 @@ const RecipeDetail = () => {
   const [servingMultiplier, setServingMultiplier] = useState(1);
   const [checkedIngredients, setCheckedIngredients] = useState(new Set());
   const [completedSteps, setCompletedSteps] = useState(new Set());
+  const [favoriteStatus, setFavoriteStatus] = useState(false);
 
-  // Fetch recipe on component mount
+  // Fetch recipe and favorite status on component mount
   useEffect(() => {
     if (!isAuthenticated()) {
       navigate('/login');
       return;
     }
 
-    const fetchRecipe = async () => {
+    const fetchRecipeData = async () => {
       try {
         setLoading(true);
         console.log(`Fetching recipe with ID: ${id}`);
-        const response = await axios.get(`http://127.0.0.1:8000/recipes/${id}`);
-        console.log('Recipe received:', response.data);
-        setRecipe(response.data);
+
+        // Fetch recipe and favorite status in parallel
+        const [recipeResponse, favoriteResponse] = await Promise.all([
+          axios.get(`http://127.0.0.1:8000/recipes/${id}`),
+          axios.get(`http://127.0.0.1:8000/recipes/${id}/favorite-status`)
+        ]);
+
+        console.log('Recipe received:', recipeResponse.data);
+        console.log('Favorite status:', favoriteResponse.data);
+
+        setRecipe(recipeResponse.data);
+        setFavoriteStatus(favoriteResponse.data.is_favorited);
       } catch (error) {
-        console.error('Error fetching recipe:', error);
+        console.error('Error fetching recipe data:', error);
         setError('Recipe not found or failed to load');
       } finally {
         setLoading(false);
       }
     };
 
-    fetchRecipe();
+    fetchRecipeData();
   }, [id, isAuthenticated, navigate]);
 
   // Helper functions
@@ -117,6 +129,10 @@ const RecipeDetail = () => {
 
   const calculateQuantity = (originalQuantity) => {
     return (originalQuantity * servingMultiplier).toFixed(2).replace(/\.?0+$/, '');
+  };
+
+  const handleFavoriteToggle = (isFavorited) => {
+    setFavoriteStatus(isFavorited);
   };
 
   // Render guards
@@ -344,7 +360,19 @@ const RecipeDetail = () => {
 
         {/* Recipe Header */}
         <div style={headerContainerStyle}>
-          <h1 style={titleStyle}>{recipe.recipe_name}</h1>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            marginBottom: '1rem'
+          }}>
+            <h1 style={titleStyle}>{recipe.recipe_name}</h1>
+            <FavoriteButton
+              recipeId={recipe.id}
+              isFavorited={favoriteStatus}
+              onToggle={handleFavoriteToggle}
+            />
+          </div>
 
           <div style={badgeContainerStyle}>
             <div style={genreBadgeStyle}>
@@ -618,22 +646,29 @@ const RecipeDetail = () => {
           </div>
         </div>
 
-        {/* Recipe Actions Footer */}
+        {/* Ratings and Reviews Section */}
+        <RatingsAndReviews
+          recipeId={recipe.id}
+          currentUserId={user?.id}
+        />
+
+        {/* Additional Recipe Actions */}
         <div style={{
           background: 'white',
           border: '2px solid #003366',
           borderRadius: '15px',
           padding: '2rem',
           textAlign: 'center',
-          boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)'
+          boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)',
+          marginTop: '2rem'
         }}>
           <h3 style={{ color: '#003366', marginBottom: '1rem' }}>
-            🍳 Ready to Cook?
+            🍳 Recipe Actions
           </h3>
           <p style={{ color: '#666', marginBottom: '1.5rem' }}>
             {completedSteps.size === recipe.instructions.length && checkedIngredients.size === recipe.ingredients.length
-              ? "🎉 All ingredients gathered and steps completed! Time to enjoy your delicious creation!"
-              : "Follow the steps above and enjoy making this delicious recipe!"
+              ? "🎉 All ingredients gathered and steps completed! Enjoy your delicious creation!"
+              : "Use the tools above to track your cooking progress!"
             }
           </p>
 
@@ -643,38 +678,6 @@ const RecipeDetail = () => {
             gap: '1rem',
             flexWrap: 'wrap'
           }}>
-            <button
-              onClick={() => alert('Rating feature coming soon! ⭐')}
-              style={{
-                padding: '12px 24px',
-                backgroundColor: '#ffc107',
-                color: '#000',
-                border: 'none',
-                borderRadius: '10px',
-                cursor: 'pointer',
-                fontWeight: '500',
-                fontSize: '16px'
-              }}
-            >
-              ⭐ Rate Recipe
-            </button>
-
-            <button
-              onClick={() => alert('Favorites feature coming soon! ❤️')}
-              style={{
-                padding: '12px 24px',
-                backgroundColor: '#dc3545',
-                color: 'white',
-                border: 'none',
-                borderRadius: '10px',
-                cursor: 'pointer',
-                fontWeight: '500',
-                fontSize: '16px'
-              }}
-            >
-              ❤️ Add to Favorites
-            </button>
-
             <button
               onClick={() => {
                 const url = window.location.href;

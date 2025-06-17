@@ -1,6 +1,6 @@
 // File: frontend/src/components/RatingsAndReviews.js
 import React, { useState, useEffect } from 'react';
-import { MessageCircle } from 'lucide-react';
+import { MessageCircle, Star } from 'lucide-react';
 import StarRating from './StarRating';
 import RatingForm from './RatingForm';
 import ReviewItem from './ReviewItem';
