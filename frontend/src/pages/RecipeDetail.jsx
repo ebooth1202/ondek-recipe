@@ -19,6 +19,7 @@ const RecipeDetail = () => {
   const [deleting, setDeleting] = useState(false);
   const [showIngredients, setShowIngredients] = useState(true);
   const [showInstructions, setShowInstructions] = useState(true);
+  const [showNotes, setShowNotes] = useState(true);
   const [servingMultiplier, setServingMultiplier] = useState(1);
   const [checkedIngredients, setCheckedIngredients] = useState(new Set());
   const [completedSteps, setCompletedSteps] = useState(new Set());
@@ -26,15 +27,15 @@ const RecipeDetail = () => {
   const [editMode, setEditMode] = useState(false);
 
 
-      useEffect(() => {
-      if (recipe) {
-        console.log('Recipe ID:', recipe.id);
-        console.log('Recipe Name:', recipe.recipe_name);
-        console.log('Prep Time:', recipe.prep_time);
-        console.log('Cook Time:', recipe.cook_time);
-        console.log('Full Recipe Object:', JSON.stringify(recipe, null, 2));
-      }
-    }, [recipe]);
+  useEffect(() => {
+    if (recipe) {
+      console.log('Recipe ID:', recipe.id);
+      console.log('Recipe Name:', recipe.recipe_name);
+      console.log('Prep Time:', recipe.prep_time);
+      console.log('Cook Time:', recipe.cook_time);
+      console.log('Full Recipe Object:', JSON.stringify(recipe, null, 2));
+    }
+  }, [recipe]);
   // Fetch recipe and favorite status on component mount
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -113,7 +114,10 @@ const RecipeDetail = () => {
       dinner: '🍽️',
       snack: '🍿',
       dessert: '🍰',
-      appetizer: '🥗'
+      appetizer: '🥗',
+      gluten_free: '🌾',  // Wheat with cross through it
+      dairy_free: '🥛',   // Milk with cross through it
+      egg_free: '🥚'      // Egg with cross through it
     };
     return emojis[genre] || '🍳';
   };
@@ -125,9 +129,26 @@ const RecipeDetail = () => {
       dinner: '#dc3545',
       snack: '#17a2b8',
       dessert: '#e83e8c',
-      appetizer: '#6f42c1'
+      appetizer: '#6f42c1',
+      gluten_free: '#9c27b0',  // Purple
+      dairy_free: '#00bcd4',   // Cyan
+      egg_free: '#ff9800'      // Orange
     };
     return colors[genre] || '#003366';
+  };
+
+  const formatGenreName = (genre) => {
+    if (!genre) return '';
+
+    // Special case for the new dietary restriction genres
+    switch(genre) {
+      case 'gluten_free': return 'Gluten Free';
+      case 'dairy_free': return 'Dairy Free';
+      case 'egg_free': return 'Egg Free';
+      default:
+        // Standard capitalization for other genres
+        return genre.charAt(0).toUpperCase() + genre.slice(1);
+    }
   };
 
   const canEditOrDelete = () => {
@@ -501,7 +522,7 @@ const RecipeDetail = () => {
 
           <div style={badgeContainerStyle}>
             <div style={genreBadgeStyle}>
-              {getGenreEmoji(recipe.genre)} {recipe.genre.charAt(0).toUpperCase() + recipe.genre.slice(1)}
+              {getGenreEmoji(recipe.genre)} {formatGenreName(recipe.genre)}
             </div>
             <div style={servingBadgeStyle}>
               👥 Serves {Math.round(recipe.serving_size * servingMultiplier)}
@@ -823,6 +844,83 @@ const RecipeDetail = () => {
           </div>
         </div>
 
+        {/* Notes Section */}
+        <div style={{
+          background: 'white',
+          border: '2px solid #6c757d', // Different border color to distinguish from instructions
+          borderRadius: '15px',
+          padding: '2rem',
+          marginTop: '2rem',
+          boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)'
+        }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '1.5rem',
+            paddingBottom: '0.5rem',
+            borderBottom: '2px solid #f0f8ff'
+          }}>
+            <h2 style={{
+              color: '#6c757d', // Different color
+              fontSize: '1.5rem',
+              margin: 0
+            }}>
+              📝 Notes {recipe.notes && recipe.notes.length > 0 ? `(${recipe.notes.length})` : ''}
+            </h2>
+            <button
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#6c757d',
+                cursor: 'pointer',
+                fontSize: '1.2rem',
+                padding: '4px'
+              }}
+              onClick={() => setShowNotes(!showNotes)}
+            >
+              {showNotes ? '▼' : '▶'}
+            </button>
+          </div>
+
+          {showNotes && (
+            <div>
+              {recipe.notes && recipe.notes.length > 0 ? (
+                recipe.notes.map((note, index) => (
+                  <div
+                    key={index}
+                    style={{
+                      marginBottom: '1rem',
+                      padding: '1rem',
+                      background: '#f8f9fa', // Lighter background
+                      borderRadius: '10px',
+                      borderLeft: '4px solid #6c757d' // Different color
+                    }}
+                  >
+                    <p style={{
+                      margin: 0,
+                      lineHeight: '1.5',
+                      color: '#333'
+                    }}>
+                      {note}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <div style={{
+                  padding: '1rem',
+                  background: '#f8f9fa',
+                  borderRadius: '10px',
+                  textAlign: 'center',
+                  color: '#6c757d'
+                }}>
+                  No notes added for this recipe.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Ratings and Reviews Section */}
         <RatingsAndReviews
           recipeId={recipe.id}
@@ -889,6 +987,45 @@ const RecipeDetail = () => {
               }}
             >
               🖨️ Print Recipe
+            </button>
+
+            <button
+              onClick={() => {
+                // Create a clean version of the recipe for duplication
+                const duplicateRecipe = {
+                  recipe_name: `${recipe.recipe_name} (Copy)`,
+                  ingredients: recipe.ingredients,
+                  instructions: recipe.instructions,
+                  notes: recipe.notes || [],
+                  serving_size: recipe.serving_size,
+                  genre: recipe.genre,
+                  prep_time: recipe.prep_time || 0,
+                  cook_time: recipe.cook_time || 0
+                };
+
+                console.log('Duplicating recipe:', duplicateRecipe);
+
+                // Store in sessionStorage to pass to the form
+                sessionStorage.setItem('duplicateRecipe', JSON.stringify(duplicateRecipe));
+
+                // Also store the original recipe for comparison (to prevent exact duplicates)
+                sessionStorage.setItem('originalRecipe', JSON.stringify(recipe));
+
+                // Navigate with a unique timestamp to force component remount
+                navigate(`/add-recipe?duplicate=true&t=${Date.now()}`);
+              }}
+              style={{
+                padding: '12px 24px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '10px',
+                cursor: 'pointer',
+                fontWeight: '500',
+                fontSize: '16px'
+              }}
+            >
+              🧬 Duplicate Recipe
             </button>
           </div>
         </div>

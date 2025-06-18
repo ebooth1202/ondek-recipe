@@ -31,8 +31,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+    expose_headers=["Content-Type"],
+    max_age=600,  # Cache preflight requests for 10 minutes
 )
 
 # Database connection
@@ -97,6 +99,9 @@ class Genre(str, Enum):
     SNACK = "snack"
     DESSERT = "dessert"
     APPETIZER = "appetizer"
+    GLUTEN_FREE = "gluten_free"
+    DAIRY_FREE = "dairy_free"
+    EGG_FREE = "egg_free"
 
 
 class MeasuringUnit(str, Enum):
@@ -169,6 +174,9 @@ class RecipeCreate(BaseModel):
     instructions: List[str]
     serving_size: int
     genre: Genre
+    prep_time: Optional[int] = 0
+    cook_time: Optional[int] = 0
+    notes: Optional[List[str]] = []  # Add notes field with default empty list
 
 
 class RecipeUpdate(BaseModel):
@@ -177,6 +185,9 @@ class RecipeUpdate(BaseModel):
     instructions: Optional[List[str]] = None
     serving_size: Optional[int] = None
     genre: Optional[Genre] = None
+    prep_time: Optional[int] = None
+    cook_time: Optional[int] = None
+    notes: Optional[List[str]] = None  # Add notes field
 
 
 class RecipeResponse(BaseModel):
@@ -186,6 +197,9 @@ class RecipeResponse(BaseModel):
     instructions: List[str]
     serving_size: int
     genre: Genre
+    prep_time: Optional[int] = 0
+    cook_time: Optional[int] = 0
+    notes: Optional[List[str]] = []  # Add notes field
     created_by: str
     created_at: datetime
 
@@ -252,6 +266,9 @@ class EnhancedRecipeResponse(BaseModel):
     instructions: List[str]
     serving_size: int
     genre: Genre
+    prep_time: Optional[int] = 0
+    cook_time: Optional[int] = 0
+    notes: Optional[List[str]] = []  # Add notes field
     created_by: str
     created_at: datetime
     average_rating: Optional[float] = None
@@ -442,6 +459,9 @@ async def create_recipe(recipe: RecipeCreate, current_user: dict = Depends(get_c
         "instructions": recipe.instructions,
         "serving_size": recipe.serving_size,
         "genre": recipe.genre.value,
+        "prep_time": recipe.prep_time or 0,
+        "cook_time": recipe.cook_time or 0,
+        "notes": recipe.notes or [],  # Add notes field
         "created_by": current_user["username"],
         "created_at": datetime.now(),
         "updated_at": datetime.now()
@@ -456,10 +476,12 @@ async def create_recipe(recipe: RecipeCreate, current_user: dict = Depends(get_c
         instructions=recipe.instructions,
         serving_size=recipe.serving_size,
         genre=recipe.genre,
+        prep_time=recipe.prep_time or 0,
+        cook_time=recipe.cook_time or 0,
+        notes=recipe.notes or [],  # Add notes field
         created_by=current_user["username"],
         created_at=recipe_doc["created_at"]
     )
-
 
 @app.get("/recipes", response_model=List[RecipeResponse])
 async def get_recipes(
@@ -498,27 +520,59 @@ async def get_recipes(
     return recipes
 
 
-@app.get("/recipes/{recipe_id}", response_model=RecipeResponse)
-async def get_recipe(recipe_id: str):
+@app.get("/recipes/{recipe_id}", response_model=EnhancedRecipeResponse)
+async def get_recipe(recipe_id: str, current_user: dict = Depends(get_current_user)):
     try:
         recipe_doc = db.recipes.find_one({"_id": ObjectId(recipe_id)})
+        if recipe_doc:
+            print("Recipe document from DB:", recipe_doc)  # Debug log
     except InvalidId:
         raise HTTPException(status_code=400, detail="Invalid recipe ID")
 
     if not recipe_doc:
         raise HTTPException(status_code=404, detail="Recipe not found")
 
+    # Get ratings for this recipe
+    ratings = list(db.ratings.find({"recipe_id": recipe_id}))
+    average_rating = None
+    total_ratings = len(ratings)
+    user_rating = None
+
+    if ratings:
+        rating_values = [r["rating"] for r in ratings]
+        average_rating = round(mean(rating_values), 1)
+
+        # Check if current user has rated this recipe
+        user_rating_doc = next((r for r in ratings if r["user_id"] == str(current_user["_id"])), None)
+        if user_rating_doc:
+            user_rating = user_rating_doc["rating"]
+
+    # Check if current user has favorited this recipe
+    favorite = db.favorites.find_one({
+        "recipe_id": recipe_id,
+        "user_id": str(current_user["_id"])
+    })
+    user_has_favorited = favorite is not None
+
+    # Convert MongoDB document to Pydantic model
     ingredients = [Ingredient(**ing) for ing in recipe_doc["ingredients"]]
 
-    return RecipeResponse(
+    return EnhancedRecipeResponse(
         id=str(recipe_doc["_id"]),
         recipe_name=recipe_doc["recipe_name"],
         ingredients=ingredients,
         instructions=recipe_doc["instructions"],
         serving_size=recipe_doc["serving_size"],
         genre=Genre(recipe_doc["genre"]),
+        prep_time=recipe_doc.get("prep_time", 0),
+        cook_time=recipe_doc.get("cook_time", 0),
+        notes=recipe_doc.get("notes", []),  # Add notes field
         created_by=recipe_doc["created_by"],
-        created_at=recipe_doc["created_at"]
+        created_at=recipe_doc["created_at"],
+        average_rating=average_rating,
+        total_ratings=total_ratings,
+        user_has_favorited=user_has_favorited,
+        user_rating=user_rating
     )
 
 
@@ -553,10 +607,12 @@ async def update_recipe(
         update_doc["serving_size"] = recipe_update.serving_size
     if recipe_update.genre is not None:
         update_doc["genre"] = recipe_update.genre
-    if recipe_update.prep_time is not None:  # Make sure this is present
+    if recipe_update.prep_time is not None:
         update_doc["prep_time"] = recipe_update.prep_time
-    if recipe_update.cook_time is not None:  # Make sure this is present
+    if recipe_update.cook_time is not None:
         update_doc["cook_time"] = recipe_update.cook_time
+    if recipe_update.notes is not None:  # Add notes field update
+        update_doc["notes"] = recipe_update.notes
 
     db.recipes.update_one({"_id": ObjectId(recipe_id)}, {"$set": update_doc})
 
@@ -570,6 +626,9 @@ async def update_recipe(
         instructions=updated_recipe["instructions"],
         serving_size=updated_recipe["serving_size"],
         genre=Genre(updated_recipe["genre"]),
+        prep_time=updated_recipe.get("prep_time", 0),
+        cook_time=updated_recipe.get("cook_time", 0),
+        notes=updated_recipe.get("notes", []),  # Add notes field
         created_by=updated_recipe["created_by"],
         created_at=updated_recipe["created_at"]
     )

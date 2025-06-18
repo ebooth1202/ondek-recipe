@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import axios from 'axios';
 import { Fraction } from 'fraction.js';
 
+
 const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }) => {
   const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   // Form state
   const [formData, setFormData] = useState({
@@ -22,6 +23,9 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
   ]);
 
   const [instructions, setInstructions] = useState(['']);
+
+  // Add notes state
+  const [notes, setNotes] = useState(['']);
 
   // Options state
   const [availableUnits, setAvailableUnits] = useState([
@@ -40,7 +44,49 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Initialize form with existing recipe data if in edit mode
+  // Check for duplicate recipe in sessionStorage
+  useEffect(() => {
+    // Check if we're duplicating a recipe from sessionStorage
+    const duplicateRecipeStr = sessionStorage.getItem('duplicateRecipe');
+    console.log('Checking for duplicated recipe:', duplicateRecipeStr);
+
+    if (duplicateRecipeStr) {
+      try {
+        const duplicateRecipe = JSON.parse(duplicateRecipeStr);
+        console.log('Found duplicated recipe to load:', duplicateRecipe);
+
+        setFormData({
+          recipe_name: duplicateRecipe.recipe_name,
+          serving_size: duplicateRecipe.serving_size,
+          genre: duplicateRecipe.genre,
+          prep_time: duplicateRecipe.prep_time || 0,
+          cook_time: duplicateRecipe.cook_time || 0
+        });
+
+        setIngredients(duplicateRecipe.ingredients.map(ing => ({
+          name: ing.name,
+          quantity: ing.quantity,
+          unit: ing.unit
+        })));
+
+        setInstructions([...duplicateRecipe.instructions]);
+
+        if (duplicateRecipe.notes && duplicateRecipe.notes.length > 0) {
+          setNotes([...duplicateRecipe.notes]);
+        } else {
+          setNotes(['']);
+        }
+
+        // Only remove from sessionStorage after successfully loading
+        // This helps for debugging and retries if needed
+        // sessionStorage.removeItem('duplicateRecipe');
+      } catch (error) {
+        console.error('Error parsing duplicated recipe:', error);
+      }
+    }
+  }, []);
+
+  // Handle edit mode separately
   useEffect(() => {
     if (editMode && existingRecipe) {
       setFormData({
@@ -58,6 +104,13 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
       })));
 
       setInstructions([...existingRecipe.instructions]);
+
+      // Add this part to load notes
+      if (existingRecipe.notes && existingRecipe.notes.length > 0) {
+        setNotes([...existingRecipe.notes]);
+      } else {
+        setNotes(['']);
+      }
     }
   }, [editMode, existingRecipe]);
 
@@ -254,19 +307,17 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
   const handleIngredientKeyDown = (index, field, e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      // If this is the last ingredient and it has content, add a new one
-      if (index === ingredients.length - 1 && ingredients[index].name.trim()) {
-        addIngredient();
-        // Focus the quantity field of the next row after a short delay
-        setTimeout(() => {
-          const nextQuantityInput = document.querySelector(`input[data-ingredient-index="${index + 1}"][data-field="quantity"]`);
-          if (nextQuantityInput) nextQuantityInput.focus();
-        }, 100);
-      } else if (index < ingredients.length - 1) {
-        // Move to next ingredient's quantity field
+
+      // Create a new ingredient row and insert it after the current one
+      const newIngredients = [...ingredients];
+      newIngredients.splice(index + 1, 0, { name: '', quantity: '', unit: 'cup' });
+      setIngredients(newIngredients);
+
+      // Focus the quantity field of the new row after a short delay
+      setTimeout(() => {
         const nextQuantityInput = document.querySelector(`input[data-ingredient-index="${index + 1}"][data-field="quantity"]`);
         if (nextQuantityInput) nextQuantityInput.focus();
-      }
+      }, 100);
     }
   };
 
@@ -322,22 +373,60 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
     }
   };
 
+  // Move instruction up or down
+  const moveInstruction = (index, direction) => {
+    if (
+      (direction === 'up' && index === 0) ||
+      (direction === 'down' && index === instructions.length - 1)
+    ) {
+      return; // Cannot move beyond array bounds
+    }
+
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    const newInstructions = [...instructions];
+
+    // Swap the instructions
+    [newInstructions[index], newInstructions[newIndex]] =
+    [newInstructions[newIndex], newInstructions[index]];
+
+    setInstructions(newInstructions);
+  };
+
+  // Change step number (reorder)
+  const changeStepNumber = (oldIndex, newStepNumber) => {
+    const newIndex = newStepNumber - 1; // Convert from 1-based to 0-based
+
+    // Validate the new index
+    if (newIndex < 0 || newIndex >= instructions.length || newIndex === oldIndex) {
+      return; // Invalid index or no change needed
+    }
+
+    const newInstructions = [...instructions];
+    const movedInstruction = newInstructions[oldIndex];
+
+    // Remove the instruction from its current position
+    newInstructions.splice(oldIndex, 1);
+
+    // Insert at the new position
+    newInstructions.splice(newIndex, 0, movedInstruction);
+
+    setInstructions(newInstructions);
+  };
+
   const handleInstructionKeyDown = (index, e) => {
     if (e.key === 'Enter' && e.shiftKey === false) {
       e.preventDefault();
-      // If this is the last instruction and it has content, add a new one
-      if (index === instructions.length - 1 && instructions[index].trim()) {
-        addInstruction();
-        // Focus the next instruction field after a short delay
-        setTimeout(() => {
-          const nextTextarea = document.querySelector(`textarea[data-instruction-index="${index + 1}"]`);
-          if (nextTextarea) nextTextarea.focus();
-        }, 100);
-      } else if (index < instructions.length - 1) {
-        // Move to next instruction
+
+      // Create a new instruction row and insert it after the current one
+      const newInstructions = [...instructions];
+      newInstructions.splice(index + 1, 0, ''); // Insert empty string at index+1
+      setInstructions(newInstructions);
+
+      // Focus the newly created instruction field after a short delay
+      setTimeout(() => {
         const nextTextarea = document.querySelector(`textarea[data-instruction-index="${index + 1}"]`);
         if (nextTextarea) nextTextarea.focus();
-      }
+      }, 100);
     }
   };
 
@@ -345,6 +434,88 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
     // Auto-add new instruction row if this is the last one and has content
     if (index === instructions.length - 1 && instructions[index].trim()) {
       setTimeout(() => addInstruction(), 100);
+    }
+  };
+
+  // Note handlers
+  const handleNoteChange = (index, value) => {
+    const newNotes = [...notes];
+    newNotes[index] = value;
+    setNotes(newNotes);
+  };
+
+  const addNote = () => {
+    setNotes([...notes, '']);
+  };
+
+  const removeNote = (index) => {
+    if (notes.length > 1) {
+      const newNotes = notes.filter((_, i) => i !== index);
+      setNotes(newNotes);
+    }
+  };
+
+  // Move note up or down
+  const moveNote = (index, direction) => {
+    if (
+      (direction === 'up' && index === 0) ||
+      (direction === 'down' && index === notes.length - 1)
+    ) {
+      return; // Cannot move beyond array bounds
+    }
+
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    const newNotes = [...notes];
+
+    // Swap the notes
+    [newNotes[index], newNotes[newIndex]] =
+    [newNotes[newIndex], newNotes[index]];
+
+    setNotes(newNotes);
+  };
+
+  // Change note number (reorder)
+  const changeNoteNumber = (oldIndex, newNoteNumber) => {
+    const newIndex = newNoteNumber - 1; // Convert from 1-based to 0-based
+
+    // Validate the new index
+    if (newIndex < 0 || newIndex >= notes.length || newIndex === oldIndex) {
+      return; // Invalid index or no change needed
+    }
+
+    const newNotes = [...notes];
+    const movedNote = newNotes[oldIndex];
+
+    // Remove the note from its current position
+    newNotes.splice(oldIndex, 1);
+
+    // Insert at the new position
+    newNotes.splice(newIndex, 0, movedNote);
+
+    setNotes(newNotes);
+  };
+
+  const handleNoteKeyDown = (index, e) => {
+    if (e.key === 'Enter' && e.shiftKey === false) {
+      e.preventDefault();
+
+      // Create a new note row and insert it after the current one
+      const newNotes = [...notes];
+      newNotes.splice(index + 1, 0, ''); // Insert empty string at index+1
+      setNotes(newNotes);
+
+      // Focus the newly created note field after a short delay
+      setTimeout(() => {
+        const nextTextarea = document.querySelector(`textarea[data-note-index="${index + 1}"]`);
+        if (nextTextarea) nextTextarea.focus();
+      }, 100);
+    }
+  };
+
+  const handleNoteBlur = (index) => {
+    // Auto-add new note row if this is the last one and has content
+    if (index === notes.length - 1 && notes[index].trim()) {
+      setTimeout(() => addNote(), 100);
     }
   };
 
@@ -380,6 +551,9 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
       return;
     }
 
+    // Filter valid notes
+    const validNotes = notes.filter(note => note.trim());
+
     try {
       // Prepare the ingredients with parsed quantities
       const processedIngredients = validIngredients.map(ing => {
@@ -406,8 +580,52 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
         prep_time: parseInt(formData.prep_time || 0),
         cook_time: parseInt(formData.cook_time || 0),
         ingredients: processedIngredients,
-        instructions: validInstructions.map(inst => inst.trim())
+        instructions: validInstructions.map(inst => inst.trim()),
+        notes: validNotes.map(note => note.trim()) // Add notes field
       };
+
+      // Check if this is a duplication attempt by checking URL parameters
+      const urlParams = new URLSearchParams(location.search);
+      const isDuplicating = urlParams.get('duplicate') === 'true';
+
+      // If duplicating, check if any changes were made compared to the original
+      if (isDuplicating) {
+        // Get the original recipe from sessionStorage (might be null if page was refreshed)
+        const originalRecipeStr = sessionStorage.getItem('originalRecipe');
+
+        // If we still have the original recipe data, compare to prevent exact duplicates
+        if (originalRecipeStr) {
+          try {
+            const originalRecipe = JSON.parse(originalRecipeStr);
+
+            // Remove the "(Copy)" suffix for comparison
+            const nameWithoutCopy = recipeData.recipe_name.replace(' (Copy)', '').trim();
+
+            // Check if this is an exact duplicate (excluding the recipe name)
+            const isExactDuplicate =
+              nameWithoutCopy === originalRecipe.recipe_name &&
+              recipeData.serving_size === originalRecipe.serving_size &&
+              recipeData.genre === originalRecipe.genre &&
+              recipeData.prep_time === originalRecipe.prep_time &&
+              recipeData.cook_time === originalRecipe.cook_time &&
+              JSON.stringify(recipeData.ingredients) === JSON.stringify(originalRecipe.ingredients) &&
+              JSON.stringify(recipeData.instructions) === JSON.stringify(originalRecipe.instructions) &&
+              JSON.stringify(recipeData.notes) === JSON.stringify(originalRecipe.notes || []);
+
+            if (isExactDuplicate) {
+              setError('You must make at least one change to create a variant of this recipe.');
+              setLoading(false);
+              return;
+            }
+          } catch (error) {
+            console.error('Error comparing recipes:', error);
+            // Continue with save if comparison fails
+          }
+        }
+
+        // Clean up after comparison
+        sessionStorage.removeItem('originalRecipe');
+      }
 
       let response;
 
@@ -426,6 +644,7 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
         setFormData({ recipe_name: '', serving_size: 1, genre: 'dinner', prep_time: 0, cook_time: 0 });
         setIngredients([{ name: '', quantity: '', unit: 'cup' }]);
         setInstructions(['']);
+        setNotes(['']);
       }
 
       // Call the callback if provided
@@ -699,7 +918,85 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
 
             {instructions.map((instruction, index) => (
               <div key={index} style={instructionRowStyle}>
-                <span style={stepNumberStyle}>{index + 1}</span>
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}>
+                  {/* Up arrow */}
+                  <button
+                    type="button"
+                    onClick={() => moveInstruction(index, 'up')}
+                    disabled={index === 0}
+                    style={{
+                      padding: '2px',
+                      backgroundColor: 'transparent',
+                      border: 'none',
+                      cursor: index === 0 ? 'not-allowed' : 'pointer',
+                      color: index === 0 ? '#ccc' : '#003366',
+                      fontSize: '14px',
+                      width: '24px',
+                      height: '24px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    title="Move step up"
+                  >
+                    ▲
+                  </button>
+
+                  {/* Step number - clickable for reordering */}
+                  <div
+                    style={{
+                      backgroundColor: '#003366',
+                      color: 'white',
+                      borderRadius: '50%',
+                      width: '28px',
+                      height: '28px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '14px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      position: 'relative',
+                    }}
+                    onClick={() => {
+                      const newStep = prompt(`Change step ${index + 1} to position:`, index + 1);
+                      if (newStep && !isNaN(newStep) && newStep > 0 && newStep <= instructions.length) {
+                        changeStepNumber(index, parseInt(newStep));
+                      }
+                    }}
+                    title="Click to change step position"
+                  >
+                    {index + 1}
+                  </div>
+
+                  {/* Down arrow */}
+                  <button
+                    type="button"
+                    onClick={() => moveInstruction(index, 'down')}
+                    disabled={index === instructions.length - 1}
+                    style={{
+                      padding: '2px',
+                      backgroundColor: 'transparent',
+                      border: 'none',
+                      cursor: index === instructions.length - 1 ? 'not-allowed' : 'pointer',
+                      color: index === instructions.length - 1 ? '#ccc' : '#003366',
+                      fontSize: '14px',
+                      width: '24px',
+                      height: '24px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    title="Move step down"
+                  >
+                    ▼
+                  </button>
+                </div>
 
                 <textarea
                   value={instruction}
@@ -743,6 +1040,137 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
             </button>
           </div>
 
+          {/* Notes Section */}
+          <div style={{ marginBottom: '2rem' }}>
+            <label style={labelStyle}>Notes (Optional)</label>
+
+            {notes.map((note, index) => (
+              <div key={index} style={instructionRowStyle}>
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}>
+                  {/* Up arrow */}
+                  <button
+                    type="button"
+                    onClick={() => moveNote(index, 'up')}
+                    disabled={index === 0}
+                    style={{
+                      padding: '2px',
+                      backgroundColor: 'transparent',
+                      border: 'none',
+                      cursor: index === 0 ? 'not-allowed' : 'pointer',
+                      color: index === 0 ? '#ccc' : '#6c757d',
+                      fontSize: '14px',
+                      width: '24px',
+                      height: '24px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    title="Move note up"
+                  >
+                    ▲
+                  </button>
+
+                  {/* Note number - clickable for reordering */}
+                  <div
+                    style={{
+                      backgroundColor: '#6c757d', // Different color for notes
+                      color: 'white',
+                      borderRadius: '50%',
+                      width: '28px',
+                      height: '28px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '14px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      position: 'relative',
+                    }}
+                    onClick={() => {
+                      const newNote = prompt(`Change note ${index + 1} to position:`, index + 1);
+                      if (newNote && !isNaN(newNote) && newNote > 0 && newNote <= notes.length) {
+                        changeNoteNumber(index, parseInt(newNote));
+                      }
+                    }}
+                    title="Click to change note position"
+                  >
+                    {index + 1}
+                  </div>
+
+                  {/* Down arrow */}
+                  <button
+                    type="button"
+                    onClick={() => moveNote(index, 'down')}
+                    disabled={index === notes.length - 1}
+                    style={{
+                      padding: '2px',
+                      backgroundColor: 'transparent',
+                      border: 'none',
+                      cursor: index === notes.length - 1 ? 'not-allowed' : 'pointer',
+                      color: index === notes.length - 1 ? '#ccc' : '#6c757d',
+                      fontSize: '14px',
+                      width: '24px',
+                      height: '24px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    title="Move note down"
+                  >
+                    ▼
+                  </button>
+                </div>
+
+                <textarea
+                  value={note}
+                  onChange={(e) => handleNoteChange(index, e.target.value)}
+                  onKeyDown={(e) => handleNoteKeyDown(index, e)}
+                  onBlur={() => handleNoteBlur(index)}
+                  data-note-index={index}
+                  style={{
+                    flex: 1,
+                    padding: '8px',
+                    border: '2px solid #6c757d', // Different border color
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    minHeight: '60px',
+                    resize: 'vertical'
+                  }}
+                  placeholder={`Note ${index + 1}... (Enter = next note, Shift+Enter = new line)`}
+                />
+
+                {notes.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeNote(index)}
+                    style={{
+                      ...removeButtonStyle,
+                      marginTop: '8px'
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
+
+            <button
+              type="button"
+              onClick={addNote}
+              style={{
+                ...addButtonStyle,
+                backgroundColor: '#6c757d' // Different color
+              }}
+            >
+              ➕ Add Note
+            </button>
+          </div>
+
           {/* Serving Size, Genre, and Time Inputs */}
           <div style={{
             display: 'grid',
@@ -768,7 +1196,7 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
               <label style={{ ...labelStyle, fontSize: '1rem' }}>
                 Category
               </label>
-              <select
+                              <select
                 name="genre"
                 value={formData.genre}
                 onChange={handleInputChange}
@@ -776,7 +1204,7 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
               >
                 {availableGenres.map(genre => (
                   <option key={genre} value={genre}>
-                    {genre.charAt(0).toUpperCase() + genre.slice(1)}
+                    {formatGenreName(genre)}
                   </option>
                 ))}
               </select>

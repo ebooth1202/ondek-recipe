@@ -61,22 +61,42 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
       dinner: '🍽️',
       snack: '🍿',
       dessert: '🍰',
-      appetizer: '🥗'
+      appetizer: '🥗',
+      gluten_free: '🌾',
+      dairy_free: '🥛',
+      egg_free: '🥚'
     };
     return emojis[genre] || '🍳';
   };
 
-  const getGenreColor = (genre) => {
-    const colors = {
-      breakfast: '#ffc107',
-      lunch: '#28a745',
-      dinner: '#dc3545',
-      snack: '#17a2b8',
-      dessert: '#e83e8c',
-      appetizer: '#6f42c1'
-    };
-    return colors[genre] || '#003366';
+const getGenreColor = (genre) => {
+  const colors = {
+    breakfast: '#ffc107',
+    lunch: '#28a745',
+    dinner: '#dc3545',
+    snack: '#17a2b8',
+    dessert: '#e83e8c',
+    appetizer: '#6f42c1',
+    gluten_free: '#9c27b0',
+    dairy_free: '#00bcd4',
+    egg_free: '#ff9800'
   };
+  return colors[genre] || '#003366';
+};
+
+const formatGenreName = (genre) => {
+  if (!genre) return '';
+
+  // Special case for the new dietary restriction genres
+  switch(genre) {
+    case 'gluten_free': return 'Gluten Free';
+    case 'dairy_free': return 'Dairy Free';
+    case 'egg_free': return 'Egg Free';
+    default:
+      // Standard capitalization for other genres
+      return genre.charAt(0).toUpperCase() + genre.slice(1);
+  }
+};
 
   // Styles
   const cardStyle = {

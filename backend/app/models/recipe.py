@@ -12,6 +12,9 @@ class Genre(str, Enum):
     SNACK = "snack"
     DESSERT = "dessert"
     APPETIZER = "appetizer"
+    GLUTEN_FREE = "gluten_free"
+    DAIRY_FREE = "dairy_free"
+    EGG_FREE = "egg_free"
 
 
 class MeasuringUnit(str, Enum):
