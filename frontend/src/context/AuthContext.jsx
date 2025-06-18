@@ -107,8 +107,17 @@ export const AuthProvider = ({ children }) => {
     return user.role === roles;
   };
 
+  const updateUser = (updatedUserData) => {
+    // Update the user data in context
+    setUser(prevUser => ({
+      ...prevUser,
+      ...updatedUserData
+    }));
+  };
+
   const value = {
     user,
+    setUser: updateUser,  // Added function to update user data
     token,
     loading,
     login,
@@ -147,4 +156,3 @@ export const AuthProvider = ({ children }) => {
     </AuthContext.Provider>
   );
 };
-

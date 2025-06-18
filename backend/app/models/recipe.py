@@ -1,7 +1,9 @@
-from pydantic import BaseModel
-from typing import List, Optional
+from pydantic import BaseModel, validator
+from typing import List, Optional, Union
 from datetime import datetime
 from enum import Enum
+from fractions import Fraction
+
 
 class Genre(str, Enum):
     BREAKFAST = "breakfast"
@@ -10,6 +12,7 @@ class Genre(str, Enum):
     SNACK = "snack"
     DESSERT = "dessert"
     APPETIZER = "appetizer"
+
 
 class MeasuringUnit(str, Enum):
     CUP = "cup"
@@ -36,10 +39,47 @@ class MeasuringUnit(str, Enum):
     PINCH = "pinch"
     DASH = "dash"
 
+
 class Ingredient(BaseModel):
     name: str
-    quantity: float
+    quantity: Union[float, str]  # Accept both float and string (for fractions)
     unit: MeasuringUnit
+
+    @validator('quantity')
+    def validate_quantity(cls, v):
+        if isinstance(v, float):
+            return v
+
+        if isinstance(v, str):
+            try:
+                if '/' in v:
+                    # Simple fraction
+                    if ' ' not in v:
+                        num, denom = v.split('/')
+                        return float(Fraction(int(num.strip()), int(denom.strip())))
+                    # Mixed number
+                    else:
+                        whole, frac = v.split(' ', 1)
+                        num, denom = frac.split('/')
+                        return float(int(whole.strip())) + float(Fraction(int(num.strip()), int(denom.strip())))
+                # Plain decimal or integer
+                return float(v)
+            except (ValueError, ZeroDivisionError):
+                raise ValueError(
+                    f"Invalid quantity format: {v}. Use a number, fraction (e.g., '1/2'), or mixed number (e.g., '1 1/2')")
+
+        return v
+
+    def dict(self, *args, **kwargs):
+        """Override dict to ensure quantity is stored as a float"""
+        d = super().dict(*args, **kwargs)
+
+        # Convert quantity to float if it's a string
+        if isinstance(d["quantity"], str):
+            d["quantity"] = self.validate_quantity(d["quantity"])
+
+        return d
+
 
 class Recipe(BaseModel):
     recipe_name: str
@@ -51,6 +91,7 @@ class Recipe(BaseModel):
     created_at: datetime = datetime.now()
     updated_at: datetime = datetime.now()
 
+
 class RecipeCreate(BaseModel):
     recipe_name: str
     ingredients: List[Ingredient]
@@ -58,12 +99,14 @@ class RecipeCreate(BaseModel):
     serving_size: int
     genre: Genre
 
+
 class RecipeUpdate(BaseModel):
     recipe_name: Optional[str] = None
     ingredients: Optional[List[Ingredient]] = None
     instructions: Optional[List[str]] = None
     serving_size: Optional[int] = None
     genre: Optional[Genre] = None
+
 
 class RecipeResponse(BaseModel):
     id: str

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
+import { Fraction } from 'fraction.js';
 
 const AddRecipe = () => {
   const { isAuthenticated } = useAuth();
@@ -65,6 +66,103 @@ const AddRecipe = () => {
     }
   }, [isAuthenticated]);
 
+  // Fraction utilities
+  const parseQuantity = (value) => {
+    if (value === undefined || value === null || value === '') return '';
+
+    try {
+      // If it's already a number, return it
+      if (typeof value === 'number') return value;
+
+      // Convert to string to ensure we can use string methods
+      const stringValue = String(value);
+
+      // Handle simple numeric values
+      if (!stringValue.includes('/')) {
+        return parseFloat(stringValue);
+      }
+
+      // Handle mixed numbers (e.g., "1 1/2")
+      if (stringValue.includes(' ')) {
+        const [whole, fractionPart] = stringValue.split(' ');
+        const [numerator, denominator] = fractionPart.split('/');
+
+        return parseFloat(whole) + (parseFloat(numerator) / parseFloat(denominator));
+      }
+
+      // Handle simple fractions (e.g., "1/2")
+      const [numerator, denominator] = stringValue.split('/');
+      return parseFloat(numerator) / parseFloat(denominator);
+    } catch (e) {
+      console.error("Error parsing fraction:", e);
+      return '';
+    }
+  };
+
+  const formatQuantity = (value) => {
+    if (value === undefined || value === null || value === '') return '';
+
+    try {
+      // Handle integer values
+      if (Number.isInteger(Number(value))) {
+        return String(value);
+      }
+
+      // Convert to fraction
+      const frac = new Fraction(value);
+
+      // If it's a proper fraction (less than 1)
+      if (frac.compare(1) < 0) {
+        return `${frac.n}/${frac.d}`;
+      }
+
+      // If it's an improper fraction (greater than or equal to 1)
+      const wholePart = Math.floor(frac.valueOf());
+      const fractionalPart = frac.subtract(wholePart);
+
+      if (fractionalPart.valueOf() === 0) {
+        return String(wholePart);
+      }
+
+      return `${wholePart} ${fractionalPart.n}/${fractionalPart.d}`;
+    } catch (e) {
+      console.error("Error formatting fraction:", e);
+      return String(value);
+    }
+  };
+
+  const validateQuantity = (value) => {
+    if (value === undefined || value === null || value === '') return true;
+
+    // If value is a number, it's valid
+    if (typeof value === 'number') return true;
+
+    // Convert to string to ensure we can use string methods
+    const stringValue = String(value);
+
+    // Check for valid numeric input
+    if (!stringValue.includes('/')) {
+      return !isNaN(stringValue);
+    }
+
+    try {
+      // Check for valid mixed number
+      if (stringValue.includes(' ')) {
+        const [whole, fractionPart] = stringValue.split(' ');
+        if (isNaN(whole)) return false;
+
+        const [numerator, denominator] = fractionPart.split('/');
+        return !isNaN(numerator) && !isNaN(denominator) && parseInt(denominator) !== 0;
+      }
+
+      // Check for valid simple fraction
+      const [numerator, denominator] = stringValue.split('/');
+      return !isNaN(numerator) && !isNaN(denominator) && parseInt(denominator) !== 0;
+    } catch (e) {
+      return false;
+    }
+  };
+
   // Form handlers
   const handleInputChange = (e) => {
     setFormData({
@@ -76,7 +174,32 @@ const AddRecipe = () => {
   // Ingredient handlers
   const handleIngredientChange = (index, field, value) => {
     const newIngredients = [...ingredients];
-    newIngredients[index][field] = value;
+
+    if (field === 'quantity') {
+      // For quantity field, validate the input
+      if (validateQuantity(value)) {
+        // Parse the fraction to a float for storage
+        if (value) {
+          try {
+            const parsedValue = parseQuantity(value);
+            newIngredients[index][field] = parsedValue;
+          } catch (e) {
+            console.error("Invalid fraction:", e);
+            // Keep the string value for display but mark as invalid
+            newIngredients[index][field] = value;
+          }
+        } else {
+          newIngredients[index][field] = '';
+        }
+      } else {
+        // For invalid input, keep the string but don't convert
+        newIngredients[index][field] = value;
+      }
+    } else {
+      // For other fields, just update normally
+      newIngredients[index][field] = value;
+    }
+
     setIngredients(newIngredients);
   };
 
@@ -110,11 +233,26 @@ const AddRecipe = () => {
     }
   };
 
-  const handleIngredientBlur = (index) => {
+  const handleIngredientBlur = (index, field) => {
+    // Format quantities as fractions on blur
+    if (field === 'quantity') {
+      const value = ingredients[index].quantity;
+      if (value && validateQuantity(value)) {
+        const newIngredients = [...ingredients];
+        if (typeof value === 'string' && (value.includes('/') || !isNaN(value))) {
+          newIngredients[index].quantity = parseQuantity(value);
+        } else {
+          // If it's already a number, no need to parse
+          newIngredients[index].quantity = value;
+        }
+        setIngredients(newIngredients);
+      }
+    }
+
     // Auto-add new ingredient row if this is the last one and has content
     if (index === ingredients.length - 1 &&
         ingredients[index].name.trim() &&
-        ingredients[index].quantity) {
+        ingredients[index].quantity !== '') {
       setTimeout(() => addIngredient(), 100);
     }
   };
@@ -178,7 +316,7 @@ const AddRecipe = () => {
     }
 
     const validIngredients = ingredients.filter(ing =>
-      ing.name.trim() && ing.quantity && !isNaN(parseFloat(ing.quantity))
+      ing.name.trim() && ing.quantity !== '' && ing.quantity !== null && ing.quantity !== undefined
     );
 
     if (validIngredients.length === 0) {
@@ -231,11 +369,6 @@ const AddRecipe = () => {
 
     setLoading(false);
   };
-
-  // Render guard
-  if (!isAuthenticated()) {
-    return null;
-  }
 
   // Styles
   const containerStyle = {
@@ -344,6 +477,11 @@ const AddRecipe = () => {
     flexShrink: 0
   };
 
+  // Render guard
+  if (!isAuthenticated()) {
+    return null;
+  }
+
   return (
     <div style={containerStyle}>
       <div style={formContainerStyle}>
@@ -399,17 +537,19 @@ const AddRecipe = () => {
             {ingredients.map((ingredient, index) => (
               <div key={index} style={ingredientRowStyle}>
                 <input
-                  type="number"
-                  step="0.1"
-                  value={ingredient.quantity}
+                  type="text"
+                  value={typeof ingredient.quantity === 'number'
+                    ? formatQuantity(ingredient.quantity)
+                    : ingredient.quantity}
                   onChange={(e) => handleIngredientChange(index, 'quantity', e.target.value)}
                   onKeyDown={(e) => handleIngredientKeyDown(index, 'quantity', e)}
+                  onBlur={() => handleIngredientBlur(index, 'quantity')}
                   data-ingredient-index={index}
                   data-field="quantity"
                   style={{
                     width: '100px',
                     padding: '8px',
-                    border: '2px solid #003366',
+                    border: validateQuantity(ingredient.quantity) ? '2px solid #003366' : '2px solid #dc3545',
                     borderRadius: '8px',
                     fontSize: '14px'
                   }}
@@ -440,7 +580,7 @@ const AddRecipe = () => {
                   value={ingredient.name}
                   onChange={(e) => handleIngredientChange(index, 'name', e.target.value)}
                   onKeyDown={(e) => handleIngredientKeyDown(index, 'name', e)}
-                  onBlur={() => handleIngredientBlur(index)}
+                  onBlur={() => handleIngredientBlur(index, 'name')}
                   data-ingredient-index={index}
                   data-field="name"
                   style={{

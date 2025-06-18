@@ -164,7 +164,7 @@ const Navbar = () => {
                   color: '#ccc',
                   fontSize: '0.9rem'
                 }}>
-                  Welcome, {user?.username}! ({user?.role})
+                  Welcome, {user?.first_name}! ({user?.role})
                 </span>
               </li>
 

@@ -1,9 +1,10 @@
-# backend/app/database.py - Enhanced version with new indexes
+# backend/app/database.py - Enhanced version with new indexes and default user setup
 
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
 from .config import settings
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,9 @@ class Database:
 
             # Create indexes
             cls._create_indexes()
+
+            # Create default admin user if it doesn't exist
+            cls._ensure_default_user()
 
         except Exception as e:
             logger.error(f"Failed to connect to MongoDB: {e}")
@@ -66,8 +70,44 @@ class Database:
             logger.warning(f"Error creating indexes: {e}")
 
     @classmethod
+    def _ensure_default_user(cls):
+        """Ensure default owner user exists"""
+        import bcrypt
+
+        try:
+            # Check if owner user exists
+            owner = cls.database.users.find_one({"username": "owner"})
+
+            if not owner:
+                logger.info("Creating default owner user")
+                # Hash the password
+                hashed_password = bcrypt.hashpw("admin123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+                # Create owner user
+                owner_user = {
+                    "username": "owner",
+                    "email": "owner@ondekrecipe.com",
+                    "password": hashed_password,
+                    "role": "owner",
+                    "created_at": datetime.now(),
+                    "updated_at": datetime.now()
+                }
+
+                cls.database.users.insert_one(owner_user)
+                logger.info("Default owner user created successfully")
+            else:
+                logger.info("Default owner user already exists")
+        except Exception as e:
+            logger.error(f"Error ensuring default user: {e}")
+
+    @classmethod
     def get_database(cls):
         return cls.database
+
+    @classmethod
+    def get_current_datetime(cls):
+        """Get current datetime for consistent datetime usage"""
+        return datetime.now()
 
 
 # Initialize database connection

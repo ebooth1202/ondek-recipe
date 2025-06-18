@@ -43,6 +43,40 @@ security = HTTPBearer()
 try:
     client = MongoClient(MONGO_URI, server_api=ServerApi('1'))
     db = client.ondek_recipe
+
+    # Create default owner user if it doesn't exist
+    if db.users.count_documents({"username": "owner"}) == 0:
+        hashed_password = bcrypt.hashpw("admin123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        owner_user = {
+            "username": "owner",
+            "email": "owner@ondekrecipe.com",
+            "password": hashed_password,
+            "role": "owner",
+            "created_at": datetime.now(),
+            "updated_at": datetime.now()
+        }
+        db.users.insert_one(owner_user)
+        print("✅ Default owner user created successfully!")
+    else:
+        # Make sure password is correct for owner user
+        owner = db.users.find_one({"username": "owner"})
+        is_valid = False
+        try:
+            is_valid = bcrypt.checkpw("admin123".encode('utf-8'), owner["password"].encode('utf-8'))
+        except Exception:
+            is_valid = False
+
+        if not is_valid:
+            # Update owner password
+            hashed_password = bcrypt.hashpw("admin123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            db.users.update_one(
+                {"username": "owner"},
+                {"$set": {"password": hashed_password, "updated_at": datetime.now()}}
+            )
+            print("✅ Owner password reset to 'admin123'")
+        else:
+            print("✅ Owner user exists with correct password")
+
     print("✅ Connected to MongoDB Atlas!")
 except Exception as e:
     print(f"❌ Failed to connect to MongoDB: {e}")
@@ -101,6 +135,8 @@ class UserCreate(BaseModel):
     username: str
     email: str
     password: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     role: UserRole = UserRole.USER
 
 
@@ -113,6 +149,8 @@ class UserResponse(BaseModel):
     id: str
     username: str
     email: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     role: UserRole
     created_at: datetime
 
@@ -120,6 +158,9 @@ class UserResponse(BaseModel):
 class UserUpdate(BaseModel):
     email: Optional[str] = None
     password: Optional[str] = None
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None  # Added username field
 
 
 class RecipeCreate(BaseModel):
@@ -225,7 +266,11 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+    try:
+        return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+    except Exception as e:
+        print(f"Password verification error: {e}")
+        return False
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
@@ -308,12 +353,20 @@ async def register(user: UserCreate):
         "updated_at": datetime.now()
     }
 
+    # Add first_name and last_name if provided
+    if user.first_name:
+        user_doc["first_name"] = user.first_name
+    if user.last_name:
+        user_doc["last_name"] = user.last_name
+
     result = db.users.insert_one(user_doc)
 
     return UserResponse(
         id=str(result.inserted_id),
         username=user.username,
         email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
         role=user.role,
         created_at=user_doc["created_at"]
     )
@@ -321,13 +374,31 @@ async def register(user: UserCreate):
 
 @app.post("/auth/login", response_model=Token)
 async def login(user: UserLogin):
+    # Debug logging
+    print(f"Login attempt for username: {user.username}")
+
     db_user = db.users.find_one({"username": user.username})
-    if not db_user or not verify_password(user.password, db_user["password"]):
+    if not db_user:
+        print(f"User not found: {user.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Debug logging
+    print(f"Found user: {db_user['username']}, role: {db_user['role']}")
+
+    if not verify_password(user.password, db_user["password"]):
+        print(f"Password verification failed for: {user.username}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Debug logging
+    print(f"Password verification successful for: {user.username}")
 
     access_token_expires = timedelta(hours=24)
     access_token = create_access_token(
@@ -355,6 +426,8 @@ async def get_current_user_info(current_user: dict = Depends(get_current_user)):
         id=str(current_user["_id"]),
         username=current_user["username"],
         email=current_user["email"],
+        first_name=current_user.get("first_name"),
+        last_name=current_user.get("last_name"),
         role=UserRole(current_user["role"]),
         created_at=current_user["created_at"]
     )
@@ -834,6 +907,8 @@ async def get_users(current_user: dict = Depends(require_role([UserRole.ADMIN, U
             id=str(user_doc["_id"]),
             username=user_doc["username"],
             email=user_doc["email"],
+            first_name=user_doc.get("first_name"),
+            last_name=user_doc.get("last_name"),
             role=UserRole(user_doc["role"]),
             created_at=user_doc["created_at"]
         ))
@@ -860,6 +935,7 @@ async def update_user(
 
     update_doc = {"updated_at": datetime.now()}
 
+    # Update email if provided
     if user_update.email is not None:
         if not validate_email(user_update.email):
             raise HTTPException(status_code=400, detail="Invalid email format")
@@ -869,16 +945,64 @@ async def update_user(
             raise HTTPException(status_code=400, detail="Email already registered")
         update_doc["email"] = user_update.email
 
+    # Update username if provided
+    if user_update.username is not None:
+        # Skip update if username is the same
+        if user_update.username != user_doc.get("username"):
+            # Check if username is already taken
+            existing_user = db.users.find_one({"username": user_update.username, "_id": {"$ne": ObjectId(user_id)}})
+            if existing_user:
+                raise HTTPException(status_code=400, detail="Username already registered")
+            update_doc["username"] = user_update.username
+
+    # Check and update password if provided
     if user_update.password is not None:
         update_doc["password"] = hash_password(user_update.password)
 
-    db.users.update_one({"_id": ObjectId(user_id)}, {"$set": update_doc})
+    # Only perform update if there are changes
+    if update_doc.keys() != ["updated_at"]:
+        # Debug logging
+        print(f"Updating user {user_id} with: {update_doc}")
+        result = db.users.update_one({"_id": ObjectId(user_id)}, {"$set": update_doc})
+        print(f"Update result: {result.modified_count} documents modified")
 
+    # Update first_name if provided
+    if user_update.first_name is not None:
+        update_doc["first_name"] = user_update.first_name
+
+    # Update last_name if provided
+    if user_update.last_name is not None:
+        update_doc["last_name"] = user_update.last_name
+
+
+    # Update first_name if provided
+    if user_update.first_name is not None:
+        update_doc["first_name"] = user_update.first_name
+
+    # Update last_name if provided
+    if user_update.last_name is not None:
+        update_doc["last_name"] = user_update.last_name
+
+    # Update password if provided
+    if user_update.password is not None:
+        update_doc["password"] = hash_password(user_update.password)
+
+    # Only perform update if there are changes
+    if len(update_doc) > 1:  # More than just "updated_at"
+        print(f"Updating user {user_id} with: {update_doc}")
+        result = db.users.update_one({"_id": ObjectId(user_id)}, {"$set": update_doc})
+        print(f"Update result: {result.modified_count} documents modified")
+
+    # Get the updated user document
     updated_user = db.users.find_one({"_id": ObjectId(user_id)})
+
+    # Return updated user information
     return UserResponse(
         id=str(updated_user["_id"]),
         username=updated_user["username"],
         email=updated_user["email"],
+        first_name=updated_user.get("first_name"),
+        last_name=updated_user.get("last_name"),
         role=UserRole(updated_user["role"]),
         created_at=updated_user["created_at"]
     )
@@ -925,6 +1049,35 @@ async def get_genres():
     return {"genres": [genre.value for genre in Genre]}
 
 
+# Route to reset owner password
+@app.get("/admin/reset-owner-password", include_in_schema=False)
+async def reset_owner_password():
+    owner = db.users.find_one({"username": "owner"})
+
+    if not owner:
+        # Create owner user
+        hashed_password = hash_password("admin123")
+        owner_user = {
+            "username": "ebooth",
+            "email": "ethan.booth1202@gmail.com",
+            "password": hashed_password,
+            "role": "owner",
+            "created_at": datetime.now(),
+            "updated_at": datetime.now()
+        }
+        db.users.insert_one(owner_user)
+        return {"message": "Owner user created successfully"}
+    else:
+        # Update owner password
+        hashed_password = hash_password("admin123")
+        db.users.update_one(
+            {"username": "owner"},
+            {"$set": {"password": hashed_password, "updated_at": datetime.now()}}
+        )
+        return {"message": "Owner password reset successfully"}
+
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
