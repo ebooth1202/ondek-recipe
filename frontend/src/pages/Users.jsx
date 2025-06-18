@@ -5,7 +5,7 @@ import axios from 'axios';
 
 const Users = () => {
   const navigate = useNavigate();
-  const { user, hasRole, isAuthenticated, setUser } = useAuth();
+  const { user, setUser, hasRole, isAuthenticated, apiBaseUrl } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -50,7 +50,7 @@ const Users = () => {
   const fetchUsers = async () => {
     try {
       setLoading(true);
-      const response = await axios.get('http://127.0.0.1:8000/users');
+      const response = await axios.get(`${apiBaseUrl}/users`);
       setUsers(response.data);
       setLoading(false);
     } catch (error) {
@@ -129,7 +129,7 @@ const Users = () => {
 
       console.log('Updating user with data:', updateData);
 
-      const response = await axios.put(`http://127.0.0.1:8000/users/${editingUser.id}`, updateData);
+      const response = await axios.put(`${apiBaseUrl}/users/${editingUser.id}`, updateData);
 
       // Update users list
       setUsers(users.map(u =>
@@ -157,7 +157,7 @@ const Users = () => {
   const handleAddUser = async (e) => {
     e.preventDefault();
     try {
-      await axios.post('http://127.0.0.1:8000/auth/register', {
+      await axios.post(`${apiBaseUrl}/auth/register`, {
         username: formData.username,
         email: formData.email,
         first_name: formData.first_name,
@@ -181,7 +181,7 @@ const Users = () => {
     if (!actionUser) return;
 
     try {
-      await axios.delete(`http://127.0.0.1:8000/users/${actionUser.id}`);
+      await axios.delete(`${apiBaseUrl}/users/${actionUser.id}`);
       setShowConfirmDeleteModal(false);
       setActionUser(null);
       setSuccessMessage('User deleted successfully!');
@@ -198,7 +198,7 @@ const Users = () => {
     if (!actionUser) return;
 
     try {
-      await axios.put(`http://127.0.0.1:8000/users/${actionUser.id}/role`, {
+      await axios.put(`${apiBaseUrl}/users/${actionUser.id}/role`, {
         role: newRole
       });
       setShowChangeRoleModal(false);

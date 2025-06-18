@@ -1,3 +1,4 @@
+// Recipes.jsx - Updated with API base URL
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -5,7 +6,7 @@ import RecipeCard from '../components/recipe/RecipeCard';
 import axios from 'axios';
 
 const Recipes = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, apiBaseUrl } = useAuth();
   const navigate = useNavigate();
 
   // State management
@@ -32,8 +33,8 @@ const Recipes = () => {
         console.log('Fetching recipes from API...');
 
         const [recipesRes, genresRes] = await Promise.all([
-          axios.get('http://127.0.0.1:8000/recipes'),
-          axios.get('http://127.0.0.1:8000/genres')
+          axios.get(`${apiBaseUrl}/recipes`),
+          axios.get(`${apiBaseUrl}/genres`)
         ]);
 
         console.log('Recipes received:', recipesRes.data);
@@ -53,7 +54,7 @@ const Recipes = () => {
     if (isAuthenticated()) {
       fetchData();
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, apiBaseUrl]);
 
   // Filter recipes based on search and genre
   useEffect(() => {
@@ -92,7 +93,7 @@ const Recipes = () => {
   // Handle recipe refresh (when coming back from add recipe)
   const refreshRecipes = async () => {
     try {
-      const response = await axios.get('http://127.0.0.1:8000/recipes');
+      const response = await axios.get(`${apiBaseUrl}/recipes`);
       setRecipes(response.data);
       setFilteredRecipes(response.data);
     } catch (error) {

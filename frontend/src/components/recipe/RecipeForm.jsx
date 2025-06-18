@@ -1,3 +1,4 @@
+// RecipeForm.jsx - Updated with API base URL
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -26,7 +27,7 @@ const formatDietaryRestrictionName = (restriction) => {
 };
 
 const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }) => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, apiBaseUrl } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -155,8 +156,8 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
     const fetchOptions = async () => {
       try {
         const [unitsRes, genresRes] = await Promise.all([
-          axios.get('http://127.0.0.1:8000/measuring-units'),
-          axios.get('http://127.0.0.1:8000/genres')
+          axios.get(`${apiBaseUrl}/measuring-units`),
+          axios.get(`${apiBaseUrl}/genres`)
         ]);
         setAvailableUnits(unitsRes.data.units);
 
@@ -176,7 +177,7 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
     if (isAuthenticated()) {
       fetchOptions();
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, apiBaseUrl]);
 
   // Fraction utilities
   const formatQuantity = (value) => {
@@ -688,12 +689,12 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
       if (editMode && existingRecipe) {
         // Update existing recipe
         console.log('Updating recipe:', recipeData);
-        response = await axios.put(`http://127.0.0.1:8000/recipes/${existingRecipe.id}`, recipeData);
+        response = await axios.put(`${apiBaseUrl}/recipes/${existingRecipe.id}`, recipeData);
         setSuccess('Recipe updated successfully! 🎉');
       } else {
         // Create new recipe
         console.log('Creating recipe:', recipeData);
-        response = await axios.post('http://127.0.0.1:8000/recipes', recipeData);
+        response = await axios.post(`${apiBaseUrl}/recipes`, recipeData);
         setSuccess('Recipe created successfully! 🎉');
 
         // Reset form for new recipe

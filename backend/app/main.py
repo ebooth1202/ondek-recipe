@@ -29,7 +29,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:8000", "http://127.0.0.1:8000"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
@@ -608,21 +608,27 @@ async def update_recipe(
     if recipe_update.serving_size is not None:
         update_doc["serving_size"] = recipe_update.serving_size
     if recipe_update.genre is not None:
-        update_doc["genre"] = recipe_update.genre
+        update_doc["genre"] = recipe_update.genre.value if hasattr(recipe_update.genre,'value') else recipe_update.genre
     if recipe_update.prep_time is not None:
         update_doc["prep_time"] = recipe_update.prep_time
     if recipe_update.cook_time is not None:
         update_doc["cook_time"] = recipe_update.cook_time
     if recipe_update.notes is not None:
         update_doc["notes"] = recipe_update.notes
-    # Add this condition for dietary restrictions
     if recipe_update.dietary_restrictions is not None:
         update_doc["dietary_restrictions"] = recipe_update.dietary_restrictions
 
-    db.recipes.update_one({"_id": ObjectId(recipe_id)}, {"$set": update_doc})
+    result = db.recipes.update_one({"_id": ObjectId(recipe_id)}, {"$set": update_doc})
 
-    # After update, fetch the recipe with all its data (ratings, favorites, etc.)
-    return get_recipe(recipe_id, current_user)
+    if result.modified_count == 0 and result.matched_count > 0:
+        print("No changes made to the recipe")
+    elif result.modified_count > 0:
+        print(f"Successfully updated recipe {recipe_id}")
+    else:
+        print(f"Failed to update recipe {recipe_id}")
+
+    # Return the updated recipe with all its data (ratings, favorites, etc.)
+    return await get_recipe(recipe_id, current_user)
 
     updated_recipe = db.recipes.find_one({"_id": ObjectId(recipe_id)})
     ingredients = [Ingredient(**ing) for ing in updated_recipe["ingredients"]]
@@ -939,55 +945,6 @@ async def update_recipe_times():
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
-
-
-@app.get("/recipes/{recipe_id}", response_model=RecipeResponse)
-async def get_recipe(recipe_id: str):
-    try:
-        recipe_doc = db.recipes.find_one({"_id": ObjectId(recipe_id)})
-        if recipe_doc:
-            print("Recipe document from DB:", recipe_doc)  # Debug log
-    except InvalidId:
-        raise HTTPException(status_code=400, detail="Invalid recipe ID")
-
-    if not recipe_doc:
-        raise HTTPException(status_code=404, detail="Recipe not found")
-
-    ratings = list(db.ratings.find({"recipe_id": recipe_id}))
-    average_rating = None
-    total_ratings = len(ratings)
-    user_rating = None
-
-    if ratings:
-        rating_values = [r["rating"] for r in ratings]
-        average_rating = round(mean(rating_values), 1)
-
-        user_rating_doc = next((r for r in ratings if r["user_id"] == str(current_user["_id"])), None)
-        if user_rating_doc:
-            user_rating = user_rating_doc["rating"]
-
-    favorite = db.favorites.find_one({
-        "recipe_id": recipe_id,
-        "user_id": str(current_user["_id"])
-    })
-    user_has_favorited = favorite is not None
-
-    ingredients = [Ingredient(**ing) for ing in recipe_doc["ingredients"]]
-
-    return EnhancedRecipeResponse(
-        id=str(recipe_doc["_id"]),
-        recipe_name=recipe_doc["recipe_name"],
-        ingredients=ingredients,
-        instructions=recipe_doc["instructions"],
-        serving_size=recipe_doc["serving_size"],
-        genre=Genre(recipe_doc["genre"]),
-        created_by=recipe_doc["created_by"],
-        created_at=recipe_doc["created_at"],
-        average_rating=average_rating,
-        total_ratings=total_ratings,
-        user_has_favorited=user_has_favorited,
-        user_rating=user_rating
-    )
 
 
 # USER MANAGEMENT ROUTES

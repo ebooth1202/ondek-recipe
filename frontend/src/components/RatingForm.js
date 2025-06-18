@@ -1,11 +1,13 @@
-// File: frontend/src/components/RatingForm.js
+// RatingForm.js - Updated with API base URL
 import React, { useState } from 'react';
 import StarRating from './StarRating';
+import { useAuth } from '../context/AuthContext';
 
 const RatingForm = ({ recipeId, existingRating = null, onSubmit, onCancel }) => {
   const [rating, setRating] = useState(existingRating?.rating || 0);
   const [review, setReview] = useState(existingRating?.review || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { apiBaseUrl } = useAuth();
 
   const handleSubmit = async () => {
     if (rating === 0) {
@@ -18,8 +20,8 @@ const RatingForm = ({ recipeId, existingRating = null, onSubmit, onCancel }) => 
       const token = localStorage.getItem('token');
       const method = existingRating ? 'PUT' : 'POST';
       const url = existingRating
-        ? `http://localhost:8000/recipes/${recipeId}/ratings/${existingRating.id}`
-        : `http://localhost:8000/recipes/${recipeId}/ratings`;
+        ? `${apiBaseUrl}/recipes/${recipeId}/ratings/${existingRating.id}`
+        : `${apiBaseUrl}/recipes/${recipeId}/ratings`;
 
       const response = await fetch(url, {
         method,

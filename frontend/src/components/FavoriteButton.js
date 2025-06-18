@@ -1,10 +1,12 @@
-// File: frontend/src/components/FavoriteButton.js
+// FavoriteButton.js - Updated with API base URL
 import React, { useState } from 'react';
 import { Heart } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 const FavoriteButton = ({ recipeId, isFavorited: initialFavorited = false, onToggle }) => {
   const [isFavorited, setIsFavorited] = useState(initialFavorited);
   const [isLoading, setIsLoading] = useState(false);
+  const { apiBaseUrl } = useAuth();
 
   const handleToggle = async () => {
     setIsLoading(true);
@@ -12,7 +14,7 @@ const FavoriteButton = ({ recipeId, isFavorited: initialFavorited = false, onTog
       const method = isFavorited ? 'DELETE' : 'POST';
       const token = localStorage.getItem('token');
 
-      const response = await fetch(`http://localhost:8000/recipes/${recipeId}/favorite`, {
+      const response = await fetch(`${apiBaseUrl}/recipes/${recipeId}/favorite`, {
         method,
         headers: {
           'Authorization': `Bearer ${token}`,

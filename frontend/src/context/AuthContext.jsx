@@ -1,6 +1,9 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import axios from 'axios';
 
+// Set a consistent base URL for all API calls
+const API_BASE_URL = 'http://localhost:8000';
+
 const AuthContext = createContext();
 
 export const useAuth = () => {
@@ -30,7 +33,7 @@ export const AuthProvider = ({ children }) => {
     const checkAuth = async () => {
       if (token) {
         try {
-          const response = await axios.get('http://127.0.0.1:8000/auth/me');
+          const response = await axios.get(`${API_BASE_URL}/auth/me`);
           setUser(response.data);
         } catch (error) {
           console.error('Auth check failed:', error);
@@ -46,7 +49,7 @@ export const AuthProvider = ({ children }) => {
   const login = async (username, password) => {
     try {
       console.log('Attempting login for:', username);
-      const response = await axios.post('http://127.0.0.1:8000/auth/login', {
+      const response = await axios.post(`${API_BASE_URL}/auth/login`, {
         username,
         password,
       });
@@ -70,7 +73,7 @@ export const AuthProvider = ({ children }) => {
   const register = async (username, email, password) => {
     try {
       console.log('Attempting registration for:', username);
-      const response = await axios.post('http://127.0.0.1:8000/auth/register', {
+      const response = await axios.post(`${API_BASE_URL}/auth/register`, {
         username,
         email,
         password,
@@ -125,6 +128,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     isAuthenticated,
     hasRole,
+    apiBaseUrl: API_BASE_URL, // Expose the base URL for other components to use
   };
 
   if (loading) {

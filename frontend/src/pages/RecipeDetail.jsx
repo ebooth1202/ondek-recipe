@@ -1,4 +1,4 @@
-// Updated RecipeDetail.jsx file with dietary restrictions display
+// RecipeDetail.jsx - Updated with API base URL
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -30,7 +30,7 @@ const formatDietaryRestrictionName = (restriction) => {
 const RecipeDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { isAuthenticated, user, hasRole } = useAuth();
+  const { isAuthenticated, user, hasRole, apiBaseUrl } = useAuth();
 
   // State management
   const [recipe, setRecipe] = useState(null);
@@ -70,8 +70,8 @@ const RecipeDetail = () => {
 
         // Fetch recipe and favorite status in parallel
         const [recipeResponse, favoriteResponse] = await Promise.all([
-          axios.get(`http://127.0.0.1:8000/recipes/${id}`),
-          axios.get(`http://127.0.0.1:8000/recipes/${id}/favorite-status`)
+          axios.get(`${apiBaseUrl}/recipes/${id}`),
+          axios.get(`${apiBaseUrl}/recipes/${id}/favorite-status`)
         ]);
 
         console.log('Recipe received:', recipeResponse.data);
@@ -88,7 +88,7 @@ const RecipeDetail = () => {
     };
 
     fetchRecipeData();
-  }, [id, isAuthenticated, navigate]);
+  }, [id, isAuthenticated, navigate, apiBaseUrl]);
 
   // Fraction utilities
   const formatQuantity = (value) => {
@@ -160,7 +160,7 @@ const RecipeDetail = () => {
 
     try {
       setDeleting(true);
-      await axios.delete(`http://127.0.0.1:8000/recipes/${id}`);
+      await axios.delete(`${apiBaseUrl}/recipes/${id}`);
       navigate('/recipes');
     } catch (error) {
       console.error('Error deleting recipe:', error);
@@ -427,7 +427,7 @@ const RecipeDetail = () => {
   };
 
   const dietaryBadgeStyle = {
-    backgroundColor: '#28a745', // Green for dietary restrictions
+    backgroundColor: '#28a745', // Green color for dietary restrictions
     color: 'white',
     padding: '6px 12px',
     borderRadius: '15px',
@@ -724,6 +724,7 @@ const RecipeDetail = () => {
                       justifyContent: 'space-between',
                       alignItems: 'center',
                       cursor: 'pointer',
+                      // Continuing RecipeDetail.jsx
                       backgroundColor: checkedIngredients.has(index) ? '#f0f8ff' : 'transparent',
                       borderRadius: '6px',
                       margin: '2px 0',
