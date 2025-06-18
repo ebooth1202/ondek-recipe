@@ -1,11 +1,31 @@
+// Updated RecipeDetail.jsx file with dietary restrictions display
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import RatingsAndReviews from '../components/RatingsAndReviews';
 import FavoriteButton from '../components/FavoriteButton';
-import RecipeForm from '../components/recipe/RecipeForm'; // Import the RecipeForm component
+import RecipeForm from '../components/recipe/RecipeForm';
 import axios from 'axios';
 import { Fraction } from 'fraction.js';
+
+// Format genre display name
+const formatGenreName = (genre) => {
+  if (!genre) return '';
+  return genre.charAt(0).toUpperCase() + genre.slice(1);
+};
+
+// Format dietary restriction display name
+const formatDietaryRestrictionName = (restriction) => {
+  if (!restriction) return '';
+
+  switch(restriction) {
+    case 'gluten_free': return 'Gluten Free';
+    case 'dairy_free': return 'Dairy Free';
+    case 'egg_free': return 'Egg Free';
+    default:
+      return restriction.charAt(0).toUpperCase() + restriction.slice(1);
+  }
+};
 
 const RecipeDetail = () => {
   const { id } = useParams();
@@ -19,13 +39,11 @@ const RecipeDetail = () => {
   const [deleting, setDeleting] = useState(false);
   const [showIngredients, setShowIngredients] = useState(true);
   const [showInstructions, setShowInstructions] = useState(true);
-  const [showNotes, setShowNotes] = useState(true);
   const [servingMultiplier, setServingMultiplier] = useState(1);
   const [checkedIngredients, setCheckedIngredients] = useState(new Set());
   const [completedSteps, setCompletedSteps] = useState(new Set());
   const [favoriteStatus, setFavoriteStatus] = useState(false);
   const [editMode, setEditMode] = useState(false);
-
 
   useEffect(() => {
     if (recipe) {
@@ -33,17 +51,17 @@ const RecipeDetail = () => {
       console.log('Recipe Name:', recipe.recipe_name);
       console.log('Prep Time:', recipe.prep_time);
       console.log('Cook Time:', recipe.cook_time);
+      console.log('Dietary Restrictions:', recipe.dietary_restrictions);
       console.log('Full Recipe Object:', JSON.stringify(recipe, null, 2));
     }
   }, [recipe]);
+
   // Fetch recipe and favorite status on component mount
   useEffect(() => {
     if (!isAuthenticated()) {
       navigate('/login');
       return;
     }
-
-
 
     const fetchRecipeData = async () => {
       try {
@@ -71,7 +89,6 @@ const RecipeDetail = () => {
 
     fetchRecipeData();
   }, [id, isAuthenticated, navigate]);
-
 
   // Fraction utilities
   const formatQuantity = (value) => {
@@ -114,10 +131,7 @@ const RecipeDetail = () => {
       dinner: '🍽️',
       snack: '🍿',
       dessert: '🍰',
-      appetizer: '🥗',
-      gluten_free: '🌾',  // Wheat with cross through it
-      dairy_free: '🥛',   // Milk with cross through it
-      egg_free: '🥚'      // Egg with cross through it
+      appetizer: '🥗'
     };
     return emojis[genre] || '🍳';
   };
@@ -129,26 +143,9 @@ const RecipeDetail = () => {
       dinner: '#dc3545',
       snack: '#17a2b8',
       dessert: '#e83e8c',
-      appetizer: '#6f42c1',
-      gluten_free: '#9c27b0',  // Purple
-      dairy_free: '#00bcd4',   // Cyan
-      egg_free: '#ff9800'      // Orange
+      appetizer: '#6f42c1'
     };
     return colors[genre] || '#003366';
-  };
-
-  const formatGenreName = (genre) => {
-    if (!genre) return '';
-
-    // Special case for the new dietary restriction genres
-    switch(genre) {
-      case 'gluten_free': return 'Gluten Free';
-      case 'dairy_free': return 'Dairy Free';
-      case 'egg_free': return 'Egg Free';
-      default:
-        // Standard capitalization for other genres
-        return genre.charAt(0).toUpperCase() + genre.slice(1);
-    }
   };
 
   const canEditOrDelete = () => {
@@ -414,9 +411,9 @@ const RecipeDetail = () => {
 
   const badgeContainerStyle = {
     display: 'flex',
-    justifyContent: 'center',
+    flexDirection: 'column',
+    alignItems: 'center',
     gap: '1rem',
-    flexWrap: 'wrap',
     marginBottom: '1.5rem'
   };
 
@@ -427,6 +424,16 @@ const RecipeDetail = () => {
     borderRadius: '20px',
     fontSize: '1rem',
     fontWeight: '500'
+  };
+
+  const dietaryBadgeStyle = {
+    backgroundColor: '#28a745', // Green for dietary restrictions
+    color: 'white',
+    padding: '6px 12px',
+    borderRadius: '15px',
+    fontSize: '0.9rem',
+    fontWeight: '500',
+    margin: '0 4px'
   };
 
   const servingBadgeStyle = {
@@ -524,6 +531,18 @@ const RecipeDetail = () => {
             <div style={genreBadgeStyle}>
               {getGenreEmoji(recipe.genre)} {formatGenreName(recipe.genre)}
             </div>
+
+            {/* Dietary Restrictions Badges */}
+            {recipe.dietary_restrictions && recipe.dietary_restrictions.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '8px' }}>
+                {recipe.dietary_restrictions.map(restriction => (
+                  <div key={restriction} style={dietaryBadgeStyle}>
+                    {formatDietaryRestrictionName(restriction)}
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div style={servingBadgeStyle}>
               👥 Serves {Math.round(recipe.serving_size * servingMultiplier)}
             </div>
@@ -844,82 +863,43 @@ const RecipeDetail = () => {
           </div>
         </div>
 
-        {/* Notes Section */}
-        <div style={{
-          background: 'white',
-          border: '2px solid #6c757d', // Different border color to distinguish from instructions
-          borderRadius: '15px',
-          padding: '2rem',
-          marginTop: '2rem',
-          boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)'
-        }}>
+        {/* Notes Section - Display if notes exist */}
+        {recipe.notes && recipe.notes.length > 0 && recipe.notes[0] && (
           <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '1.5rem',
-            paddingBottom: '0.5rem',
-            borderBottom: '2px solid #f0f8ff'
+            background: 'white',
+            border: '2px solid #6c757d',
+            borderRadius: '15px',
+            padding: '2rem',
+            marginBottom: '2rem',
+            boxShadow: '0 4px 12px rgba(108, 117, 125, 0.1)'
           }}>
             <h2 style={{
-              color: '#6c757d', // Different color
+              color: '#6c757d',
               fontSize: '1.5rem',
-              margin: 0
+              marginBottom: '1.5rem',
+              borderBottom: '2px solid #f0f8ff',
+              paddingBottom: '0.5rem'
             }}>
-              📝 Notes {recipe.notes && recipe.notes.length > 0 ? `(${recipe.notes.length})` : ''}
+              📋 Recipe Notes
             </h2>
-            <button
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#6c757d',
-                cursor: 'pointer',
-                fontSize: '1.2rem',
-                padding: '4px'
-              }}
-              onClick={() => setShowNotes(!showNotes)}
-            >
-              {showNotes ? '▼' : '▶'}
-            </button>
-          </div>
 
-          {showNotes && (
-            <div>
-              {recipe.notes && recipe.notes.length > 0 ? (
-                recipe.notes.map((note, index) => (
-                  <div
-                    key={index}
-                    style={{
-                      marginBottom: '1rem',
-                      padding: '1rem',
-                      background: '#f8f9fa', // Lighter background
-                      borderRadius: '10px',
-                      borderLeft: '4px solid #6c757d' // Different color
-                    }}
-                  >
-                    <p style={{
-                      margin: 0,
-                      lineHeight: '1.5',
-                      color: '#333'
-                    }}>
-                      {note}
-                    </p>
-                  </div>
-                ))
-              ) : (
-                <div style={{
-                  padding: '1rem',
-                  background: '#f8f9fa',
-                  borderRadius: '10px',
-                  textAlign: 'center',
-                  color: '#6c757d'
-                }}>
-                  No notes added for this recipe.
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {recipe.notes.map((note, index) => (
+                <div
+                  key={index}
+                  style={{
+                    padding: '1rem',
+                    background: '#f8f9fa',
+                    borderRadius: '10px',
+                    borderLeft: '4px solid #6c757d'
+                  }}
+                >
+                  <p style={{ margin: 0, lineHeight: '1.5' }}>{note}</p>
                 </div>
-              )}
+              ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Ratings and Reviews Section */}
         <RatingsAndReviews
@@ -987,45 +967,6 @@ const RecipeDetail = () => {
               }}
             >
               🖨️ Print Recipe
-            </button>
-
-            <button
-              onClick={() => {
-                // Create a clean version of the recipe for duplication
-                const duplicateRecipe = {
-                  recipe_name: `${recipe.recipe_name} (Copy)`,
-                  ingredients: recipe.ingredients,
-                  instructions: recipe.instructions,
-                  notes: recipe.notes || [],
-                  serving_size: recipe.serving_size,
-                  genre: recipe.genre,
-                  prep_time: recipe.prep_time || 0,
-                  cook_time: recipe.cook_time || 0
-                };
-
-                console.log('Duplicating recipe:', duplicateRecipe);
-
-                // Store in sessionStorage to pass to the form
-                sessionStorage.setItem('duplicateRecipe', JSON.stringify(duplicateRecipe));
-
-                // Also store the original recipe for comparison (to prevent exact duplicates)
-                sessionStorage.setItem('originalRecipe', JSON.stringify(recipe));
-
-                // Navigate with a unique timestamp to force component remount
-                navigate(`/add-recipe?duplicate=true&t=${Date.now()}`);
-              }}
-              style={{
-                padding: '12px 24px',
-                backgroundColor: '#28a745',
-                color: 'white',
-                border: 'none',
-                borderRadius: '10px',
-                cursor: 'pointer',
-                fontWeight: '500',
-                fontSize: '16px'
-              }}
-            >
-              🧬 Duplicate Recipe
             </button>
           </div>
         </div>

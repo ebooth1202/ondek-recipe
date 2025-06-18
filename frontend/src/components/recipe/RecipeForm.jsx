@@ -1,8 +1,29 @@
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import axios from 'axios';
 import { Fraction } from 'fraction.js';
 
+// Format genre display name
+const formatGenreName = (genre) => {
+  if (!genre) return '';
+
+  // Standard capitalization for genres
+  return genre.charAt(0).toUpperCase() + genre.slice(1);
+};
+
+// Format dietary restriction display name
+const formatDietaryRestrictionName = (restriction) => {
+  if (!restriction) return '';
+
+  switch(restriction) {
+    case 'gluten_free': return 'Gluten Free';
+    case 'dairy_free': return 'Dairy Free';
+    case 'egg_free': return 'Egg Free';
+    default:
+      return restriction.charAt(0).toUpperCase() + restriction.slice(1);
+  }
+};
 
 const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }) => {
   const { isAuthenticated } = useAuth();
@@ -15,7 +36,8 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
     serving_size: 1,
     genre: 'dinner',
     prep_time: 0,
-    cook_time: 0
+    cook_time: 0,
+    dietary_restrictions: [] // Add dietary restrictions array
   });
 
   const [ingredients, setIngredients] = useState([
@@ -39,6 +61,11 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
     'breakfast', 'lunch', 'dinner', 'snack', 'dessert', 'appetizer'
   ]);
 
+  // Available dietary restrictions
+  const availableDietaryRestrictions = [
+    'gluten_free', 'dairy_free', 'egg_free'
+  ];
+
   // UI state
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -60,7 +87,8 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
           serving_size: duplicateRecipe.serving_size,
           genre: duplicateRecipe.genre,
           prep_time: duplicateRecipe.prep_time || 0,
-          cook_time: duplicateRecipe.cook_time || 0
+          cook_time: duplicateRecipe.cook_time || 0,
+          dietary_restrictions: duplicateRecipe.dietary_restrictions || [] // Load dietary restrictions
         });
 
         setIngredients(duplicateRecipe.ingredients.map(ing => ({
@@ -94,7 +122,8 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
         serving_size: existingRecipe.serving_size,
         genre: existingRecipe.genre,
         prep_time: existingRecipe.prep_time || 0,
-        cook_time: existingRecipe.cook_time || 0
+        cook_time: existingRecipe.cook_time || 0,
+        dietary_restrictions: existingRecipe.dietary_restrictions || [] // Load dietary restrictions
       });
 
       setIngredients(existingRecipe.ingredients.map(ing => ({
@@ -130,7 +159,14 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
           axios.get('http://127.0.0.1:8000/genres')
         ]);
         setAvailableUnits(unitsRes.data.units);
-        setAvailableGenres(genresRes.data.genres);
+
+        // Filter out dietary restrictions from genres
+        if (genresRes.data.genres) {
+          const filteredGenres = genresRes.data.genres.filter(genre =>
+            !['gluten_free', 'dairy_free', 'egg_free'].includes(genre)
+          );
+          setAvailableGenres(filteredGenres);
+        }
       } catch (error) {
         console.error('Error fetching options:', error);
         // Keep default values if API fails
@@ -273,6 +309,25 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
       ...formData,
       [e.target.name]: e.target.value
     });
+  };
+
+  // Toggle dietary restriction
+  const handleDietaryRestrictionChange = (restriction) => {
+    const currentRestrictions = [...formData.dietary_restrictions];
+
+    if (currentRestrictions.includes(restriction)) {
+      // Remove if already included
+      setFormData({
+        ...formData,
+        dietary_restrictions: currentRestrictions.filter(r => r !== restriction)
+      });
+    } else {
+      // Add if not included
+      setFormData({
+        ...formData,
+        dietary_restrictions: [...currentRestrictions, restriction]
+      });
+    }
   };
 
   // Ingredient handlers
@@ -581,7 +636,8 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
         cook_time: parseInt(formData.cook_time || 0),
         ingredients: processedIngredients,
         instructions: validInstructions.map(inst => inst.trim()),
-        notes: validNotes.map(note => note.trim()) // Add notes field
+        notes: validNotes.map(note => note.trim()),
+        dietary_restrictions: formData.dietary_restrictions // Include dietary restrictions
       };
 
       // Check if this is a duplication attempt by checking URL parameters
@@ -641,7 +697,14 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
         setSuccess('Recipe created successfully! 🎉');
 
         // Reset form for new recipe
-        setFormData({ recipe_name: '', serving_size: 1, genre: 'dinner', prep_time: 0, cook_time: 0 });
+        setFormData({
+          recipe_name: '',
+          serving_size: 1,
+          genre: 'dinner',
+          prep_time: 0,
+          cook_time: 0,
+          dietary_restrictions: []
+        });
         setIngredients([{ name: '', quantity: '', unit: 'cup' }]);
         setInstructions(['']);
         setNotes(['']);
@@ -759,20 +822,18 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
     transition: 'all 0.3s ease'
   };
 
-  const stepNumberStyle = {
-    backgroundColor: '#003366',
-    color: 'white',
-    borderRadius: '50%',
-    width: '24px',
-    height: '24px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '12px',
-    fontWeight: 'bold',
-    marginTop: '8px',
-    flexShrink: 0
-  };
+  const dietaryBadgeStyle = (selected) => ({
+    display: 'inline-block',
+    padding: '8px 12px',
+    margin: '0 8px 8px 0',
+    borderRadius: '20px',
+    fontSize: '0.9rem',
+    cursor: 'pointer',
+    backgroundColor: selected ? '#28a745' : '#f0f8ff',
+    color: selected ? 'white' : '#666',
+    border: `2px solid ${selected ? '#28a745' : '#ccc'}`,
+    transition: 'all 0.2s ease'
+  });
 
   // Render guard
   if (!isAuthenticated()) {
@@ -1171,6 +1232,23 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
             </button>
           </div>
 
+          {/* Dietary Restrictions Section */}
+          <div style={{ marginBottom: '2rem' }}>
+            <label style={labelStyle}>Dietary Restrictions (Optional)</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+              {availableDietaryRestrictions.map(restriction => (
+                <button
+                  key={restriction}
+                  type="button"
+                  onClick={() => handleDietaryRestrictionChange(restriction)}
+                  style={dietaryBadgeStyle(formData.dietary_restrictions.includes(restriction))}
+                >
+                  {formatDietaryRestrictionName(restriction)}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Serving Size, Genre, and Time Inputs */}
           <div style={{
             display: 'grid',
@@ -1196,7 +1274,7 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
               <label style={{ ...labelStyle, fontSize: '1rem' }}>
                 Category
               </label>
-                              <select
+              <select
                 name="genre"
                 value={formData.genre}
                 onChange={handleInputChange}

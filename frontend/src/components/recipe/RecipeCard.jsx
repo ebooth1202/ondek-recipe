@@ -2,6 +2,26 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
+// Format genre display name
+const formatGenreName = (genre) => {
+  if (!genre) return '';
+
+  return genre.charAt(0).toUpperCase() + genre.slice(1);
+};
+
+// Format dietary restriction display name
+const formatDietaryRestrictionName = (restriction) => {
+  if (!restriction) return '';
+
+  switch(restriction) {
+    case 'gluten_free': return 'Gluten Free';
+    case 'dairy_free': return 'Dairy Free';
+    case 'egg_free': return 'Egg Free';
+    default:
+      return restriction.charAt(0).toUpperCase() + restriction.slice(1);
+  }
+};
+
 const RecipeCard = ({ recipe, onFavoriteToggle }) => {
   const navigate = useNavigate();
   const [isFavorited, setIsFavorited] = useState(recipe.is_favorited || false);
@@ -61,42 +81,22 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
       dinner: '🍽️',
       snack: '🍿',
       dessert: '🍰',
-      appetizer: '🥗',
-      gluten_free: '🌾',
-      dairy_free: '🥛',
-      egg_free: '🥚'
+      appetizer: '🥗'
     };
     return emojis[genre] || '🍳';
   };
 
-const getGenreColor = (genre) => {
-  const colors = {
-    breakfast: '#ffc107',
-    lunch: '#28a745',
-    dinner: '#dc3545',
-    snack: '#17a2b8',
-    dessert: '#e83e8c',
-    appetizer: '#6f42c1',
-    gluten_free: '#9c27b0',
-    dairy_free: '#00bcd4',
-    egg_free: '#ff9800'
+  const getGenreColor = (genre) => {
+    const colors = {
+      breakfast: '#ffc107',
+      lunch: '#28a745',
+      dinner: '#dc3545',
+      snack: '#17a2b8',
+      dessert: '#e83e8c',
+      appetizer: '#6f42c1'
+    };
+    return colors[genre] || '#003366';
   };
-  return colors[genre] || '#003366';
-};
-
-const formatGenreName = (genre) => {
-  if (!genre) return '';
-
-  // Special case for the new dietary restriction genres
-  switch(genre) {
-    case 'gluten_free': return 'Gluten Free';
-    case 'dairy_free': return 'Dairy Free';
-    case 'egg_free': return 'Egg Free';
-    default:
-      // Standard capitalization for other genres
-      return genre.charAt(0).toUpperCase() + genre.slice(1);
-  }
-};
 
   // Styles
   const cardStyle = {
@@ -129,97 +129,41 @@ const formatGenreName = (genre) => {
   };
 
   const genreBadgeStyle = {
-    backgroundColor: getGenreColor(recipe.genre),
+    backgroundColor: getGenreColor(recipe?.genre),
     color: 'white',
     padding: '4px 8px',
-    borderRadius: '15px',
-    fontSize: '0.8rem',
-    fontWeight: '500',
-    textTransform: 'uppercase',
-    whiteSpace: 'nowrap',
-    marginLeft: '1rem'
-  };
-
-  const metaStyle = {
-    display: 'flex',
-    justifyContent: 'space-between',
-    marginBottom: '1rem',
-    fontSize: '0.9rem',
-    color: '#666'
-  };
-
-  const sectionStyle = {
-    marginBottom: '1rem',
-    flex: 1
-  };
-
-  const sectionTitleStyle = {
-    color: '#003366',
-    fontSize: '1rem',
-    marginBottom: '0.5rem'
-  };
-
-  const ingredientsListStyle = {
-    maxHeight: '80px',
-    overflowY: 'auto',
-    fontSize: '0.9rem',
-    color: '#666'
-  };
-
-  const ingredientItemStyle = {
-    padding: '2px 0',
-    borderBottom: '1px solid #f0f8ff'
-  };
-
-  const instructionsStyle = {
-    fontSize: '0.9rem',
-    color: '#666',
-    lineHeight: '1.4'
-  };
-
-  const footerStyle = {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: '1rem',
-    borderTop: '1px solid #f0f8ff',
-    marginTop: 'auto'
-  };
-
-  const dateStyle = {
-    fontSize: '0.8rem',
-    color: '#999'
-  };
-
-  const viewButtonStyle = {
-    background: '#f0f8ff',
-    color: '#003366',
-    padding: '4px 8px',
-    borderRadius: '8px',
+    borderRadius: '20px',
     fontSize: '0.8rem',
     fontWeight: '500'
   };
 
-  // Favorite button style - positioned absolutely at the top center
-  const favoriteButtonStyle = {
-    position: 'absolute',
-    top: '-15px',  // Position slightly above the card
-    left: '50%',
-    transform: 'translateX(-50%)', // Center horizontally
-    width: '36px',
-    height: '36px',
-    borderRadius: '50%',
-    backgroundColor: isFavorited ? '#ffc107' : 'white',
-    color: isFavorited ? 'white' : '#666',
-    border: '2px solid ' + (isFavorited ? '#ffc107' : '#e0e0e0'),
+  const dietaryBadgeStyle = {
+    backgroundColor: '#28a745', // Green color for dietary restrictions
+    color: 'white',
+    padding: '3px 6px',
+    borderRadius: '12px',
+    fontSize: '0.7rem',
+    fontWeight: '500',
+    marginTop: '4px',
+    display: 'inline-block',
+    marginRight: '4px'
+  };
+
+  const servingBadgeStyle = {
+    backgroundColor: '#003366',
+    color: 'white',
+    padding: '8px 16px',
+    borderRadius: '20px',
+    fontSize: '1rem'
+  };
+
+  const metaStyle = {
     display: 'flex',
-    alignItems: 'center',
     justifyContent: 'center',
-    cursor: 'pointer',
-    zIndex: 2,
-    boxShadow: '0 2px 5px rgba(0, 0, 0, 0.1)',
-    transition: 'all 0.2s ease',
-    fontSize: '18px'
+    gap: '2rem',
+    fontSize: '0.9rem',
+    color: '#666',
+    marginBottom: '1.5rem'
   };
 
   return (
@@ -238,7 +182,26 @@ const formatGenreName = (genre) => {
       {/* Favorite Button - Absolutely positioned at top center */}
       <button
         onClick={handleFavoriteClick}
-        style={favoriteButtonStyle}
+        style={{
+          position: 'absolute',
+          top: '-15px',  // Position slightly above the card
+          left: '50%',
+          transform: 'translateX(-50%)', // Center horizontally
+          width: '36px',
+          height: '36px',
+          borderRadius: '50%',
+          backgroundColor: isFavorited ? '#ffc107' : 'white',
+          color: isFavorited ? 'white' : '#666',
+          border: '2px solid ' + (isFavorited ? '#ffc107' : '#e0e0e0'),
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          zIndex: 2,
+          boxShadow: '0 2px 5px rgba(0, 0, 0, 0.1)',
+          transition: 'all 0.2s ease',
+          fontSize: '18px'
+        }}
         disabled={isToggling}
       >
         {isToggling ? (
@@ -251,8 +214,25 @@ const formatGenreName = (genre) => {
       {/* Header */}
       <div style={headerStyle}>
         <h3 style={titleStyle}>{recipe.recipe_name}</h3>
-        <div style={genreBadgeStyle}>
-          {getGenreEmoji(recipe.genre)} {recipe.genre}
+        <div>
+          {/* Genre Badge - Always visible */}
+          <div style={genreBadgeStyle}>
+            {getGenreEmoji(recipe.genre)} {formatGenreName(recipe.genre)}
+          </div>
+
+          {/* Dietary Restrictions - Only show if they exist */}
+          {recipe.dietary_restrictions && recipe.dietary_restrictions.length > 0 && (
+            <div style={{ marginTop: '8px', textAlign: 'right' }}>
+              {recipe.dietary_restrictions.map(restriction => (
+                <span
+                  key={restriction}
+                  style={dietaryBadgeStyle}
+                >
+                  {formatDietaryRestrictionName(restriction)}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -263,16 +243,28 @@ const formatGenreName = (genre) => {
       </div>
 
       {/* Ingredients Preview */}
-      <div style={sectionStyle}>
-        <h4 style={sectionTitleStyle}>
+      <div style={{
+        flex: 1,
+        marginBottom: '1rem'
+      }}>
+        <h4 style={{
+          color: '#003366',
+          marginBottom: '0.5rem',
+          fontSize: '1rem'
+        }}>
           🛒 Ingredients ({recipe.ingredients.length})
         </h4>
-        <div style={ingredientsListStyle}>
+        <div style={{
+          maxHeight: '80px',
+          overflowY: 'auto',
+          fontSize: '0.9rem',
+          color: '#666'
+        }}>
           {recipe.ingredients.slice(0, 5).map((ingredient, index) => (
             <div
               key={index}
               style={{
-                ...ingredientItemStyle,
+                padding: '2px 0',
                 borderBottom: index < Math.min(4, recipe.ingredients.length - 1)
                   ? '1px solid #f0f8ff'
                   : 'none'
@@ -294,11 +286,21 @@ const formatGenreName = (genre) => {
       </div>
 
       {/* Instructions Preview */}
-      <div style={sectionStyle}>
-        <h4 style={sectionTitleStyle}>
+      <div style={{
+        marginBottom: '1rem'
+      }}>
+        <h4 style={{
+          color: '#003366',
+          marginBottom: '0.5rem',
+          fontSize: '1rem'
+        }}>
           📝 Instructions ({recipe.instructions.length} steps)
         </h4>
-        <div style={instructionsStyle}>
+        <div style={{
+          fontSize: '0.9rem',
+          color: '#666',
+          lineHeight: '1.4'
+        }}>
           {recipe.instructions[0] && (
             <div>
               <strong>1.</strong> {recipe.instructions[0].length > 80
@@ -320,11 +322,28 @@ const formatGenreName = (genre) => {
       </div>
 
       {/* Footer */}
-      <div style={footerStyle}>
-        <span style={dateStyle}>
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingTop: '1rem',
+        borderTop: '1px solid #f0f8ff',
+        marginTop: 'auto'
+      }}>
+        <span style={{
+          fontSize: '0.8rem',
+          color: '#999'
+        }}>
           Created: {new Date(recipe.created_at).toLocaleDateString()}
         </span>
-        <div style={viewButtonStyle}>
+        <div style={{
+          background: '#f0f8ff',
+          color: '#003366',
+          padding: '4px 8px',
+          borderRadius: '8px',
+          fontSize: '0.8rem',
+          fontWeight: '500'
+        }}>
           Click to view →
         </div>
       </div>
