@@ -528,6 +528,7 @@ async def update_recipe(
         recipe_update: RecipeUpdate,
         current_user: dict = Depends(get_current_user)
 ):
+    print("Received update data:", recipe_update.dict())
     try:
         recipe_doc = db.recipes.find_one({"_id": ObjectId(recipe_id)})
     except InvalidId:
@@ -551,7 +552,11 @@ async def update_recipe(
     if recipe_update.serving_size is not None:
         update_doc["serving_size"] = recipe_update.serving_size
     if recipe_update.genre is not None:
-        update_doc["genre"] = recipe_update.genre.value
+        update_doc["genre"] = recipe_update.genre
+    if recipe_update.prep_time is not None:  # Make sure this is present
+        update_doc["prep_time"] = recipe_update.prep_time
+    if recipe_update.cook_time is not None:  # Make sure this is present
+        update_doc["cook_time"] = recipe_update.cook_time
 
     db.recipes.update_one({"_id": ObjectId(recipe_id)}, {"$set": update_doc})
 
@@ -851,10 +856,31 @@ async def check_favorite_status(recipe_id: str, current_user: dict = Depends(get
     return {"is_favorited": favorite is not None}
 
 
-@app.get("/recipes/{recipe_id}/enhanced", response_model=EnhancedRecipeResponse)
-async def get_enhanced_recipe(recipe_id: str, current_user: dict = Depends(get_current_user)):
+@app.get("/admin/update-recipe-times", include_in_schema=False)
+async def update_recipe_times():
+    """Add prep_time and cook_time fields to all recipes that don't have them"""
+    try:
+        result = db.recipes.update_many(
+            {"prep_time": {"$exists": False}},  # Find recipes without prep_time
+            {"$set": {"prep_time": 0, "cook_time": 0}}  # Set default values
+        )
+
+        return {
+            "success": True,
+            "modified_count": result.modified_count,
+            "matched_count": result.matched_count,
+            "message": f"Updated {result.modified_count} recipes"
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/recipes/{recipe_id}", response_model=RecipeResponse)
+async def get_recipe(recipe_id: str):
     try:
         recipe_doc = db.recipes.find_one({"_id": ObjectId(recipe_id)})
+        if recipe_doc:
+            print("Recipe document from DB:", recipe_doc)  # Debug log
     except InvalidId:
         raise HTTPException(status_code=400, detail="Invalid recipe ID")
 

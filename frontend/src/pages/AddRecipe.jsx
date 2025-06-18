@@ -10,10 +10,12 @@ const AddRecipe = () => {
 
   // Form state
   const [formData, setFormData] = useState({
-    recipe_name: '',
-    serving_size: 1,
-    genre: 'dinner'
-  });
+  recipe_name: '',
+  serving_size: 1,
+  genre: 'dinner',
+  prep_time: 0,  // Add prep time in minutes
+  cook_time: 0,  // Add cook time in minutes
+});
 
   const [ingredients, setIngredients] = useState([
     { name: '', quantity: '', unit: 'cup' }
@@ -67,38 +69,6 @@ const AddRecipe = () => {
   }, [isAuthenticated]);
 
   // Fraction utilities
-  const parseQuantity = (value) => {
-    if (value === undefined || value === null || value === '') return '';
-
-    try {
-      // If it's already a number, return it
-      if (typeof value === 'number') return value;
-
-      // Convert to string to ensure we can use string methods
-      const stringValue = String(value);
-
-      // Handle simple numeric values
-      if (!stringValue.includes('/')) {
-        return parseFloat(stringValue);
-      }
-
-      // Handle mixed numbers (e.g., "1 1/2")
-      if (stringValue.includes(' ')) {
-        const [whole, fractionPart] = stringValue.split(' ');
-        const [numerator, denominator] = fractionPart.split('/');
-
-        return parseFloat(whole) + (parseFloat(numerator) / parseFloat(denominator));
-      }
-
-      // Handle simple fractions (e.g., "1/2")
-      const [numerator, denominator] = stringValue.split('/');
-      return parseFloat(numerator) / parseFloat(denominator);
-    } catch (e) {
-      console.error("Error parsing fraction:", e);
-      return '';
-    }
-  };
-
   const formatQuantity = (value) => {
     if (value === undefined || value === null || value === '') return '';
 
@@ -131,37 +101,97 @@ const AddRecipe = () => {
     }
   };
 
-  const validateQuantity = (value) => {
-    if (value === undefined || value === null || value === '') return true;
-
-    // If value is a number, it's valid
-    if (typeof value === 'number') return true;
-
-    // Convert to string to ensure we can use string methods
-    const stringValue = String(value);
-
-    // Check for valid numeric input
-    if (!stringValue.includes('/')) {
-      return !isNaN(stringValue);
-    }
+  const parseQuantity = (value) => {
+    if (value === undefined || value === null || value === '') return '';
 
     try {
-      // Check for valid mixed number
-      if (stringValue.includes(' ')) {
-        const [whole, fractionPart] = stringValue.split(' ');
-        if (isNaN(whole)) return false;
+      // If it's already a number, return it
+      if (typeof value === 'number') return value;
 
-        const [numerator, denominator] = fractionPart.split('/');
-        return !isNaN(numerator) && !isNaN(denominator) && parseInt(denominator) !== 0;
+      // Convert to string to ensure we can use string methods
+      const stringValue = String(value);
+
+      // Handle simple numeric values
+      if (!stringValue.includes('/')) {
+        return parseFloat(stringValue);
       }
 
-      // Check for valid simple fraction
+      // Handle mixed numbers (e.g., "1 1/2")
+      if (stringValue.includes(' ')) {
+        const [whole, fractionPart] = stringValue.split(' ');
+        const [numerator, denominator] = fractionPart.split('/');
+
+        // Check if we have a valid fraction part
+        if (!denominator || parseInt(denominator) === 0) {
+          return stringValue; // Return as is if not fully formed
+        }
+
+        return parseFloat(whole) + (parseFloat(numerator) / parseFloat(denominator));
+      }
+
+      // Handle simple fractions (e.g., "1/2")
       const [numerator, denominator] = stringValue.split('/');
-      return !isNaN(numerator) && !isNaN(denominator) && parseInt(denominator) !== 0;
+
+      // Check if we have a valid denominator
+      if (!denominator || parseInt(denominator) === 0) {
+        return stringValue; // Return as is if not fully formed
+      }
+
+      return parseFloat(numerator) / parseFloat(denominator);
     } catch (e) {
-      return false;
+      console.error("Error parsing fraction:", e);
+      return value;
     }
   };
+
+  const isValidFractionInput = (input) => {
+  // Handle non-string or undefined inputs
+  if (input === undefined || input === null) return true;
+
+  // Convert to string to ensure we can use string methods
+  const inputStr = String(input);
+
+  // Empty string is valid
+  if (inputStr === '') return true;
+
+  // Check if it's a simple number
+  if (!isNaN(inputStr) && !inputStr.includes('/')) return true;
+
+  // Allow partial fractions (during typing)
+  if (inputStr === '/') return true;
+  if (/^\d+\/$/.test(inputStr)) return true;  // "1/"
+  if (/^\/\d+$/.test(inputStr)) return true;  // "/2"
+
+  // Whole number with partial fraction
+  if (/^\d+ \d+\/$/.test(inputStr)) return true;  // "1 1/"
+  if (/^\d+ \/\d+$/.test(inputStr)) return true;  // "1 /2"
+  if (/^\d+ $/.test(inputStr)) return true;  // "1 " (space after number)
+
+  // Check for valid complete fractions
+  try {
+    if (inputStr.includes('/')) {
+      // Mixed number with fraction
+      if (inputStr.includes(' ')) {
+        const [whole, fraction] = inputStr.split(' ');
+        if (isNaN(whole)) return false;
+
+        if (!fraction.includes('/')) return true; // "1 2" is valid during typing
+
+        const [num, denom] = fraction.split('/');
+        return !isNaN(num) && (!denom || !isNaN(denom));
+      }
+
+      // Simple fraction
+      const [num, denom] = inputStr.split('/');
+      return (!num || !isNaN(num)) && (!denom || !isNaN(denom));
+    }
+
+    // Just a number
+    return !isNaN(inputStr);
+  } catch (e) {
+    return false;
+  }
+};
 
   // Form handlers
   const handleInputChange = (e) => {
@@ -177,22 +207,8 @@ const AddRecipe = () => {
 
     if (field === 'quantity') {
       // For quantity field, validate the input
-      if (validateQuantity(value)) {
-        // Parse the fraction to a float for storage
-        if (value) {
-          try {
-            const parsedValue = parseQuantity(value);
-            newIngredients[index][field] = parsedValue;
-          } catch (e) {
-            console.error("Invalid fraction:", e);
-            // Keep the string value for display but mark as invalid
-            newIngredients[index][field] = value;
-          }
-        } else {
-          newIngredients[index][field] = '';
-        }
-      } else {
-        // For invalid input, keep the string but don't convert
+      if (isValidFractionInput(value)) {
+        // Store the value as-is
         newIngredients[index][field] = value;
       }
     } else {
@@ -215,47 +231,57 @@ const AddRecipe = () => {
   };
 
   const handleIngredientKeyDown = (index, field, e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      // If this is the last ingredient and it has content, add a new one
-      if (index === ingredients.length - 1 && ingredients[index].name.trim()) {
-        addIngredient();
-        // Focus the next ingredient name field after a short delay
-        setTimeout(() => {
-          const nextInput = document.querySelector(`input[data-ingredient-index="${index + 1}"][data-field="name"]`);
-          if (nextInput) nextInput.focus();
-        }, 100);
-      } else if (index < ingredients.length - 1) {
-        // Move to next ingredient
-        const nextInput = document.querySelector(`input[data-ingredient-index="${index + 1}"][data-field="name"]`);
-        if (nextInput) nextInput.focus();
-      }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    // If this is the last ingredient and it has content, add a new one
+    if (index === ingredients.length - 1 && ingredients[index].name.trim()) {
+      addIngredient();
+      // Focus the quantity field of the next row after a short delay
+      setTimeout(() => {
+        const nextQuantityInput = document.querySelector(`input[data-ingredient-index="${index + 1}"][data-field="quantity"]`);
+        if (nextQuantityInput) nextQuantityInput.focus();
+      }, 100);
+    } else if (index < ingredients.length - 1) {
+      // Move to next ingredient's quantity field
+      const nextQuantityInput = document.querySelector(`input[data-ingredient-index="${index + 1}"][data-field="quantity"]`);
+      if (nextQuantityInput) nextQuantityInput.focus();
     }
-  };
+  }
+};
 
   const handleIngredientBlur = (index, field) => {
-    // Format quantities as fractions on blur
-    if (field === 'quantity') {
-      const value = ingredients[index].quantity;
-      if (value && validateQuantity(value)) {
-        const newIngredients = [...ingredients];
-        if (typeof value === 'string' && (value.includes('/') || !isNaN(value))) {
-          newIngredients[index].quantity = parseQuantity(value);
-        } else {
-          // If it's already a number, no need to parse
-          newIngredients[index].quantity = value;
+  // Format quantities as fractions on blur
+  if (field === 'quantity') {
+    const value = ingredients[index].quantity;
+
+    // Skip empty values or already numeric values
+    if (!value || typeof value === 'number') return;
+
+    if (isValidFractionInput(value)) {
+      const newIngredients = [...ingredients];
+      // Only parse complete fractions
+      if (typeof value === 'string' && value.includes('/') &&
+          !(value === '/' || value.endsWith('/') || value.startsWith('/'))) {
+        try {
+          const parsedValue = parseQuantity(value);
+          if (typeof parsedValue === 'number' && !isNaN(parsedValue)) {
+            newIngredients[index].quantity = parsedValue;
+            setIngredients(newIngredients);
+          }
+        } catch (e) {
+          console.error("Error parsing fraction on blur:", e);
         }
-        setIngredients(newIngredients);
       }
     }
+  }
 
-    // Auto-add new ingredient row if this is the last one and has content
-    if (index === ingredients.length - 1 &&
-        ingredients[index].name.trim() &&
-        ingredients[index].quantity !== '') {
-      setTimeout(() => addIngredient(), 100);
-    }
-  };
+  // Auto-add new ingredient row if this is the last one and has content
+  if (index === ingredients.length - 1 &&
+      ingredients[index].name.trim() &&
+      ingredients[index].quantity !== '') {
+    setTimeout(() => addIngredient(), 100);
+  }
+};
 
   // Instruction handlers
   const handleInstructionChange = (index, value) => {
@@ -334,15 +360,31 @@ const AddRecipe = () => {
     }
 
     try {
+      // Prepare the ingredients with parsed quantities
+      const processedIngredients = validIngredients.map(ing => {
+        // Parse the quantity to a float for submission
+        let qty = ing.quantity;
+        if (typeof qty === 'string') {
+          const parsed = parseQuantity(qty);
+          if (typeof parsed === 'number' && !isNaN(parsed)) {
+            qty = parsed;
+          }
+        }
+
+        return {
+          name: ing.name.trim(),
+          quantity: parseFloat(qty),
+          unit: ing.unit
+        };
+      });
+
       const recipeData = {
         recipe_name: formData.recipe_name.trim(),
         serving_size: parseInt(formData.serving_size),
         genre: formData.genre,
-        ingredients: validIngredients.map(ing => ({
-          name: ing.name.trim(),
-          quantity: parseFloat(ing.quantity),
-          unit: ing.unit
-        })),
+        prep_time: parseInt(formData.prep_time || 0),  // Add prep time
+        cook_time: parseInt(formData.cook_time || 0),  // Add cook time
+        ingredients: processedIngredients,
         instructions: validInstructions.map(inst => inst.trim())
       };
 
@@ -353,9 +395,13 @@ const AddRecipe = () => {
       setSuccess('Recipe created successfully! 🎉');
 
       // Reset form
-      setFormData({ recipe_name: '', serving_size: 1, genre: 'dinner' });
-      setIngredients([{ name: '', quantity: '', unit: 'cup' }]);
-      setInstructions(['']);
+      setFormData({
+        recipe_name: '',
+        serving_size: 1,
+        genre: 'dinner',
+        prep_time: 0,
+        cook_time: 0
+      });
 
       // Redirect after a short delay
       setTimeout(() => {
@@ -549,7 +595,7 @@ const AddRecipe = () => {
                   style={{
                     width: '100px',
                     padding: '8px',
-                    border: validateQuantity(ingredient.quantity) ? '2px solid #003366' : '2px solid #dc3545',
+                    border: isValidFractionInput(ingredient.quantity) ? '2px solid #003366' : '2px solid #dc3545',
                     borderRadius: '8px',
                     fontSize: '14px'
                   }}
@@ -580,7 +626,7 @@ const AddRecipe = () => {
                   value={ingredient.name}
                   onChange={(e) => handleIngredientChange(index, 'name', e.target.value)}
                   onKeyDown={(e) => handleIngredientKeyDown(index, 'name', e)}
-                  onBlur={() => handleIngredientBlur(index, 'name')}
+                  onBlur={() => handleIngredientBlur(index)}
                   data-ingredient-index={index}
                   data-field="name"
                   style={{
@@ -670,7 +716,7 @@ const AddRecipe = () => {
             display: 'grid',
             gridTemplateColumns: '1fr 1fr',
             gap: '1rem',
-            marginBottom: '2rem'
+            marginBottom: '1rem'  // Changed from 2rem to 1rem to reduce space before time inputs
           }}>
             <div>
               <label style={{ ...labelStyle, fontSize: '1rem' }}>
@@ -702,6 +748,74 @@ const AddRecipe = () => {
                   </option>
                 ))}
               </select>
+            </div>
+          </div>
+
+          {/* Time Inputs - Prep, Cook, and Total Time */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr 1fr',
+            gap: '1rem',
+            marginBottom: '2rem'
+          }}>
+            <div>
+              <label style={{ ...labelStyle, fontSize: '1rem' }}>
+                Prep Time (mins)
+              </label>
+              <input
+                type="number"
+                name="prep_time"
+                value={formData.prep_time}
+                onChange={handleInputChange}
+                min="0"
+                style={{
+                  ...inputStyle,
+                  width: '100px',
+                  padding: '10px',
+                  textAlign: 'center'
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{ ...labelStyle, fontSize: '1rem' }}>
+                Cook Time (mins)
+              </label>
+              <input
+                type="number"
+                name="cook_time"
+                value={formData.cook_time}
+                onChange={handleInputChange}
+                min="0"
+                style={{
+                  ...inputStyle,
+                  width: '100px',
+                  padding: '10px',
+                  textAlign: 'center'
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{
+                ...labelStyle,
+                fontSize: '1rem',
+                fontWeight: '600',  // Make it slightly bolder
+                color: '#002855'    // Slightly darker blue
+              }}>
+                Total Time (mins)
+              </label>
+              <div style={{
+                ...inputStyle,
+                width: '100px',
+                padding: '10px',
+                textAlign: 'center',
+                fontWeight: '600',  // Make text bolder
+                backgroundColor: '#f0f8ff',  // Light blue background
+                border: '2px solid #002855'  // Darker border
+              }}>
+                {parseInt(formData.prep_time || 0) + parseInt(formData.cook_time || 0)}
+              </div>
             </div>
           </div>
 

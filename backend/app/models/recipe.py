@@ -87,6 +87,8 @@ class Recipe(BaseModel):
     instructions: List[str]
     serving_size: int
     genre: Genre
+    prep_time: Optional[int] = 0  # Add prep time field in minutes
+    cook_time: Optional[int] = 0  # Add cook time field in minutes
     created_by: str
     created_at: datetime = datetime.now()
     updated_at: datetime = datetime.now()
@@ -98,6 +100,8 @@ class RecipeCreate(BaseModel):
     instructions: List[str]
     serving_size: int
     genre: Genre
+    prep_time: Optional[int] = 0  # Add prep time field
+    cook_time: Optional[int] = 0  # Add cook time field
 
 
 class RecipeUpdate(BaseModel):
@@ -106,6 +110,8 @@ class RecipeUpdate(BaseModel):
     instructions: Optional[List[str]] = None
     serving_size: Optional[int] = None
     genre: Optional[Genre] = None
+    prep_time: Optional[int] = None  # Add prep time field
+    cook_time: Optional[int] = None  # Add cook time field
 
 
 class RecipeResponse(BaseModel):
@@ -115,5 +121,7 @@ class RecipeResponse(BaseModel):
     instructions: List[str]
     serving_size: int
     genre: Genre
+    prep_time: Optional[int] = 0  # Add prep time field
+    cook_time: Optional[int] = 0  # Add cook time field
     created_by: str
     created_at: datetime

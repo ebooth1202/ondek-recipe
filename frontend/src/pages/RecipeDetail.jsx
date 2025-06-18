@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import RatingsAndReviews from '../components/RatingsAndReviews';
 import FavoriteButton from '../components/FavoriteButton';
+import RecipeForm from '../components/recipe/RecipeForm'; // Import the RecipeForm component
 import axios from 'axios';
 import { Fraction } from 'fraction.js';
 
@@ -22,13 +23,26 @@ const RecipeDetail = () => {
   const [checkedIngredients, setCheckedIngredients] = useState(new Set());
   const [completedSteps, setCompletedSteps] = useState(new Set());
   const [favoriteStatus, setFavoriteStatus] = useState(false);
+  const [editMode, setEditMode] = useState(false);
 
+
+      useEffect(() => {
+      if (recipe) {
+        console.log('Recipe ID:', recipe.id);
+        console.log('Recipe Name:', recipe.recipe_name);
+        console.log('Prep Time:', recipe.prep_time);
+        console.log('Cook Time:', recipe.cook_time);
+        console.log('Full Recipe Object:', JSON.stringify(recipe, null, 2));
+      }
+    }, [recipe]);
   // Fetch recipe and favorite status on component mount
   useEffect(() => {
     if (!isAuthenticated()) {
       navigate('/login');
       return;
     }
+
+
 
     const fetchRecipeData = async () => {
       try {
@@ -57,38 +71,39 @@ const RecipeDetail = () => {
     fetchRecipeData();
   }, [id, isAuthenticated, navigate]);
 
+
   // Fraction utilities
   const formatQuantity = (value) => {
-  if (value === undefined || value === null || value === '') return '';
+    if (value === undefined || value === null || value === '') return '';
 
-  try {
-    // Handle integer values
-    if (Number.isInteger(Number(value))) {
+    try {
+      // Handle integer values
+      if (Number.isInteger(Number(value))) {
+        return String(value);
+      }
+
+      // Convert to fraction
+      const frac = new Fraction(value);
+
+      // If it's a proper fraction (less than 1)
+      if (frac.compare(1) < 0) {
+        return `${frac.n}/${frac.d}`;
+      }
+
+      // If it's an improper fraction (greater than or equal to 1)
+      const wholePart = Math.floor(frac.valueOf());
+      const fractionalPart = frac.subtract(wholePart);
+
+      if (fractionalPart.valueOf() === 0) {
+        return String(wholePart);
+      }
+
+      return `${wholePart} ${fractionalPart.n}/${fractionalPart.d}`;
+    } catch (e) {
+      console.error("Error formatting fraction:", e);
       return String(value);
     }
-
-    // Convert to fraction
-    const frac = new Fraction(value);
-
-    // If it's a proper fraction (less than 1)
-    if (frac.compare(1) < 0) {
-      return `${frac.n}/${frac.d}`;
-    }
-
-    // If it's an improper fraction (greater than or equal to 1)
-    const wholePart = Math.floor(frac.valueOf());
-    const fractionalPart = frac.subtract(wholePart);
-
-    if (fractionalPart.valueOf() === 0) {
-      return String(wholePart);
-    }
-
-    return `${wholePart} ${fractionalPart.n}/${fractionalPart.d}`;
-  } catch (e) {
-    console.error("Error formatting fraction:", e);
-    return String(value);
-  }
-};
+  };
 
   // Helper functions
   const getGenreEmoji = (genre) => {
@@ -162,14 +177,55 @@ const RecipeDetail = () => {
   };
 
   const calculateQuantity = (originalQuantity) => {
-    // Multiply the quantity by the serving multiplier
+  if (originalQuantity === undefined || originalQuantity === null || originalQuantity === '')
+    return '';
+
+  try {
+    // Scale the quantity by the serving multiplier
     const scaledValue = originalQuantity * servingMultiplier;
-    // Format the result as a fraction
-    return formatQuantity(scaledValue);
-  };
+
+    // Handle integer values
+    if (Number.isInteger(scaledValue)) {
+      return String(scaledValue);
+    }
+
+    // Convert to fraction
+    const frac = new Fraction(scaledValue);
+
+    // If it's a proper fraction (less than 1)
+    if (frac.compare(1) < 0) {
+      return `${frac.n}/${frac.d}`;
+    }
+
+    // If it's an improper fraction (greater than or equal to 1)
+    const wholePart = Math.floor(frac.valueOf());
+    const fractionalPart = frac.subtract(wholePart);
+
+    if (fractionalPart.valueOf() === 0) {
+      return String(wholePart);
+    }
+
+    return `${wholePart} ${fractionalPart.n}/${fractionalPart.d}`;
+  } catch (e) {
+    console.error("Error formatting scaled quantity:", e);
+    return String(originalQuantity * servingMultiplier);
+  }
+};
 
   const handleFavoriteToggle = (isFavorited) => {
     setFavoriteStatus(isFavorited);
+  };
+
+  // Edit functions
+  const handleEnableEdit = () => {
+    setEditMode(true);
+  };
+
+  const handleEditSuccess = (updatedRecipe) => {
+    // Update the recipe state with the updated data
+    setRecipe(updatedRecipe);
+    // Exit edit mode
+    setEditMode(false);
   };
 
   // Render guards
@@ -261,6 +317,38 @@ const RecipeDetail = () => {
               🔄 Try Again
             </button>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // If in edit mode, render the RecipeForm component
+  if (editMode) {
+    return (
+      <div style={{ padding: '2rem', backgroundColor: '#f0f8ff', minHeight: 'calc(100vh - 80px)' }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+          <button
+            onClick={() => setEditMode(false)}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#f0f8ff',
+              color: '#003366',
+              border: '2px solid #003366',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              marginBottom: '2rem',
+              fontSize: '14px',
+              fontWeight: '500'
+            }}
+          >
+            ← Cancel & Return to Recipe
+          </button>
+
+          <RecipeForm
+            editMode={true}
+            existingRecipe={recipe}
+            onSubmitSuccess={handleEditSuccess}
+          />
         </div>
       </div>
     );
@@ -426,6 +514,58 @@ const RecipeDetail = () => {
             <span>🕒 {new Date(recipe.created_at).toLocaleTimeString()}</span>
           </div>
 
+          {/* Time Information */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'center',
+            gap: '1.5rem',
+            margin: '1rem 0',
+            flexWrap: 'wrap'
+          }}>
+            <div style={{
+              background: '#f0f8ff',
+              padding: '0.5rem 1rem',
+              borderRadius: '8px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center'
+            }}>
+              <span style={{ fontSize: '0.9rem', color: '#666' }}>Prep Time</span>
+              <span style={{ fontWeight: '500', color: '#003366' }}>
+                {recipe.prep_time !== undefined && recipe.prep_time !== null ? recipe.prep_time : 0} mins
+              </span>
+            </div>
+
+            <div style={{
+              background: '#f0f8ff',
+              padding: '0.5rem 1rem',
+              borderRadius: '8px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center'
+            }}>
+              <span style={{ fontSize: '0.9rem', color: '#666' }}>Cook Time</span>
+              <span style={{ fontWeight: '500', color: '#003366' }}>
+                {recipe.cook_time !== undefined && recipe.cook_time !== null ? recipe.cook_time : 0} mins
+              </span>
+            </div>
+
+            <div style={{
+              background: '#e6f0ff', // Slightly darker background
+              padding: '0.5rem 1rem',
+              borderRadius: '8px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              border: '1px solid #cce0ff'
+            }}>
+              <span style={{ fontSize: '0.9rem', color: '#666' }}>Total Time</span>
+              <span style={{ fontWeight: '600', color: '#002855' }}>
+                {(recipe.prep_time || 0) + (recipe.cook_time || 0)} mins
+              </span>
+            </div>
+          </div>
+
           {/* Serving Size Adjuster */}
           <div style={{
             background: '#f0f8ff',
@@ -469,7 +609,7 @@ const RecipeDetail = () => {
               marginTop: '1.5rem'
             }}>
               <button
-                onClick={() => alert('Edit functionality coming soon! ✏️')}
+                onClick={handleEnableEdit}
                 style={{
                   padding: '10px 20px',
                   backgroundColor: '#28a745',
