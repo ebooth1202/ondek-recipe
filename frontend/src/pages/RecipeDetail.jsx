@@ -1,4 +1,4 @@
-// RecipeDetail.jsx - Updated with API base URL
+// RecipeDetail.jsx - Updated with Duplicate Recipe functionality
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -37,6 +37,7 @@ const RecipeDetail = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const [showIngredients, setShowIngredients] = useState(true);
   const [showInstructions, setShowInstructions] = useState(true);
   const [servingMultiplier, setServingMultiplier] = useState(1);
@@ -70,8 +71,8 @@ const RecipeDetail = () => {
 
         // Fetch recipe and favorite status in parallel
         const [recipeResponse, favoriteResponse] = await Promise.all([
-          axios.get(`${apiBaseUrl}/recipes/${id}`),
-          axios.get(`${apiBaseUrl}/recipes/${id}/favorite-status`)
+          axios.get(`http://127.0.0.1:8000/recipes/${id}`),
+          axios.get(`http://127.0.0.1:8000/recipes/${id}/favorite-status`)
         ]);
 
         console.log('Recipe received:', recipeResponse.data);
@@ -160,13 +161,64 @@ const RecipeDetail = () => {
 
     try {
       setDeleting(true);
-      await axios.delete(`${apiBaseUrl}/recipes/${id}`);
+      await axios.delete(`http://127.0.0.1:8000/recipes/${id}`);
       navigate('/recipes');
     } catch (error) {
       console.error('Error deleting recipe:', error);
       alert('Failed to delete recipe. Please try again.');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleDuplicate = () => {
+    if (!recipe) return;
+
+    try {
+      setDuplicating(true);
+
+      // Create a copy of the recipe with modified name
+      const duplicateRecipeData = {
+        recipe_name: `${recipe.recipe_name} (Copy)`,
+        ingredients: recipe.ingredients.map(ing => ({
+          name: ing.name,
+          quantity: ing.quantity,
+          unit: ing.unit
+        })),
+        instructions: [...recipe.instructions],
+        serving_size: recipe.serving_size,
+        genre: recipe.genre,
+        prep_time: recipe.prep_time || 0,
+        cook_time: recipe.cook_time || 0,
+        notes: recipe.notes ? [...recipe.notes] : [],
+        dietary_restrictions: recipe.dietary_restrictions ? [...recipe.dietary_restrictions] : []
+      };
+
+      console.log('Duplicating recipe:', duplicateRecipeData);
+
+      // Store the duplicate recipe data in sessionStorage
+      sessionStorage.setItem('duplicateRecipe', JSON.stringify(duplicateRecipeData));
+
+      // Store the original recipe for comparison (to prevent exact duplicates)
+      sessionStorage.setItem('originalRecipe', JSON.stringify({
+        recipe_name: recipe.recipe_name,
+        ingredients: recipe.ingredients,
+        instructions: recipe.instructions,
+        serving_size: recipe.serving_size,
+        genre: recipe.genre,
+        prep_time: recipe.prep_time || 0,
+        cook_time: recipe.cook_time || 0,
+        notes: recipe.notes || [],
+        dietary_restrictions: recipe.dietary_restrictions || []
+      }));
+
+      // Navigate to add recipe page with duplicate flag
+      navigate('/add-recipe?duplicate=true');
+    } catch (error) {
+      console.error('Error duplicating recipe:', error);
+      alert('Failed to duplicate recipe. Please try again.');
+    } finally {
+      setDuplicating(false);
     }
   };
 
@@ -195,40 +247,40 @@ const RecipeDetail = () => {
   };
 
   const calculateQuantity = (originalQuantity) => {
-  if (originalQuantity === undefined || originalQuantity === null || originalQuantity === '')
-    return '';
+    if (originalQuantity === undefined || originalQuantity === null || originalQuantity === '')
+      return '';
 
-  try {
-    // Scale the quantity by the serving multiplier
-    const scaledValue = originalQuantity * servingMultiplier;
+    try {
+      // Scale the quantity by the serving multiplier
+      const scaledValue = originalQuantity * servingMultiplier;
 
-    // Handle integer values
-    if (Number.isInteger(scaledValue)) {
-      return String(scaledValue);
+      // Handle integer values
+      if (Number.isInteger(scaledValue)) {
+        return String(scaledValue);
+      }
+
+      // Convert to fraction
+      const frac = new Fraction(scaledValue);
+
+      // If it's a proper fraction (less than 1)
+      if (frac.compare(1) < 0) {
+        return `${frac.n}/${frac.d}`;
+      }
+
+      // If it's an improper fraction (greater than or equal to 1)
+      const wholePart = Math.floor(frac.valueOf());
+      const fractionalPart = frac.subtract(wholePart);
+
+      if (fractionalPart.valueOf() === 0) {
+        return String(wholePart);
+      }
+
+      return `${wholePart} ${fractionalPart.n}/${fractionalPart.d}`;
+    } catch (e) {
+      console.error("Error formatting scaled quantity:", e);
+      return String(originalQuantity * servingMultiplier);
     }
-
-    // Convert to fraction
-    const frac = new Fraction(scaledValue);
-
-    // If it's a proper fraction (less than 1)
-    if (frac.compare(1) < 0) {
-      return `${frac.n}/${frac.d}`;
-    }
-
-    // If it's an improper fraction (greater than or equal to 1)
-    const wholePart = Math.floor(frac.valueOf());
-    const fractionalPart = frac.subtract(wholePart);
-
-    if (fractionalPart.valueOf() === 0) {
-      return String(wholePart);
-    }
-
-    return `${wholePart} ${fractionalPart.n}/${fractionalPart.d}`;
-  } catch (e) {
-    console.error("Error formatting scaled quantity:", e);
-    return String(originalQuantity * servingMultiplier);
-  }
-};
+  };
 
   const handleFavoriteToggle = (isFavorited) => {
     setFavoriteStatus(isFavorited);
@@ -532,9 +584,15 @@ const RecipeDetail = () => {
               {getGenreEmoji(recipe.genre)} {formatGenreName(recipe.genre)}
             </div>
 
-            {/* Dietary Restrictions Badges */}
+            {/* Dietary Restrictions Badges - Side by side */}
             {recipe.dietary_restrictions && recipe.dietary_restrictions.length > 0 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '8px' }}>
+              <div style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                justifyContent: 'center',
+                gap: '6px',
+                marginTop: '8px'
+              }}>
                 {recipe.dietary_restrictions.map(restriction => (
                   <div key={restriction} style={dietaryBadgeStyle}>
                     {formatDietaryRestrictionName(restriction)}
@@ -724,7 +782,6 @@ const RecipeDetail = () => {
                       justifyContent: 'space-between',
                       alignItems: 'center',
                       cursor: 'pointer',
-                      // Continuing RecipeDetail.jsx
                       backgroundColor: checkedIngredients.has(index) ? '#f0f8ff' : 'transparent',
                       borderRadius: '6px',
                       margin: '2px 0',
@@ -864,7 +921,39 @@ const RecipeDetail = () => {
           </div>
         </div>
 
-        {/* Notes Section - Display if notes exist */}
+        {/* Description Section - Display if description exists */}
+        {recipe.description && (
+          <div style={{
+            background: 'white',
+            border: '2px solid #17a2b8',
+            borderRadius: '15px',
+            padding: '2rem',
+            marginBottom: '2rem',
+            boxShadow: '0 4px 12px rgba(23, 162, 184, 0.1)'
+          }}>
+            <h2 style={{
+              color: '#17a2b8',
+              fontSize: '1.5rem',
+              marginBottom: '1.5rem',
+              borderBottom: '2px solid #f0f8ff',
+              paddingBottom: '0.5rem'
+            }}>
+              📝 Description
+            </h2>
+
+            <div style={{
+              padding: '1rem',
+              background: '#f0f9ff',
+              borderRadius: '10px',
+              borderLeft: '4px solid #17a2b8',
+              fontSize: '1.1rem',
+              lineHeight: '1.6',
+              color: '#333'
+            }}>
+              {recipe.description}
+            </div>
+          </div>
+        )}
         {recipe.notes && recipe.notes.length > 0 && recipe.notes[0] && (
           <div style={{
             background: 'white',
@@ -948,7 +1037,14 @@ const RecipeDetail = () => {
                 borderRadius: '10px',
                 cursor: 'pointer',
                 fontWeight: '500',
-                fontSize: '16px'
+                fontSize: '16px',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = '#138496';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = '#17a2b8';
               }}
             >
               📤 Share Recipe
@@ -964,10 +1060,45 @@ const RecipeDetail = () => {
                 borderRadius: '10px',
                 cursor: 'pointer',
                 fontWeight: '500',
-                fontSize: '16px'
+                fontSize: '16px',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = '#5a6268';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = '#6c757d';
               }}
             >
               🖨️ Print Recipe
+            </button>
+
+            <button
+              onClick={handleDuplicate}
+              disabled={duplicating}
+              style={{
+                padding: '12px 24px',
+                backgroundColor: duplicating ? '#ccc' : '#fd7e14',
+                color: 'white',
+                border: 'none',
+                borderRadius: '10px',
+                cursor: duplicating ? 'not-allowed' : 'pointer',
+                fontWeight: '500',
+                fontSize: '16px',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                if (!duplicating) {
+                  e.target.style.backgroundColor = '#e8590c';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!duplicating) {
+                  e.target.style.backgroundColor = '#fd7e14';
+                }
+              }}
+            >
+              {duplicating ? '⏳ Duplicating...' : '📋 Duplicate Recipe'}
             </button>
           </div>
         </div>

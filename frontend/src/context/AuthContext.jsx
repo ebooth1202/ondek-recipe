@@ -2,7 +2,7 @@ import React, { createContext, useState, useContext, useEffect } from 'react';
 import axios from 'axios';
 
 // Set a consistent base URL for all API calls
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = 'http://127.0.0.1:8000';
 
 const AuthContext = createContext();
 
@@ -48,7 +48,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (username, password) => {
     try {
-      console.log('Attempting login for:', username);
+      // console.log('Attempting login for:', username);
       const response = await axios.post(`${API_BASE_URL}/auth/login`, {
         username,
         password,
@@ -61,7 +61,7 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('token', access_token);
       axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
 
-      console.log('Login successful:', userData);
+      // console.log('Login successful:', userData);
       return { success: true };
     } catch (error) {
       console.error('Login error:', error);
@@ -72,14 +72,14 @@ export const AuthProvider = ({ children }) => {
 
   const register = async (username, email, password) => {
     try {
-      console.log('Attempting registration for:', username);
+      // console.log('Attempting registration for:', username);
       const response = await axios.post(`${API_BASE_URL}/auth/register`, {
         username,
         email,
         password,
       });
 
-      console.log('Registration successful, now logging in...');
+      // console.log('Registration successful, now logging in...');
       // Auto-login after successful registration
       const loginResult = await login(username, password);
       return loginResult;
@@ -91,7 +91,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
-    console.log('Logging out user');
+    // console.log('Logging out user');
     setUser(null);
     setToken(null);
     localStorage.removeItem('token');

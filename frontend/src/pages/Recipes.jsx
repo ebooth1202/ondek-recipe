@@ -1,4 +1,3 @@
-// Recipes.jsx - Updated with API base URL
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -30,15 +29,25 @@ const Recipes = () => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        console.log('Fetching recipes from API...');
+        // console.log('Fetching recipes from API...');
 
         const [recipesRes, genresRes] = await Promise.all([
-          axios.get(`${apiBaseUrl}/recipes`),
-          axios.get(`${apiBaseUrl}/genres`)
+          axios.get(`http://127.0.0.1:8000/recipes`),
+          axios.get(`http://127.0.0.1:8000/genres`)
         ]);
 
-        console.log('Recipes received:', recipesRes.data);
-        console.log('Genres received:', genresRes.data);
+        // console.log('Raw recipes received:', recipesRes.data);
+
+        // Debug: Check if dietary restrictions are present
+        recipesRes.data.forEach((recipe, index) => {
+          // console.log(`Recipe ${index + 1} (${recipe.recipe_name}):`, {
+          //   id: recipe.id,
+          //   dietary_restrictions: recipe.dietary_restrictions,
+          //   has_dietary: recipe.dietary_restrictions && recipe.dietary_restrictions.length > 0
+          // });
+        });
+
+        // console.log('Genres received:', genresRes.data);
 
         setRecipes(recipesRes.data);
         setFilteredRecipes(recipesRes.data);
@@ -54,7 +63,7 @@ const Recipes = () => {
     if (isAuthenticated()) {
       fetchData();
     }
-  }, [isAuthenticated, apiBaseUrl]);
+  }, [isAuthenticated]);
 
   // Filter recipes based on search and genre
   useEffect(() => {
@@ -93,7 +102,8 @@ const Recipes = () => {
   // Handle recipe refresh (when coming back from add recipe)
   const refreshRecipes = async () => {
     try {
-      const response = await axios.get(`${apiBaseUrl}/recipes`);
+      const response = await axios.get(`http://127.0.0.1:8000/recipes`);
+      // console.log('Refreshed recipes:', response.data);
       setRecipes(response.data);
       setFilteredRecipes(response.data);
     } catch (error) {

@@ -29,12 +29,12 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:8000", "http://127.0.0.1:8000"],
+    allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+    allow_headers=["*"],  # Allow all headers
     expose_headers=["Content-Type"],
-    max_age=600,  # Cache preflight requests for 10 minutes
+    max_age=600,
 )
 
 # Database connection
@@ -168,38 +168,44 @@ class UserUpdate(BaseModel):
     last_name: Optional[str] = None  # Added username field
 
 
-class RecipeCreate(BaseModel):
-    recipe_name: str
-    ingredients: List[Ingredient]
-    instructions: List[str]
-    serving_size: int
+class Recipe(BaseModel):
+    recipe_name: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = Field(None, max_length=500)  # Add this line
+    ingredients: List[Ingredient] = Field(..., min_items=1)
+    instructions: List[str] = Field(..., min_items=1)
+    serving_size: int = Field(..., gt=0, le=100)
     genre: Genre
-    prep_time: Optional[int] = 0
-    cook_time: Optional[int] = 0
-    notes: Optional[List[str]] = []  # Add notes field with default empty list
+    prep_time: Optional[int] = Field(0, ge=0, le=1440)  # Max 24 hours in minutes
+    cook_time: Optional[int] = Field(0, ge=0, le=1440)  # Max 24 hours in minutes
+    notes: Optional[List[str]] = []
+    dietary_restrictions: Optional[List[str]] = []
 
 
 class RecipeUpdate(BaseModel):
     recipe_name: Optional[str] = None
+    description: Optional[str] = None  # Add this line
     ingredients: Optional[List[Ingredient]] = None
     instructions: Optional[List[str]] = None
     serving_size: Optional[int] = None
     genre: Optional[Genre] = None
     prep_time: Optional[int] = None
     cook_time: Optional[int] = None
-    notes: Optional[List[str]] = None  # Add notes field
+    notes: Optional[List[str]] = None
+    dietary_restrictions: Optional[List[str]] = None
 
 
 class RecipeResponse(BaseModel):
     id: str
     recipe_name: str
+    description: Optional[str] = None  # Add this line
     ingredients: List[Ingredient]
     instructions: List[str]
     serving_size: int
     genre: Genre
     prep_time: Optional[int] = 0
     cook_time: Optional[int] = 0
-    notes: Optional[List[str]] = []  # Add notes field
+    notes: Optional[List[str]] = []
+    dietary_restrictions: Optional[List[str]] = []
     created_by: str
     created_at: datetime
 
@@ -453,34 +459,39 @@ async def get_current_user_info(current_user: dict = Depends(get_current_user)):
 
 # RECIPE ROUTES
 @app.post("/recipes", response_model=RecipeResponse)
-async def create_recipe(recipe: RecipeCreate, current_user: dict = Depends(get_current_user)):
+async def create_recipe(recipe: Recipe, current_user: dict = Depends(get_current_user)):
     recipe_doc = {
         "recipe_name": recipe.recipe_name,
-        "ingredients": [ingredient.dict() for ingredient in recipe.ingredients],
+        "description": recipe.description,  # Add this line
+        "ingredients": [ing.dict() for ing in recipe.ingredients],
         "instructions": recipe.instructions,
         "serving_size": recipe.serving_size,
         "genre": recipe.genre.value,
         "prep_time": recipe.prep_time or 0,
         "cook_time": recipe.cook_time or 0,
-        "notes": recipe.notes or [],  # Add notes field
+        "notes": recipe.notes or [],
+        "dietary_restrictions": recipe.dietary_restrictions or [],
         "created_by": current_user["username"],
-        "created_at": datetime.now(),
-        "updated_at": datetime.now()
+        "created_at": datetime.utcnow()
     }
 
     result = db.recipes.insert_one(recipe_doc)
+    recipe_doc["_id"] = result.inserted_id
 
+    ingredients = [Ingredient(**ing) for ing in recipe_doc["ingredients"]]
     return RecipeResponse(
-        id=str(result.inserted_id),
-        recipe_name=recipe.recipe_name,
-        ingredients=recipe.ingredients,
-        instructions=recipe.instructions,
-        serving_size=recipe.serving_size,
-        genre=recipe.genre,
-        prep_time=recipe.prep_time or 0,
-        cook_time=recipe.cook_time or 0,
-        notes=recipe.notes or [],  # Add notes field
-        created_by=current_user["username"],
+        id=str(recipe_doc["_id"]),
+        recipe_name=recipe_doc["recipe_name"],
+        description=recipe_doc.get("description"),  # Add this line
+        ingredients=ingredients,
+        instructions=recipe_doc["instructions"],
+        serving_size=recipe_doc["serving_size"],
+        genre=Genre(recipe_doc["genre"]),
+        prep_time=recipe_doc.get("prep_time", 0),
+        cook_time=recipe_doc.get("cook_time", 0),
+        notes=recipe_doc.get("notes", []),
+        dietary_restrictions=recipe_doc.get("dietary_restrictions", []),
+        created_by=recipe_doc["created_by"],
         created_at=recipe_doc["created_at"]
     )
 
@@ -496,6 +507,7 @@ async def get_recipes(
     if search:
         query["$or"] = [
             {"recipe_name": {"$regex": search, "$options": "i"}},
+            {"description": {"$regex": search, "$options": "i"}},  # Add this line to search descriptions too
             {"ingredients.name": {"$regex": search, "$options": "i"}}
         ]
 
@@ -510,10 +522,15 @@ async def get_recipes(
         recipes.append(RecipeResponse(
             id=str(recipe_doc["_id"]),
             recipe_name=recipe_doc["recipe_name"],
+            description=recipe_doc.get("description"),  # Add this line
             ingredients=ingredients,
             instructions=recipe_doc["instructions"],
             serving_size=recipe_doc["serving_size"],
             genre=Genre(recipe_doc["genre"]),
+            prep_time=recipe_doc.get("prep_time", 0),
+            cook_time=recipe_doc.get("cook_time", 0),
+            notes=recipe_doc.get("notes", []),
+            dietary_restrictions=recipe_doc.get("dietary_restrictions", []),
             created_by=recipe_doc["created_by"],
             created_at=recipe_doc["created_at"]
         ))
@@ -523,44 +540,18 @@ async def get_recipes(
 
 @app.get("/recipes/{recipe_id}", response_model=EnhancedRecipeResponse)
 async def get_recipe(recipe_id: str, current_user: dict = Depends(get_current_user)):
-    try:
-        recipe_doc = db.recipes.find_one({"_id": ObjectId(recipe_id)})
-        if recipe_doc:
-            print("Recipe document from DB:", recipe_doc)  # Debug log
-    except InvalidId:
+    if not ObjectId.is_valid(recipe_id):
         raise HTTPException(status_code=400, detail="Invalid recipe ID")
 
+    recipe_doc = db.recipes.find_one({"_id": ObjectId(recipe_id)})
     if not recipe_doc:
         raise HTTPException(status_code=404, detail="Recipe not found")
 
-    # Get ratings for this recipe
-    ratings = list(db.ratings.find({"recipe_id": recipe_id}))
-    average_rating = None
-    total_ratings = len(ratings)
-    user_rating = None
-
-    if ratings:
-        rating_values = [r["rating"] for r in ratings]
-        average_rating = round(mean(rating_values), 1)
-
-        # Check if current user has rated this recipe
-        user_rating_doc = next((r for r in ratings if r["user_id"] == str(current_user["_id"])), None)
-        if user_rating_doc:
-            user_rating = user_rating_doc["rating"]
-
-    # Check if current user has favorited this recipe
-    favorite = db.favorites.find_one({
-        "recipe_id": recipe_id,
-        "user_id": str(current_user["_id"])
-    })
-    user_has_favorited = favorite is not None
-
-    # Convert MongoDB document to Pydantic model
     ingredients = [Ingredient(**ing) for ing in recipe_doc["ingredients"]]
-
     return EnhancedRecipeResponse(
         id=str(recipe_doc["_id"]),
         recipe_name=recipe_doc["recipe_name"],
+        description=recipe_doc.get("description"),  # Add this line
         ingredients=ingredients,
         instructions=recipe_doc["instructions"],
         serving_size=recipe_doc["serving_size"],
@@ -568,13 +559,9 @@ async def get_recipe(recipe_id: str, current_user: dict = Depends(get_current_us
         prep_time=recipe_doc.get("prep_time", 0),
         cook_time=recipe_doc.get("cook_time", 0),
         notes=recipe_doc.get("notes", []),
-        dietary_restrictions=recipe_doc.get("dietary_restrictions", []),  # Add this line
+        dietary_restrictions=recipe_doc.get("dietary_restrictions", []),
         created_by=recipe_doc["created_by"],
-        created_at=recipe_doc["created_at"],
-        average_rating=average_rating,
-        total_ratings=total_ratings,
-        user_has_favorited=user_has_favorited,
-        user_rating=user_rating
+        created_at=recipe_doc["created_at"]
     )
 
 
@@ -584,63 +571,79 @@ async def update_recipe(
         recipe_update: RecipeUpdate,
         current_user: dict = Depends(get_current_user)
 ):
-    print("Received update data:", recipe_update.dict())
-    try:
-        recipe_doc = db.recipes.find_one({"_id": ObjectId(recipe_id)})
-    except InvalidId:
+    if not ObjectId.is_valid(recipe_id):
         raise HTTPException(status_code=400, detail="Invalid recipe ID")
 
-    if not recipe_doc:
+    # Check if recipe exists and user has permission
+    existing_recipe = db.recipes.find_one({"_id": ObjectId(recipe_id)})
+    if not existing_recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
 
-    if (recipe_doc["created_by"] != current_user["username"] and
+    # Check if user is the creator or has admin/owner role
+    if (existing_recipe["created_by"] != current_user["username"] and
             current_user["role"] not in ["admin", "owner"]):
-        raise HTTPException(status_code=403, detail="Not authorized to edit this recipe")
+        raise HTTPException(status_code=403, detail="Not authorized to update this recipe")
 
-    update_doc = {"updated_at": datetime.now()}
+    # Build update document
+    update_doc = {}
 
     if recipe_update.recipe_name is not None:
         update_doc["recipe_name"] = recipe_update.recipe_name
+
+    if recipe_update.description is not None:  # Add this block
+        update_doc["description"] = recipe_update.description
+
     if recipe_update.ingredients is not None:
         update_doc["ingredients"] = [ing.dict() for ing in recipe_update.ingredients]
+
     if recipe_update.instructions is not None:
         update_doc["instructions"] = recipe_update.instructions
+
     if recipe_update.serving_size is not None:
         update_doc["serving_size"] = recipe_update.serving_size
+
     if recipe_update.genre is not None:
-        update_doc["genre"] = recipe_update.genre.value if hasattr(recipe_update.genre,'value') else recipe_update.genre
+        update_doc["genre"] = recipe_update.genre.value
+
     if recipe_update.prep_time is not None:
         update_doc["prep_time"] = recipe_update.prep_time
+
     if recipe_update.cook_time is not None:
         update_doc["cook_time"] = recipe_update.cook_time
+
     if recipe_update.notes is not None:
         update_doc["notes"] = recipe_update.notes
+
     if recipe_update.dietary_restrictions is not None:
         update_doc["dietary_restrictions"] = recipe_update.dietary_restrictions
 
-    result = db.recipes.update_one({"_id": ObjectId(recipe_id)}, {"$set": update_doc})
+    if not update_doc:
+        raise HTTPException(status_code=400, detail="No fields to update")
 
-    if result.modified_count == 0 and result.matched_count > 0:
-        print("No changes made to the recipe")
-    elif result.modified_count > 0:
-        print(f"Successfully updated recipe {recipe_id}")
-    else:
-        print(f"Failed to update recipe {recipe_id}")
+    # Update the recipe
+    result = db.recipes.update_one(
+        {"_id": ObjectId(recipe_id)},
+        {"$set": update_doc}
+    )
 
-    # Return the updated recipe with all its data (ratings, favorites, etc.)
-    return await get_recipe(recipe_id, current_user)
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Recipe not found")
 
+    # Return updated recipe
     updated_recipe = db.recipes.find_one({"_id": ObjectId(recipe_id)})
     ingredients = [Ingredient(**ing) for ing in updated_recipe["ingredients"]]
 
     return RecipeResponse(
         id=str(updated_recipe["_id"]),
         recipe_name=updated_recipe["recipe_name"],
+        description=updated_recipe.get("description"),  # Add this line
         ingredients=ingredients,
         instructions=updated_recipe["instructions"],
         serving_size=updated_recipe["serving_size"],
         genre=Genre(updated_recipe["genre"]),
-        # Add this line to include dietary_restrictions in the response
+        prep_time=updated_recipe.get("prep_time", 0),
+        cook_time=updated_recipe.get("cook_time", 0),
+        notes=updated_recipe.get("notes", []),
         dietary_restrictions=updated_recipe.get("dietary_restrictions", []),
         created_by=updated_recipe["created_by"],
         created_at=updated_recipe["created_at"]

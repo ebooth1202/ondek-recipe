@@ -20,8 +20,8 @@ const AddRecipe = () => {
     if (duplicating) {
       // Log to help debugging
       const duplicateRecipe = sessionStorage.getItem('duplicateRecipe');
-      console.log('Add Recipe page found duplicate param. Recipe data in storage:',
-        duplicateRecipe ? 'Present' : 'Not found');
+      // console.log('Add Recipe page found duplicate param. Recipe data in storage:',
+      //   duplicateRecipe ? 'Present' : 'Not found');
     }
   }, [location.search]);
 
@@ -35,7 +35,7 @@ const AddRecipe = () => {
   // Handle successful form submission
   const handleSubmitSuccess = (data) => {
     // You can add any post-submission logic here if needed
-    console.log('Recipe created successfully:', data);
+    // console.log('Recipe created successfully:', data);
   };
 
   return (

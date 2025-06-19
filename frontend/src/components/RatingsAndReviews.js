@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
@@ -26,12 +25,12 @@ const RatingsAndReviews = ({ recipeId, currentUserId }) => {
       fetchRatings();
       fetchSummary();
     }
-  }, [recipeId, apiBaseUrl]);
+  }, [recipeId]);
 
   const fetchRatings = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${apiBaseUrl}/recipes/${recipeId}/ratings`);
+      const response = await axios.get(`http://127.0.0.1:8000/recipes/${recipeId}/ratings`);
       setRatings(response.data);
 
       // Check if current user has already rated
@@ -49,7 +48,7 @@ const RatingsAndReviews = ({ recipeId, currentUserId }) => {
 
   const fetchSummary = async () => {
     try {
-      const response = await axios.get(`${apiBaseUrl}/recipes/${recipeId}/ratings/summary`);
+      const response = await axios.get(`http://127.0.0.1:8000/recipes/${recipeId}/ratings/summary`);
       setSummary(response.data);
     } catch (err) {
       console.error('Error fetching rating summary:', err);
@@ -89,7 +88,7 @@ const RatingsAndReviews = ({ recipeId, currentUserId }) => {
     }
 
     try {
-      await axios.delete(`${apiBaseUrl}/recipes/${recipeId}/ratings/${rating.id}`);
+      await axios.delete(`http://127.0.0.1:8000/recipes/${recipeId}/ratings/${rating.id}`);
 
       // Update local state
       setRatings(ratings.filter(r => r.id !== rating.id));
@@ -107,19 +106,45 @@ const RatingsAndReviews = ({ recipeId, currentUserId }) => {
 
   // Render the rating breakdown bars
   const RatingBreakdown = () => (
-    <div className="w-full max-w-sm">
+    <div style={{ width: '100%', maxWidth: '300px' }}>
       {[5, 4, 3, 2, 1].map((num) => (
-        <div key={num} className="flex items-center gap-2 mb-1">
-          <span className="w-4 text-sm text-gray-600">{num}</span>
-          <div className="flex-1 h-2 bg-gray-200 rounded overflow-hidden">
+        <div key={num} style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          marginBottom: '4px'
+        }}>
+          <span style={{
+            width: '16px',
+            fontSize: '14px',
+            color: '#666',
+            textAlign: 'right'
+          }}>
+            {num}
+          </span>
+          <div style={{
+            flex: 1,
+            height: '8px',
+            backgroundColor: '#e0e0e0',
+            borderRadius: '4px',
+            overflow: 'hidden'
+          }}>
             <div
-              className="h-full bg-yellow-400 rounded"
               style={{
-                width: `${summary.total_ratings ? (summary.rating_breakdown[num] / summary.total_ratings) * 100 : 0}%`
+                height: '100%',
+                backgroundColor: '#ffc107',
+                borderRadius: '4px',
+                width: `${summary.total_ratings ? (summary.rating_breakdown[num] / summary.total_ratings) * 100 : 0}%`,
+                transition: 'width 0.3s ease'
               }}
             />
           </div>
-          <span className="w-8 text-xs text-gray-500 text-right">
+          <span style={{
+            width: '24px',
+            fontSize: '12px',
+            color: '#999',
+            textAlign: 'right'
+          }}>
             {summary.rating_breakdown[num] || 0}
           </span>
         </div>
@@ -128,76 +153,189 @@ const RatingsAndReviews = ({ recipeId, currentUserId }) => {
   );
 
   return (
-    <div className="bg-white border-2 border-blue-900 rounded-lg p-6 mb-6 shadow-md">
-      <h2 className="text-2xl font-bold text-blue-900 mb-6">
-        Ratings & Reviews
+    <div style={{
+      backgroundColor: 'white',
+      border: '2px solid #003366',
+      borderRadius: '15px',
+      padding: '2rem',
+      marginBottom: '2rem',
+      boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)'
+    }}>
+      <h2 style={{
+        color: '#003366',
+        fontSize: '2rem',
+        marginBottom: '2rem',
+        textAlign: 'center'
+      }}>
+        ⭐ Ratings & Reviews
       </h2>
 
       {/* Rating Summary */}
-      <div className="bg-blue-50 p-4 rounded-lg mb-6">
-        <div className="flex flex-wrap justify-between items-center gap-6">
-          <div className="text-center">
-            <div className="flex items-end">
-              <span className="text-4xl font-bold text-blue-900">
+      <div style={{
+        backgroundColor: '#f0f8ff',
+        padding: '2rem',
+        borderRadius: '15px',
+        marginBottom: '2rem',
+        border: '1px solid #003366'
+      }}>
+        <div style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '2rem'
+        }}>
+          {/* Average Rating Display */}
+          <div style={{
+            textAlign: 'center',
+            minWidth: '200px'
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'center',
+              marginBottom: '8px'
+            }}>
+              <span style={{
+                fontSize: '3rem',
+                fontWeight: 'bold',
+                color: '#003366'
+              }}>
                 {summary.average_rating ? summary.average_rating.toFixed(1) : "0.0"}
               </span>
-              <span className="text-sm text-gray-500 ml-1 mb-1">/ 5</span>
+              <span style={{
+                fontSize: '1.2rem',
+                color: '#666',
+                marginLeft: '4px'
+              }}>
+                / 5
+              </span>
             </div>
-            <StarRating rating={summary.average_rating} size="lg" />
-            <p className="text-sm text-gray-600 mt-1">
+            <div style={{ marginBottom: '8px' }}>
+              <StarRating rating={summary.average_rating} size="lg" />
+            </div>
+            <p style={{
+              fontSize: '14px',
+              color: '#666',
+              margin: 0
+            }}>
               Based on {summary.total_ratings} {summary.total_ratings === 1 ? 'rating' : 'ratings'}
             </p>
           </div>
 
-          <RatingBreakdown />
+          {/* Rating Breakdown */}
+          <div style={{ flex: 1, maxWidth: '400px' }}>
+            <RatingBreakdown />
+          </div>
         </div>
       </div>
 
       {/* Add/Edit Rating Form */}
       {showRatingForm ? (
-        <RatingForm
-          recipeId={recipeId}
-          existingRating={editingRating}
-          onSubmit={handleRatingSubmit}
-          onCancel={() => {
-            setShowRatingForm(false);
-            setEditingRating(null);
-          }}
-        />
+        <div style={{ marginBottom: '2rem' }}>
+          <RatingForm
+            recipeId={recipeId}
+            existingRating={editingRating}
+            onSubmit={handleRatingSubmit}
+            onCancel={() => {
+              setShowRatingForm(false);
+              setEditingRating(null);
+            }}
+          />
+        </div>
       ) : (
-        <div className="flex justify-center mb-6">
+        <div style={{
+          textAlign: 'center',
+          marginBottom: '2rem'
+        }}>
           <button
             onClick={() => setShowRatingForm(true)}
-            className="bg-blue-900 text-white px-4 py-2 rounded-lg hover:bg-blue-800 transition-colors"
+            style={{
+              backgroundColor: '#003366',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '12px 24px',
+              fontSize: '16px',
+              fontWeight: '500',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = '#0066cc';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = '#003366';
+            }}
           >
-            {userRating ? 'Edit Your Rating' : 'Add Your Rating'}
+            {userRating ? '✏️ Edit Your Rating' : '⭐ Add Your Rating'}
           </button>
         </div>
       )}
 
       {/* Error Message */}
       {error && (
-        <div className="bg-red-100 text-red-800 p-3 rounded-lg mb-4">
+        <div style={{
+          backgroundColor: '#f8d7da',
+          color: '#721c24',
+          padding: '1rem',
+          borderRadius: '8px',
+          marginBottom: '2rem',
+          border: '1px solid #f5c6cb'
+        }}>
           {error}
         </div>
       )}
 
       {/* Reviews List */}
-      <div className="mt-8">
-        <h3 className="text-xl font-semibold text-blue-900 mb-4">
-          User Reviews ({ratings.length})
+      <div style={{ marginTop: '2rem' }}>
+        <h3 style={{
+          color: '#003366',
+          fontSize: '1.5rem',
+          marginBottom: '1.5rem',
+          borderBottom: '2px solid #f0f8ff',
+          paddingBottom: '0.5rem'
+        }}>
+          💬 User Reviews ({ratings.length})
         </h3>
 
         {loading ? (
-          <div className="flex justify-center p-8">
-            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-900"></div>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'center',
+            padding: '3rem'
+          }}>
+            <div style={{
+              width: '40px',
+              height: '40px',
+              border: '4px solid #f0f8ff',
+              borderTop: '4px solid #003366',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite'
+            }}></div>
           </div>
         ) : ratings.length === 0 ? (
-          <div className="text-center p-8 bg-blue-50 rounded-lg text-gray-600">
-            <p>No reviews yet. Be the first to review this recipe!</p>
+          <div style={{
+            textAlign: 'center',
+            padding: '3rem',
+            backgroundColor: '#f0f8ff',
+            borderRadius: '15px',
+            border: '1px solid #003366'
+          }}>
+            <p style={{
+              color: '#666',
+              fontSize: '1.1rem',
+              margin: 0
+            }}>
+              No reviews yet. Be the first to review this recipe! 🌟
+            </p>
           </div>
         ) : (
-          <div className="space-y-4 max-h-[500px] overflow-y-auto px-2">
+          <div style={{
+            maxHeight: '500px',
+            overflowY: 'auto',
+            padding: '0 8px'
+          }}>
             {ratings.map((rating) => (
               <ReviewItem
                 key={rating.id}
@@ -210,6 +348,16 @@ const RatingsAndReviews = ({ recipeId, currentUserId }) => {
           </div>
         )}
       </div>
+
+      {/* Add CSS animation for loading spinner */}
+      <style>
+        {`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}
+      </style>
     </div>
   );
 };

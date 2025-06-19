@@ -1,4 +1,4 @@
-// RecipeForm.jsx - Updated with API base URL
+// RecipeForm.jsx - Fixed to clear sessionStorage for new recipes
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -34,6 +34,7 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
   // Form state
   const [formData, setFormData] = useState({
     recipe_name: '',
+    description: '', // Add description field
     serving_size: 1,
     genre: 'dinner',
     prep_time: 0,
@@ -72,54 +73,77 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Check for duplicate recipe in sessionStorage
+  // Check for duplicate recipe in sessionStorage only if duplicating
   useEffect(() => {
-    // Check if we're duplicating a recipe from sessionStorage
-    const duplicateRecipeStr = sessionStorage.getItem('duplicateRecipe');
-    console.log('Checking for duplicated recipe:', duplicateRecipeStr);
+    const urlParams = new URLSearchParams(location.search);
+    const isDuplicating = urlParams.get('duplicate') === 'true';
 
-    if (duplicateRecipeStr) {
-      try {
-        const duplicateRecipe = JSON.parse(duplicateRecipeStr);
-        console.log('Found duplicated recipe to load:', duplicateRecipe);
+    if (isDuplicating) {
+      // Check if we're duplicating a recipe from sessionStorage
+      const duplicateRecipeStr = sessionStorage.getItem('duplicateRecipe');
+      console.log('Duplicating - checking for duplicated recipe:', duplicateRecipeStr ? 'Found' : 'Not found');
 
-        setFormData({
-          recipe_name: duplicateRecipe.recipe_name,
-          serving_size: duplicateRecipe.serving_size,
-          genre: duplicateRecipe.genre,
-          prep_time: duplicateRecipe.prep_time || 0,
-          cook_time: duplicateRecipe.cook_time || 0,
-          dietary_restrictions: duplicateRecipe.dietary_restrictions || [] // Load dietary restrictions
-        });
+      if (duplicateRecipeStr) {
+        try {
+          const duplicateRecipe = JSON.parse(duplicateRecipeStr);
+          console.log('Found duplicated recipe to load:', duplicateRecipe);
 
-        setIngredients(duplicateRecipe.ingredients.map(ing => ({
-          name: ing.name,
-          quantity: ing.quantity,
-          unit: ing.unit
-        })));
+          setFormData({
+            recipe_name: duplicateRecipe.recipe_name,
+            description: duplicateRecipe.description || '', // Load description
+            serving_size: duplicateRecipe.serving_size,
+            genre: duplicateRecipe.genre,
+            prep_time: duplicateRecipe.prep_time || 0,
+            cook_time: duplicateRecipe.cook_time || 0,
+            dietary_restrictions: duplicateRecipe.dietary_restrictions || [] // Load dietary restrictions
+          });
 
-        setInstructions([...duplicateRecipe.instructions]);
+          setIngredients(duplicateRecipe.ingredients.map(ing => ({
+            name: ing.name,
+            quantity: ing.quantity,
+            unit: ing.unit
+          })));
 
-        if (duplicateRecipe.notes && duplicateRecipe.notes.length > 0) {
-          setNotes([...duplicateRecipe.notes]);
-        } else {
-          setNotes(['']);
+          setInstructions([...duplicateRecipe.instructions]);
+
+          if (duplicateRecipe.notes && duplicateRecipe.notes.length > 0) {
+            setNotes([...duplicateRecipe.notes]);
+          } else {
+            setNotes(['']);
+          }
+        } catch (error) {
+          console.error('Error parsing duplicated recipe:', error);
         }
-
-        // Only remove from sessionStorage after successfully loading
-        // This helps for debugging and retries if needed
-        // sessionStorage.removeItem('duplicateRecipe');
-      } catch (error) {
-        console.error('Error parsing duplicated recipe:', error);
       }
+    } else {
+      // NOT duplicating - clear any existing sessionStorage data and reset to blank form
+      console.log('Not duplicating - clearing sessionStorage and resetting form');
+      sessionStorage.removeItem('duplicateRecipe');
+      sessionStorage.removeItem('originalRecipe');
+
+      // Reset to blank form
+      setFormData({
+        recipe_name: '',
+        description: '', // Reset description
+        serving_size: 1,
+        genre: 'dinner',
+        prep_time: 0,
+        cook_time: 0,
+        dietary_restrictions: []
+      });
+
+      setIngredients([{ name: '', quantity: '', unit: 'cup' }]);
+      setInstructions(['']);
+      setNotes(['']);
     }
-  }, []);
+  }, [location.search]);
 
   // Handle edit mode separately
   useEffect(() => {
     if (editMode && existingRecipe) {
       setFormData({
         recipe_name: existingRecipe.recipe_name,
+        description: existingRecipe.description || '', // Load description
         serving_size: existingRecipe.serving_size,
         genre: existingRecipe.genre,
         prep_time: existingRecipe.prep_time || 0,
@@ -156,8 +180,8 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
     const fetchOptions = async () => {
       try {
         const [unitsRes, genresRes] = await Promise.all([
-          axios.get(`${apiBaseUrl}/measuring-units`),
-          axios.get(`${apiBaseUrl}/genres`)
+          axios.get(`http://127.0.0.1:8000/measuring-units`),
+          axios.get(`http://127.0.0.1:8000/genres`)
         ]);
         setAvailableUnits(unitsRes.data.units);
 
@@ -631,6 +655,7 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
 
       const recipeData = {
         recipe_name: formData.recipe_name.trim(),
+        description: formData.description.trim() || null, // Include description
         serving_size: parseInt(formData.serving_size),
         genre: formData.genre,
         prep_time: parseInt(formData.prep_time || 0),
@@ -667,7 +692,8 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
               recipeData.cook_time === originalRecipe.cook_time &&
               JSON.stringify(recipeData.ingredients) === JSON.stringify(originalRecipe.ingredients) &&
               JSON.stringify(recipeData.instructions) === JSON.stringify(originalRecipe.instructions) &&
-              JSON.stringify(recipeData.notes) === JSON.stringify(originalRecipe.notes || []);
+              JSON.stringify(recipeData.notes) === JSON.stringify(originalRecipe.notes || []) &&
+              JSON.stringify(recipeData.dietary_restrictions) === JSON.stringify(originalRecipe.dietary_restrictions || []);
 
             if (isExactDuplicate) {
               setError('You must make at least one change to create a variant of this recipe.');
@@ -682,6 +708,7 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
 
         // Clean up after comparison
         sessionStorage.removeItem('originalRecipe');
+        sessionStorage.removeItem('duplicateRecipe');
       }
 
       let response;
@@ -689,17 +716,18 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
       if (editMode && existingRecipe) {
         // Update existing recipe
         console.log('Updating recipe:', recipeData);
-        response = await axios.put(`${apiBaseUrl}/recipes/${existingRecipe.id}`, recipeData);
+        response = await axios.put(`http://127.0.0.1:8000/recipes/${existingRecipe.id}`, recipeData);
         setSuccess('Recipe updated successfully! 🎉');
       } else {
         // Create new recipe
         console.log('Creating recipe:', recipeData);
-        response = await axios.post(`${apiBaseUrl}/recipes`, recipeData);
+        response = await axios.post(`http://127.0.0.1:8000/recipes`, recipeData);
         setSuccess('Recipe created successfully! 🎉');
 
         // Reset form for new recipe
         setFormData({
           recipe_name: '',
+          description: '', // Reset description
           serving_size: 1,
           genre: 'dinner',
           prep_time: 0,
@@ -887,6 +915,31 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
               placeholder="Enter recipe name"
               required
             />
+          </div>
+
+          {/* Description */}
+          <div style={{ marginBottom: '2rem' }}>
+            <label style={labelStyle}>Description (Optional)</label>
+            <textarea
+              name="description"
+              value={formData.description}
+              onChange={handleInputChange}
+              style={{
+                ...inputStyle,
+                minHeight: '100px',
+                resize: 'vertical'
+              }}
+              placeholder="Brief description of your recipe (e.g., 'A delicious chocolate chip cookie recipe passed down from my grandmother...')"
+              maxLength={500}
+            />
+            <div style={{
+              fontSize: '12px',
+              color: formData.description.length > 450 ? '#dc3545' : '#666',
+              marginTop: '0.5rem',
+              textAlign: 'right'
+            }}>
+              {formData.description.length}/500 characters
+            </div>
           </div>
 
           {/* Ingredients Section */}

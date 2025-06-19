@@ -98,19 +98,19 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
     return colors[genre] || '#003366';
   };
 
-  // Styles
+  // Styles - Made card smaller
   const cardStyle = {
     background: 'white',
     border: '2px solid #003366',
     borderRadius: '15px',
-    padding: '1.5rem',
+    padding: '1.25rem', // Reduced from 1.5rem
     boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)',
     cursor: 'pointer',
     transition: 'all 0.3s ease',
-    minHeight: '250px',
+    minHeight: '180px', // Reduced from 250px
     display: 'flex',
     flexDirection: 'column',
-    position: 'relative' // For absolute positioning of favorite button
+    position: 'relative' // For absolute positioning of favorite button and dietary tags
   };
 
   const headerStyle = {
@@ -128,33 +128,43 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
     lineHeight: '1.3'
   };
 
+  const badgeContainerStyle = {
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-end'
+  };
+
   const genreBadgeStyle = {
     backgroundColor: getGenreColor(recipe?.genre),
     color: 'white',
     padding: '4px 8px',
     borderRadius: '20px',
     fontSize: '0.8rem',
-    fontWeight: '500'
+    fontWeight: '500',
+    marginBottom: '4px' // Add space for dietary restriction tags below
+  };
+
+  const dietaryTagsContainerStyle = {
+    position: 'absolute',
+    top: '32px', // Position below the genre badge (genre badge height + margin)
+    right: '0',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: '2px', // Small gap between multiple dietary restriction tags
+    zIndex: 1
   };
 
   const dietaryBadgeStyle = {
     backgroundColor: '#28a745', // Green color for dietary restrictions
     color: 'white',
-    padding: '3px 6px',
+    padding: '2px 6px',
     borderRadius: '12px',
     fontSize: '0.7rem',
     fontWeight: '500',
-    marginTop: '4px',
-    display: 'inline-block',
-    marginRight: '4px'
-  };
-
-  const servingBadgeStyle = {
-    backgroundColor: '#003366',
-    color: 'white',
-    padding: '8px 16px',
-    borderRadius: '20px',
-    fontSize: '1rem'
+    whiteSpace: 'nowrap',
+    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.2)' // Subtle shadow to make it stand out
   };
 
   const metaStyle = {
@@ -163,7 +173,7 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
     gap: '2rem',
     fontSize: '0.9rem',
     color: '#666',
-    marginBottom: '1.5rem'
+    marginBottom: '1rem' // Reduced from 1.5rem
   };
 
   return (
@@ -214,22 +224,22 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
       {/* Header */}
       <div style={headerStyle}>
         <h3 style={titleStyle}>{recipe.recipe_name}</h3>
-        <div>
-          {/* Genre Badge - Always visible */}
+        <div style={badgeContainerStyle}>
+          {/* Genre Badge */}
           <div style={genreBadgeStyle}>
             {getGenreEmoji(recipe.genre)} {formatGenreName(recipe.genre)}
           </div>
 
-          {/* Dietary Restrictions - Only show if they exist */}
+          {/* Dietary Restrictions - Absolutely positioned below genre badge */}
           {recipe.dietary_restrictions && recipe.dietary_restrictions.length > 0 && (
-            <div style={{ marginTop: '8px', textAlign: 'right' }}>
-              {recipe.dietary_restrictions.map(restriction => (
-                <span
+            <div style={dietaryTagsContainerStyle}>
+              {recipe.dietary_restrictions.map((restriction, index) => (
+                <div
                   key={restriction}
                   style={dietaryBadgeStyle}
                 >
                   {formatDietaryRestrictionName(restriction)}
-                </span>
+                </div>
               ))}
             </div>
           )}
@@ -242,82 +252,29 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
         <span>👨‍🍳 By {recipe.created_by}</span>
       </div>
 
-      {/* Ingredients Preview */}
+      {/* Description Section - Replaces ingredients and instructions */}
       <div style={{
         flex: 1,
-        marginBottom: '1rem'
+        marginBottom: '1rem',
+        display: 'flex',
+        flexDirection: 'column'
       }}>
-        <h4 style={{
-          color: '#003366',
-          marginBottom: '0.5rem',
-          fontSize: '1rem'
-        }}>
-          🛒 Ingredients ({recipe.ingredients.length})
-        </h4>
         <div style={{
-          maxHeight: '80px',
-          overflowY: 'auto',
-          fontSize: '0.9rem',
-          color: '#666'
+          fontSize: '0.95rem',
+          color: '#555',
+          lineHeight: '1.5',
+          textAlign: 'center',
+          padding: '0.5rem',
+          backgroundColor: '#f8f9fa',
+          borderRadius: '8px',
+          border: '1px solid #e9ecef',
+          minHeight: '60px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontStyle: recipe.description ? 'normal' : 'italic'
         }}>
-          {recipe.ingredients.slice(0, 5).map((ingredient, index) => (
-            <div
-              key={index}
-              style={{
-                padding: '2px 0',
-                borderBottom: index < Math.min(4, recipe.ingredients.length - 1)
-                  ? '1px solid #f0f8ff'
-                  : 'none'
-              }}
-            >
-              {ingredient.quantity} {ingredient.unit} {ingredient.name}
-            </div>
-          ))}
-          {recipe.ingredients.length > 5 && (
-            <div style={{
-              padding: '2px 0',
-              fontStyle: 'italic',
-              color: '#003366'
-            }}>
-              + {recipe.ingredients.length - 5} more...
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Instructions Preview */}
-      <div style={{
-        marginBottom: '1rem'
-      }}>
-        <h4 style={{
-          color: '#003366',
-          marginBottom: '0.5rem',
-          fontSize: '1rem'
-        }}>
-          📝 Instructions ({recipe.instructions.length} steps)
-        </h4>
-        <div style={{
-          fontSize: '0.9rem',
-          color: '#666',
-          lineHeight: '1.4'
-        }}>
-          {recipe.instructions[0] && (
-            <div>
-              <strong>1.</strong> {recipe.instructions[0].length > 80
-                ? `${recipe.instructions[0].substring(0, 80)}...`
-                : recipe.instructions[0]
-              }
-            </div>
-          )}
-          {recipe.instructions.length > 1 && (
-            <div style={{
-              marginTop: '4px',
-              fontStyle: 'italic',
-              color: '#003366'
-            }}>
-              + {recipe.instructions.length - 1} more step{recipe.instructions.length - 1 !== 1 ? 's' : ''}...
-            </div>
-          )}
+          {recipe.description || 'No description available'}
         </div>
       </div>
 
