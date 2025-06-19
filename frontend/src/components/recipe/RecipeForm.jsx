@@ -3,7 +3,6 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import axios from 'axios';
-import { Fraction } from 'fraction.js';
 
 // Format genre display name
 const formatGenreName = (genre) => {
@@ -52,12 +51,12 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
   const [notes, setNotes] = useState(['']);
 
   // Options state
-  const [availableUnits, setAvailableUnits] = useState([
-    'cup', 'cups', 'tablespoon', 'tablespoons', 'teaspoon', 'teaspoons',
-    'ounce', 'ounces', 'pound', 'pounds', 'gram', 'grams',
-    'kilogram', 'kilograms', 'liter', 'liters', 'milliliter', 'milliliters',
-    'piece', 'pieces', 'whole', 'pinch', 'dash'
-  ]);
+const [availableUnits, setAvailableUnits] = useState([
+  'cup', 'cups', 'tablespoon', 'tablespoons', 'teaspoon', 'teaspoons',
+  'ounce', 'ounces', 'pound', 'pounds', 'gram', 'grams',
+  'kilogram', 'kilograms', 'liter', 'liters', 'milliliter', 'milliliters',
+  'piece', 'pieces', 'whole', 'stick', 'sticks', 'pinch', 'dash'  // Added 'stick', 'sticks'
+]);
 
   const [availableGenres, setAvailableGenres] = useState([
     'breakfast', 'lunch', 'dinner', 'snack', 'dessert', 'appetizer'
@@ -139,34 +138,116 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
   }, [location.search]);
 
   // Handle edit mode separately
-  useEffect(() => {
-    if (editMode && existingRecipe) {
-      setFormData({
-        recipe_name: existingRecipe.recipe_name,
-        description: existingRecipe.description || '', // Load description
-        serving_size: existingRecipe.serving_size,
-        genre: existingRecipe.genre,
-        prep_time: existingRecipe.prep_time || 0,
-        cook_time: existingRecipe.cook_time || 0,
-        dietary_restrictions: existingRecipe.dietary_restrictions || [] // Load dietary restrictions
-      });
+useEffect(() => {
+  console.log('Edit mode useEffect running:', { editMode, existingRecipe: !!existingRecipe });
 
-      setIngredients(existingRecipe.ingredients.map(ing => ({
-        name: ing.name,
-        quantity: ing.quantity,
-        unit: ing.unit
-      })));
+  if (editMode && existingRecipe) {
+    console.log('Setting form data from existing recipe:', {
+      recipeName: existingRecipe.recipe_name,
+      description: existingRecipe.description,
+      hasDescription: !!existingRecipe.description
+    });
 
-      setInstructions([...existingRecipe.instructions]);
+    setFormData({
+      recipe_name: existingRecipe.recipe_name,
+      description: existingRecipe.description || '', // Load description
+      serving_size: existingRecipe.serving_size,
+      genre: existingRecipe.genre,
+      prep_time: existingRecipe.prep_time || 0,
+      cook_time: existingRecipe.cook_time || 0,
+      dietary_restrictions: existingRecipe.dietary_restrictions || []
+    });
 
-      // Add this part to load notes
-      if (existingRecipe.notes && existingRecipe.notes.length > 0) {
-        setNotes([...existingRecipe.notes]);
-      } else {
-        setNotes(['']);
+    setIngredients(existingRecipe.ingredients.map(ing => ({
+      name: ing.name,
+      quantity: ing.quantity,
+      unit: ing.unit
+    })));
+
+    setInstructions([...existingRecipe.instructions]);
+
+    if (existingRecipe.notes && existingRecipe.notes.length > 0) {
+      setNotes([...existingRecipe.notes]);
+    } else {
+      setNotes(['']);
+    }
+
+    console.log('Form data set for edit mode');
+  }
+}, [editMode, existingRecipe]);
+
+// 2. Handle duplication and new recipe creation (only when NOT in edit mode)
+useEffect(() => {
+  console.log('Duplication/New recipe useEffect running:', { editMode });
+
+  // Skip this effect entirely if in edit mode
+  if (editMode) {
+    console.log('Skipping duplication useEffect because in edit mode');
+    return;
+  }
+
+  const urlParams = new URLSearchParams(location.search);
+  const isDuplicating = urlParams.get('duplicate') === 'true';
+
+  console.log('Duplication check:', { isDuplicating });
+
+  if (isDuplicating) {
+    const duplicateRecipeStr = sessionStorage.getItem('duplicateRecipe');
+    console.log('Duplicating - checking for duplicated recipe:', duplicateRecipeStr ? 'Found' : 'Not found');
+
+    if (duplicateRecipeStr) {
+      try {
+        const duplicateRecipe = JSON.parse(duplicateRecipeStr);
+        console.log('Found duplicated recipe to load:', duplicateRecipe);
+
+        setFormData({
+          recipe_name: duplicateRecipe.recipe_name,
+          description: duplicateRecipe.description || '',
+          serving_size: duplicateRecipe.serving_size,
+          genre: duplicateRecipe.genre,
+          prep_time: duplicateRecipe.prep_time || 0,
+          cook_time: duplicateRecipe.cook_time || 0,
+          dietary_restrictions: duplicateRecipe.dietary_restrictions || []
+        });
+
+        setIngredients(duplicateRecipe.ingredients.map(ing => ({
+          name: ing.name,
+          quantity: ing.quantity,
+          unit: ing.unit
+        })));
+
+        setInstructions([...duplicateRecipe.instructions]);
+
+        if (duplicateRecipe.notes && duplicateRecipe.notes.length > 0) {
+          setNotes([...duplicateRecipe.notes]);
+        } else {
+          setNotes(['']);
+        }
+      } catch (error) {
+        console.error('Error parsing duplicated recipe:', error);
       }
     }
-  }, [editMode, existingRecipe]);
+  } else {
+    // NOT duplicating - clear sessionStorage and reset to blank form
+    console.log('Not duplicating - clearing sessionStorage and resetting form');
+    sessionStorage.removeItem('duplicateRecipe');
+    sessionStorage.removeItem('originalRecipe');
+
+    setFormData({
+      recipe_name: '',
+      description: '',
+      serving_size: 1,
+      genre: 'dinner',
+      prep_time: 0,
+      cook_time: 0,
+      dietary_restrictions: []
+    });
+
+    setIngredients([{ name: '', quantity: '', unit: 'cup' }]);
+    setInstructions(['']);
+    setNotes(['']);
+  }
+}, [location.search, editMode]);
 
   // Authentication check
   useEffect(() => {
@@ -203,130 +284,183 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
     }
   }, [isAuthenticated, apiBaseUrl]);
 
-  // Fraction utilities
-  const formatQuantity = (value) => {
-    if (value === undefined || value === null || value === '') return '';
+  // Fraction utilities - Robust
+const formatQuantity = (value) => {
+  if (value === undefined || value === null || value === '') return '';
 
-    try {
-      // Handle integer values
-      if (Number.isInteger(Number(value))) {
-        return String(value);
-      }
+  try {
+    // Convert to number first
+    const numValue = typeof value === 'number' ? value : parseFloat(value);
 
-      // Convert to fraction
-      const frac = new Fraction(value);
-
-      // If it's a proper fraction (less than 1)
-      if (frac.compare(1) < 0) {
-        return `${frac.n}/${frac.d}`;
-      }
-
-      // If it's an improper fraction (greater than or equal to 1)
-      const wholePart = Math.floor(frac.valueOf());
-      const fractionalPart = frac.subtract(wholePart);
-
-      if (fractionalPart.valueOf() === 0) {
-        return String(wholePart);
-      }
-
-      return `${wholePart} ${fractionalPart.n}/${fractionalPart.d}`;
-    } catch (e) {
-      console.error("Error formatting fraction:", e);
-      return String(value);
+    // Handle integer values
+    if (Number.isInteger(numValue)) {
+      return String(numValue);
     }
+
+    // Use a more robust fraction conversion
+    return convertDecimalToMixedNumber(numValue);
+  } catch (e) {
+    console.error("Error formatting fraction:", e);
+    return String(value);
+  }
+};
+
+const convertDecimalToMixedNumber = (decimal) => {
+  try {
+    // Handle edge cases
+    if (decimal === 0) return "0";
+    if (decimal < 0) return String(decimal); // Handle negative numbers as decimals
+
+    // Get the whole number part
+    const wholePart = Math.floor(decimal);
+    const fractionalPart = decimal - wholePart;
+
+    // If no fractional part, return whole number
+    if (fractionalPart === 0) {
+      return String(wholePart);
+    }
+
+    // Convert fractional part to fraction
+    const fraction = decimalToFraction(fractionalPart);
+
+    // Return appropriate format
+    if (wholePart === 0) {
+      return fraction; // Just the fraction (e.g., "1/2")
+    } else {
+      return `${wholePart} ${fraction}`; // Mixed number (e.g., "1 1/2")
+    }
+  } catch (e) {
+    console.error("Error converting to mixed number:", e);
+    return String(decimal);
+  }
+};
+
+const decimalToFraction = (decimal) => {
+  // Common fractions lookup for better accuracy
+  const commonFractions = {
+    0.125: "1/8",
+    0.25: "1/4",
+    0.375: "3/8",
+    0.5: "1/2",
+    0.625: "5/8",
+    0.75: "3/4",
+    0.875: "7/8",
+    0.333: "1/3",
+    0.667: "2/3",
+    0.2: "1/5",
+    0.4: "2/5",
+    0.6: "3/5",
+    0.8: "4/5"
   };
 
-  const isValidFractionInput = (input) => {
-    // Handle non-string or undefined inputs
-    if (input === undefined || input === null) return true;
-
-    // Convert to string to ensure we can use string methods
-    const inputStr = String(input);
-
-    // Empty string is valid
-    if (inputStr === '') return true;
-
-    // Check if it's a simple number
-    if (!isNaN(inputStr) && !inputStr.includes('/')) return true;
-
-    // Allow partial fractions (during typing)
-    if (inputStr === '/') return true;
-    if (/^\d+\/$/.test(inputStr)) return true;  // "1/"
-    if (/^\/\d+$/.test(inputStr)) return true;  // "/2"
-
-    // Whole number with partial fraction
-    if (/^\d+ \d+\/$/.test(inputStr)) return true;  // "1 1/"
-    if (/^\d+ \/\d+$/.test(inputStr)) return true;  // "1 /2"
-    if (/^\d+ $/.test(inputStr)) return true;  // "1 " (space after number)
-
-    // Check for valid complete fractions
-    try {
-      if (inputStr.includes('/')) {
-        // Mixed number with fraction
-        if (inputStr.includes(' ')) {
-          const [whole, fraction] = inputStr.split(' ');
-          if (isNaN(whole)) return false;
-
-          if (!fraction.includes('/')) return true; // "1 2" is valid during typing
-
-          const [num, denom] = fraction.split('/');
-          return !isNaN(num) && (!denom || !isNaN(denom));
-        }
-
-        // Simple fraction
-        const [num, denom] = inputStr.split('/');
-        return (!num || !isNaN(num)) && (!denom || !isNaN(denom));
-      }
-
-      // Just a number
-      return !isNaN(inputStr);
-    } catch (e) {
-      return false;
+  // Check for common fractions first (with tolerance)
+  for (const [dec, frac] of Object.entries(commonFractions)) {
+    if (Math.abs(decimal - parseFloat(dec)) < 0.001) {
+      return frac;
     }
-  };
+  }
 
-  const parseQuantity = (value) => {
-    if (value === undefined || value === null || value === '') return '';
+  // Use algorithm to find fraction
+  let tolerance = 1e-6;
+  let h1 = 1, h2 = 0, k1 = 0, k2 = 1;
+  let b = decimal;
 
-    try {
-      // If it's already a number, return it
-      if (typeof value === 'number') return value;
+  do {
+    let a = Math.floor(b);
+    let aux = h1; h1 = a * h1 + h2; h2 = aux;
+    aux = k1; k1 = a * k1 + k2; k2 = aux;
+    b = 1 / (b - a);
+  } while (Math.abs(decimal - h1 / k1) > decimal * tolerance);
 
-      // Convert to string to ensure we can use string methods
-      const stringValue = String(value);
+  return `${h1}/${k1}`;
+};
 
-      // Handle simple numeric values
-      if (!stringValue.includes('/')) {
-        return parseFloat(stringValue);
-      }
+const isValidFractionInput = (input) => {
+  if (input === undefined || input === null) return true;
 
-      // Handle mixed numbers (e.g., "1 1/2")
-      if (stringValue.includes(' ')) {
-        const [whole, fractionPart] = stringValue.split(' ');
-        const [numerator, denominator] = fractionPart.split('/');
+  const inputStr = String(input).trim();
+  if (inputStr === '') return true;
 
-        // Check if we have a valid fraction part
-        if (!denominator || parseInt(denominator) === 0) {
-          return stringValue; // Return as is if not fully formed
-        }
+  // Allow simple numbers
+  if (!isNaN(inputStr) && !inputStr.includes('/')) return true;
 
-        return parseFloat(whole) + (parseFloat(numerator) / parseFloat(denominator));
-      }
+  // Allow partial input during typing
+  if (inputStr === '/') return true;
+  if (/^\d+\/$/.test(inputStr)) return true;  // "1/"
+  if (/^\/\d+$/.test(inputStr)) return true;  // "/2"
+  if (/^\d+ $/.test(inputStr)) return true;   // "1 " (space after number)
+  if (/^\d+ \/$/.test(inputStr)) return true; // "1 /"
+  if (/^\d+ \d+\/$/.test(inputStr)) return true; // "1 1/"
 
-      // Handle simple fractions (e.g., "1/2")
-      const [numerator, denominator] = stringValue.split('/');
-
-      // Check if we have a valid denominator
-      if (!denominator || parseInt(denominator) === 0) {
-        return stringValue; // Return as is if not fully formed
-      }
-
-      return parseFloat(numerator) / parseFloat(denominator);
-    } catch (e) {
-      console.error("Error parsing fraction:", e);
-      return value;
+  // Validate complete fractions and mixed numbers
+  try {
+    // Simple fraction like "1/2"
+    if (/^\d+\/\d+$/.test(inputStr)) {
+      const [num, denom] = inputStr.split('/');
+      return !isNaN(num) && !isNaN(denom) && parseInt(denom) !== 0;
     }
-  };
+
+    // Mixed number like "1 1/2"
+    if (/^\d+\s+\d+\/\d+$/.test(inputStr)) {
+      const parts = inputStr.split(' ');
+      const whole = parts[0];
+      const [num, denom] = parts[1].split('/');
+      return !isNaN(whole) && !isNaN(num) && !isNaN(denom) && parseInt(denom) !== 0;
+    }
+
+    // Just a number
+    return !isNaN(inputStr);
+  } catch (e) {
+    return false;
+  }
+};
+
+const parseQuantity = (value) => {
+  if (value === undefined || value === null || value === '') return '';
+
+  try {
+    if (typeof value === 'number') return value;
+
+    const stringValue = String(value).trim();
+
+    // Handle simple numeric values
+    if (!stringValue.includes('/')) {
+      const parsed = parseFloat(stringValue);
+      return isNaN(parsed) ? stringValue : parsed;
+    }
+
+    // Handle mixed numbers (e.g., "1 1/2")
+    if (stringValue.includes(' ')) {
+      const parts = stringValue.split(' ');
+      if (parts.length !== 2) return stringValue;
+
+      const whole = parseFloat(parts[0]);
+      const fractionPart = parts[1];
+
+      if (isNaN(whole) || !fractionPart.includes('/')) return stringValue;
+
+      const [numerator, denominator] = fractionPart.split('/');
+      const num = parseInt(numerator);
+      const denom = parseInt(denominator);
+
+      if (isNaN(num) || isNaN(denom) || denom === 0) return stringValue;
+
+      return whole + (num / denom);
+    }
+
+    // Handle simple fractions (e.g., "1/2")
+    const [numerator, denominator] = stringValue.split('/');
+    const num = parseInt(numerator);
+    const denom = parseInt(denominator);
+
+    if (isNaN(num) || isNaN(denom) || denom === 0) return stringValue;
+
+    return num / denom;
+  } catch (e) {
+    console.error("Error parsing quantity:", e);
+    return value;
+  }
+};
 
   // Form handlers
   const handleInputChange = (e) => {

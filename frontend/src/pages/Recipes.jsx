@@ -16,6 +16,8 @@ const Recipes = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGenre, setSelectedGenre] = useState('');
   const [availableGenres, setAvailableGenres] = useState([]);
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+  const [favoriteRecipeIds, setFavoriteRecipeIds] = useState([]);
 
   // Authentication check
   useEffect(() => {
@@ -23,6 +25,28 @@ const Recipes = () => {
       navigate('/login');
     }
   }, [isAuthenticated, navigate]);
+
+  // Function to fetch user's favorites
+  const fetchUserFavorites = async () => {
+    try {
+      const response = await axios.get('http://127.0.0.1:8000/users/me/favorites');
+      const favoriteIds = response.data.map(recipe => recipe.id);
+      setFavoriteRecipeIds(favoriteIds);
+    } catch (error) {
+      console.error('Error fetching user favorites:', error);
+    }
+  };
+
+  // Handle real-time favorite changes
+  const handleFavoriteChange = (recipeId, isFavorited) => {
+    if (isFavorited) {
+      // Add to favorites
+      setFavoriteRecipeIds(prev => [...prev, recipeId]);
+    } else {
+      // Remove from favorites
+      setFavoriteRecipeIds(prev => prev.filter(id => id !== recipeId));
+    }
+  };
 
   // Fetch recipes and genres from API
   useEffect(() => {
@@ -52,6 +76,9 @@ const Recipes = () => {
         setRecipes(recipesRes.data);
         setFilteredRecipes(recipesRes.data);
         setAvailableGenres(genresRes.data.genres);
+
+        // Also fetch user favorites
+        await fetchUserFavorites();
       } catch (error) {
         console.error('Error fetching data:', error);
         setError('Failed to load recipes. Please try again.');
@@ -65,29 +92,70 @@ const Recipes = () => {
     }
   }, [isAuthenticated]);
 
-  // Filter recipes based on search and genre
+  // Filter recipes based on search, genre, and favorites
   useEffect(() => {
     let filtered = recipes;
 
-    // Filter by search term
-    if (searchTerm) {
-      filtered = filtered.filter(recipe =>
-        recipe.recipe_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        recipe.ingredients.some(ing =>
-          ing.name.toLowerCase().includes(searchTerm.toLowerCase())
-        )
-      );
+    // Filter by favorites first if active
+    if (showFavoritesOnly) {
+      filtered = filtered.filter(recipe => favoriteRecipeIds.includes(recipe.id));
     }
 
-    // Filter by genre
+    // Enhanced search - searches through multiple fields
+    if (searchTerm) {
+      const searchLower = searchTerm.toLowerCase();
+
+      filtered = filtered.filter(recipe => {
+        // Search in recipe name
+        const nameMatch = recipe.recipe_name.toLowerCase().includes(searchLower);
+
+        // Search in description
+        const descriptionMatch = recipe.description &&
+          recipe.description.toLowerCase().includes(searchLower);
+
+        // Search in ingredients
+        const ingredientMatch = recipe.ingredients.some(ing =>
+          ing.name.toLowerCase().includes(searchLower)
+        );
+
+        // Search in instructions
+        const instructionMatch = recipe.instructions.some(instruction =>
+          instruction.toLowerCase().includes(searchLower)
+        );
+
+        // Search in notes
+        const notesMatch = recipe.notes && recipe.notes.some(note =>
+          note.toLowerCase().includes(searchLower)
+        );
+
+        // Search in genre
+        const genreMatch = recipe.genre.toLowerCase().includes(searchLower);
+
+        // Search in dietary restrictions
+        const dietaryMatch = recipe.dietary_restrictions &&
+          recipe.dietary_restrictions.some(restriction =>
+            restriction.toLowerCase().includes(searchLower)
+          );
+
+        // Search in creator name
+        const creatorMatch = recipe.created_by.toLowerCase().includes(searchLower);
+
+        // Return true if any field matches
+        return nameMatch || descriptionMatch || ingredientMatch ||
+               instructionMatch || notesMatch || genreMatch ||
+               dietaryMatch || creatorMatch;
+      });
+    }
+
+    // Filter by genre (keep existing logic)
     if (selectedGenre) {
       filtered = filtered.filter(recipe => recipe.genre === selectedGenre);
     }
 
     setFilteredRecipes(filtered);
-  }, [recipes, searchTerm, selectedGenre]);
+  }, [recipes, searchTerm, selectedGenre, showFavoritesOnly, favoriteRecipeIds]);
 
-  // Group recipes alphabetically
+  // Group recipes alphabetically (only used when not showing favorites)
   const groupedRecipes = filteredRecipes.reduce((acc, recipe) => {
     const firstLetter = recipe.recipe_name.charAt(0).toUpperCase();
     if (!acc[firstLetter]) {
@@ -106,9 +174,16 @@ const Recipes = () => {
       // console.log('Refreshed recipes:', response.data);
       setRecipes(response.data);
       setFilteredRecipes(response.data);
+      // Refresh favorites too
+      await fetchUserFavorites();
     } catch (error) {
       console.error('Error refreshing recipes:', error);
     }
+  };
+
+  // Handle favorites toggle
+  const handleFavoritesToggle = () => {
+    setShowFavoritesOnly(!showFavoritesOnly);
   };
 
   // Render guards
@@ -207,8 +282,9 @@ const Recipes = () => {
 
   const recipeGridStyle = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-    gap: '1.5rem'
+    gridTemplateColumns: 'repeat(auto-fill, minmax(375px, 275px))', // Keep user's specified sizing
+    gap: '1.5rem',
+    justifyContent: 'center' // Center the grid when there are fewer cards
   };
 
   const alphabetHeaderStyle = {
@@ -241,6 +317,9 @@ const Recipes = () => {
             {filteredRecipes.length} recipe{filteredRecipes.length !== 1 ? 's' : ''} found
             {recipes.length > 0 && (
               <span> • Total: {recipes.length}</span>
+            )}
+            {showFavoritesOnly && (
+              <span> • Showing Favorites Only</span>
             )}
           </p>
         </div>
@@ -311,6 +390,22 @@ const Recipes = () => {
               🔄 Refresh
             </button>
 
+            <button
+              onClick={handleFavoritesToggle}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: showFavoritesOnly ? '#0066cc' : '#28a745', // Darker when active
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                fontSize: '14px',
+                cursor: 'pointer',
+                transition: 'background-color 0.3s ease'
+              }}
+            >
+              ⭐ {showFavoritesOnly ? 'Show All' : 'Favorites'}
+            </button>
+
             {(searchTerm || selectedGenre) && (
               <button
                 onClick={() => {
@@ -367,10 +462,12 @@ const Recipes = () => {
         {filteredRecipes.length === 0 && !loading && !error && (
           <div style={emptyStateStyle}>
             <h2 style={{ color: '#003366', marginBottom: '1rem' }}>
-              {searchTerm || selectedGenre ? '🔍 No recipes found' : '📝 No recipes yet'}
+              {searchTerm || selectedGenre || showFavoritesOnly ? '🔍 No recipes found' : '📝 No recipes yet'}
             </h2>
             <p style={{ color: '#666', marginBottom: '2rem' }}>
-              {searchTerm || selectedGenre
+              {showFavoritesOnly
+                ? 'You haven\'t favorited any recipes yet. Start by exploring and favoriting some recipes!'
+                : searchTerm || selectedGenre
                 ? 'Try adjusting your search or filter criteria'
                 : 'Start building your recipe collection by adding your first recipe!'
               }
@@ -389,11 +486,12 @@ const Recipes = () => {
                 ➕ Add Your First Recipe
               </button>
 
-              {(searchTerm || selectedGenre) && (
+              {(searchTerm || selectedGenre || showFavoritesOnly) && (
                 <button
                   onClick={() => {
                     setSearchTerm('');
                     setSelectedGenre('');
+                    setShowFavoritesOnly(false);
                   }}
                   style={{
                     ...buttonStyle,
@@ -407,18 +505,39 @@ const Recipes = () => {
           </div>
         )}
 
-        {/* Recipe Groups */}
-        {alphabeticalGroups.map(letter => (
-          <div key={letter} style={{ marginBottom: '3rem' }}>
-            <div style={alphabetHeaderStyle}>{letter}</div>
-
+        {/* Recipe Groups - Show alphabetically grouped OR simple list for favorites */}
+        {showFavoritesOnly ? (
+          // Simple alphabetical list for favorites (no letter headers)
+          filteredRecipes.length > 0 && (
             <div style={recipeGridStyle}>
-              {groupedRecipes[letter].map(recipe => (
-                <RecipeCard key={recipe.id} recipe={recipe} />
-              ))}
+              {filteredRecipes
+                .sort((a, b) => a.recipe_name.localeCompare(b.recipe_name))
+                .map(recipe => (
+                  <RecipeCard
+                    key={recipe.id}
+                    recipe={recipe}
+                    onFavoriteToggle={handleFavoriteChange}
+                  />
+                ))}
             </div>
-          </div>
-        ))}
+          )
+        ) : (
+          // Normal alphabetical grouping
+          alphabeticalGroups.map(letter => (
+            <div key={letter} style={{ marginBottom: '3rem' }}>
+              <div style={alphabetHeaderStyle}>{letter}</div>
+              <div style={recipeGridStyle}>
+                {groupedRecipes[letter].map(recipe => (
+                  <RecipeCard
+                    key={recipe.id}
+                    recipe={recipe}
+                    onFavoriteToggle={handleFavoriteChange}
+                  />
+                ))}
+              </div>
+            </div>
+          ))
+        )}
 
         {/* Recipe Count Summary */}
         {filteredRecipes.length > 0 && (
@@ -436,7 +555,9 @@ const Recipes = () => {
             </h3>
             <p style={{ color: '#666' }}>
               You have <strong>{recipes.length}</strong> recipe{recipes.length !== 1 ? 's' : ''} in your collection!
-              {searchTerm || selectedGenre ? (
+              {showFavoritesOnly ? (
+                <span> <strong>{favoriteRecipeIds.length}</strong> of them are favorited.</span>
+              ) : searchTerm || selectedGenre ? (
                 <span> Showing <strong>{filteredRecipes.length}</strong> filtered result{filteredRecipes.length !== 1 ? 's' : ''}.</span>
               ) : null}
             </p>

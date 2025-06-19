@@ -126,6 +126,8 @@ class MeasuringUnit(str, Enum):
     PIECE = "piece"
     PIECES = "pieces"
     WHOLE = "whole"
+    STICK = "stick"        # ADD THIS LINE
+    STICKS = "sticks"      # ADD THIS LINE
     PINCH = "pinch"
     DASH = "dash"
 
@@ -268,6 +270,7 @@ class FavoriteResponse(BaseModel):
 class EnhancedRecipeResponse(BaseModel):
     id: str
     recipe_name: str
+    description: Optional[str] = None  # ADD THIS LINE
     ingredients: List[Ingredient]
     instructions: List[str]
     serving_size: int
@@ -275,7 +278,7 @@ class EnhancedRecipeResponse(BaseModel):
     prep_time: Optional[int] = 0
     cook_time: Optional[int] = 0
     notes: Optional[List[str]] = []
-    dietary_restrictions: Optional[List[str]] = []  # Add this field
+    dietary_restrictions: Optional[List[str]] = []
     created_by: str
     created_at: datetime
     average_rating: Optional[float] = None
@@ -551,7 +554,7 @@ async def get_recipe(recipe_id: str, current_user: dict = Depends(get_current_us
     return EnhancedRecipeResponse(
         id=str(recipe_doc["_id"]),
         recipe_name=recipe_doc["recipe_name"],
-        description=recipe_doc.get("description"),  # Add this line
+        description=recipe_doc.get("description"),  # ADD THIS LINE
         ingredients=ingredients,
         instructions=recipe_doc["instructions"],
         serving_size=recipe_doc["serving_size"],
@@ -563,7 +566,6 @@ async def get_recipe(recipe_id: str, current_user: dict = Depends(get_current_us
         created_by=recipe_doc["created_by"],
         created_at=recipe_doc["created_at"]
     )
-
 
 @app.put("/recipes/{recipe_id}", response_model=EnhancedRecipeResponse)
 async def update_recipe(

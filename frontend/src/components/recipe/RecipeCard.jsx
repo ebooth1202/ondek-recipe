@@ -125,7 +125,10 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
     fontSize: '1.3rem',
     margin: 0,
     flex: 1,
-    lineHeight: '1.3'
+    lineHeight: '1.3',
+    minHeight: '3.4rem', // Fixed height to accommodate 2 lines consistently
+    display: 'flex',
+    alignItems: 'flex-start' // Align text to top of the fixed height area
   };
 
   const badgeContainerStyle = {
@@ -252,29 +255,82 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
         <span>👨‍🍳 By {recipe.created_by}</span>
       </div>
 
-      {/* Description Section - Replaces ingredients and instructions */}
+      {/* Description Section - Truncated to 4 lines with Total Time Box */}
       <div style={{
         flex: 1,
-        marginBottom: '1rem',
+        marginBottom: '0.5rem', // Reduced from 1rem
         display: 'flex',
-        flexDirection: 'column'
+        flexDirection: 'column',
+        gap: '0.5rem' // Reduced from 0.75rem
       }}>
+        {/* Truncated Description */}
         <div style={{
-          fontSize: '0.95rem',
+          fontSize: '0.85rem', // Slightly smaller font
           color: '#555',
-          lineHeight: '1.5',
-          textAlign: 'center',
-          padding: '0.5rem',
+          lineHeight: '1.3', // Adjusted line height
+          textAlign: 'left', // Changed from center to left for better text flow
+          padding: '0.4rem 0.5rem', // Reduced top/bottom padding
           backgroundColor: '#f8f9fa',
           borderRadius: '8px',
           border: '1px solid #e9ecef',
-          minHeight: '60px',
+          height: '70px', // Increased height slightly
+          display: 'flex',
+          alignItems: 'flex-start', // Changed from center to flex-start
+          justifyContent: 'flex-start', // Changed alignment
+          fontStyle: recipe.description ? 'normal' : 'italic',
+          overflow: 'hidden',
+          position: 'relative'
+        }}>
+          <div style={{
+            display: '-webkit-box',
+            WebkitLineClamp: 4,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            width: '100%',
+            paddingTop: '2px' // Small padding to prevent top cutoff
+          }}>
+            {recipe.description || 'No description available'}
+          </div>
+        </div>
+
+        {/* Total Time Box - Made smaller and half width */}
+        <div style={{
+          backgroundColor: '#e6f0ff',
+          border: '1px solid #003366', // Thinner border
+          borderRadius: '6px', // Smaller border radius
+          padding: '0.25rem 0.5rem', // Reduced padding
+          textAlign: 'center',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          fontStyle: recipe.description ? 'normal' : 'italic'
+          gap: '0.3rem', // Reduced gap
+          minHeight: '35px', // Increased to 35px as requested
+          width: '50%', // Half the width
+          margin: '0 auto' // Center the box
         }}>
-          {recipe.description || 'No description available'}
+          <span style={{
+            fontSize: '0.9rem' // Smaller emoji
+          }}>⏱️</span>
+          <div>
+            <div style={{
+              fontSize: '0.65rem', // Smaller label
+              color: '#666',
+              fontWeight: '500',
+              lineHeight: '1'
+            }}>
+              Total Time
+            </div>
+            <div style={{
+              fontSize: '0.75rem', // Smaller time text
+              color: '#003366',
+              fontWeight: '700',
+              lineHeight: '1'
+            }}>
+              {((recipe.prep_time || 0) + (recipe.cook_time || 0)) || 'Not set'}
+              {((recipe.prep_time || 0) + (recipe.cook_time || 0)) ? ' mins' : ''}
+            </div>
+          </div>
         </div>
       </div>
 
