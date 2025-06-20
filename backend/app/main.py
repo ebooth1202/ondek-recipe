@@ -18,7 +18,7 @@ from statistics import mean
 import logging
 
 # AI imports
-from .utils.ai_helper import recipe_ai_helper
+from .utils.ai_helper import ai_helper
 
 # Load environment variables
 load_dotenv()
@@ -965,14 +965,14 @@ async def ai_chat(chat_data: ChatMessage, current_user: dict = Depends(get_curre
     Main AI chat endpoint for recipe-related conversations
     """
     try:
-        if not recipe_ai_helper.is_configured():
+        if not ai_helper.is_configured():
             return ChatResponse(
                 response="AI features are currently unavailable. Please contact the administrator to configure the OpenAI API key.",
                 timestamp=datetime.now()
             )
 
         # Process the chat message
-        response_text = await recipe_ai_helper.chat_about_recipes(
+        response_text = await ai_helper.chat_about_recipes(
             user_message=chat_data.message,
             conversation_history=chat_data.conversation_history
         )
@@ -999,10 +999,10 @@ async def get_recipe_suggestions(
     Get recipe suggestions based on available ingredients
     """
     try:
-        if not recipe_ai_helper.is_configured():
+        if not ai_helper.is_configured():
             return {"response": "AI features are currently unavailable."}
 
-        suggestions = recipe_ai_helper.get_recipe_suggestions_by_ingredients(
+        suggestions = ai_helper.get_recipe_suggestions_by_ingredients(
             search_request.ingredients
         )
 
@@ -1022,18 +1022,18 @@ async def search_recipes_ai(
     Search recipes using natural language processing
     """
     try:
-        if not recipe_ai_helper.is_configured():
+        if not ai_helper.is_configured():
             return {"recipes": [], "message": "AI features are currently unavailable."}
 
         # Extract search criteria from the query
-        search_criteria = recipe_ai_helper.extract_search_intent(query)
+        search_criteria = ai_helper.extract_search_intent(query)
 
         # Search for recipes
         if search_criteria:
-            recipes = recipe_ai_helper.search_recipes_by_criteria(search_criteria)
+            recipes = ai_helper.search_recipes_by_criteria(search_criteria)
         else:
             # If no specific criteria, return a general set
-            recipes = recipe_ai_helper.get_recipes_data(limit=10)
+            recipes = ai_helper.get_recipes_data(limit=10)
 
         return {
             "recipes": recipes,
@@ -1055,7 +1055,7 @@ async def get_recipe_details_ai(
     Get detailed recipe information formatted for AI responses
     """
     try:
-        recipe = recipe_ai_helper.get_recipe_by_id(recipe_id)
+        recipe = ai_helper.get_recipe_by_id(recipe_id)
 
         if not recipe:
             return {"error": "Recipe not found"}
@@ -1073,8 +1073,8 @@ async def ai_status():
     Check AI service status
     """
     return {
-        "ai_configured": recipe_ai_helper.is_configured(),
-        "model": recipe_ai_helper.model if recipe_ai_helper.is_configured() else None,
+        "ai_configured": ai_helper.is_configured(),
+        "model": ai_helper.model if ai_helper.is_configured() else None,
         "database_connected": db is not None
     }
 
@@ -1190,6 +1190,22 @@ async def delete_user(
 
     db.users.delete_one({"_id": ObjectId(user_id)})
     return {"message": "User deleted successfully"}
+
+
+# AI AGENT ROUTES (Legacy compatibility)
+@app.post("/ai/chat", response_model=AIResponse)
+async def ai_chat_legacy(message: AIMessage, current_user: dict = Depends(get_current_user)):
+    """Legacy AI chat endpoint for backward compatibility"""
+    try:
+        if not ai_helper.is_configured():
+            response_text = "AI features require OpenAI API key configuration."
+        else:
+            response_text = await ai_helper.general_cooking_chat(message.message)
+
+        return AIResponse(response=response_text)
+    except Exception as e:
+        logger.error(f"Error in legacy AI chat: {e}")
+        return AIResponse(response="I'm sorry, I encountered an error. Please try again.")
 
 
 # UTILITY ROUTES
