@@ -1,8 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends, status, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pymongo import MongoClient
-from pymongo.server_api import ServerApi
 from bson import ObjectId
 from bson.errors import InvalidId
 import bcrypt
@@ -16,6 +14,9 @@ from enum import Enum
 import re
 from statistics import mean
 import logging
+
+# Database import
+from .database import db, Database
 
 # AI imports
 from .utils.ai_helper import ai_helper
@@ -45,53 +46,9 @@ app.add_middleware(
     max_age=600,
 )
 
-# Database connection
-MONGO_URI = os.getenv("MONGO_URI")
+# Configuration
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key")
 security = HTTPBearer()
-
-try:
-    client = MongoClient(MONGO_URI, server_api=ServerApi('1'))
-    db = client.ondek_recipe
-
-    # Create default owner user if it doesn't exist
-    if db.users.count_documents({"username": "owner"}) == 0:
-        hashed_password = bcrypt.hashpw("admin123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-        owner_user = {
-            "username": "owner",
-            "email": "owner@ondekrecipe.com",
-            "password": hashed_password,
-            "role": "owner",
-            "created_at": datetime.now(),
-            "updated_at": datetime.now()
-        }
-        db.users.insert_one(owner_user)
-        print("✅ Default owner user created successfully!")
-    else:
-        # Make sure password is correct for owner user
-        owner = db.users.find_one({"username": "owner"})
-        is_valid = False
-        try:
-            is_valid = bcrypt.checkpw("admin123".encode('utf-8'), owner["password"].encode('utf-8'))
-        except Exception:
-            is_valid = False
-
-        if not is_valid:
-            # Update owner password
-            hashed_password = bcrypt.hashpw("admin123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-            db.users.update_one(
-                {"username": "owner"},
-                {"$set": {"password": hashed_password, "updated_at": datetime.now()}}
-            )
-            print("✅ Owner password reset to 'admin123'")
-        else:
-            print("✅ Owner user exists with correct password")
-
-    print("✅ Connected to MongoDB Atlas!")
-except Exception as e:
-    print(f"❌ Failed to connect to MongoDB: {e}")
-    raise
-
 
 # Pydantic Models
 class UserRole(str, Enum):
@@ -226,14 +183,6 @@ class Token(BaseModel):
     user: UserResponse
 
 
-class AIMessage(BaseModel):
-    message: str
-
-
-class AIResponse(BaseModel):
-    response: str
-
-
 # RATINGS AND FAVORITES MODELS
 class RatingCreate(BaseModel):
     recipe_id: str
@@ -319,7 +268,7 @@ def verify_password(password: str, hashed: str) -> bool:
     try:
         return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
     except Exception as e:
-        print(f"Password verification error: {e}")
+        logger.error(f"Password verification error: {e}")
         return False
 
 
@@ -399,8 +348,8 @@ async def register(user: UserCreate):
         "email": user.email,
         "password": hashed_password,
         "role": user.role.value,
-        "created_at": datetime.now(),
-        "updated_at": datetime.now()
+        "created_at": Database.get_current_datetime(),
+        "updated_at": Database.get_current_datetime()
     }
 
     # Add first_name and last_name if provided
@@ -424,31 +373,28 @@ async def register(user: UserCreate):
 
 @app.post("/auth/login", response_model=Token)
 async def login(user: UserLogin):
-    # Debug logging
-    print(f"Login attempt for username: {user.username}")
+    logger.info(f"Login attempt for username: {user.username}")
 
     db_user = db.users.find_one({"username": user.username})
     if not db_user:
-        print(f"User not found: {user.username}")
+        logger.info(f"User not found: {user.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Debug logging
-    print(f"Found user: {db_user['username']}, role: {db_user['role']}")
+    logger.info(f"Found user: {db_user['username']}, role: {db_user['role']}")
 
     if not verify_password(user.password, db_user["password"]):
-        print(f"Password verification failed for: {user.username}")
+        logger.info(f"Password verification failed for: {user.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Debug logging
-    print(f"Password verification successful for: {user.username}")
+    logger.info(f"Password verification successful for: {user.username}")
 
     access_token_expires = timedelta(hours=24)
     access_token = create_access_token(
@@ -459,6 +405,8 @@ async def login(user: UserLogin):
         id=str(db_user["_id"]),
         username=db_user["username"],
         email=db_user["email"],
+        first_name=db_user.get("first_name"),
+        last_name=db_user.get("last_name"),
         role=UserRole(db_user["role"]),
         created_at=db_user["created_at"]
     )
@@ -498,7 +446,7 @@ async def create_recipe(recipe: Recipe, current_user: dict = Depends(get_current
         "notes": recipe.notes or [],
         "dietary_restrictions": recipe.dietary_restrictions or [],
         "created_by": current_user["username"],
-        "created_at": datetime.utcnow()
+        "created_at": Database.get_current_datetime()
     }
 
     result = db.recipes.insert_one(recipe_doc)
@@ -592,7 +540,7 @@ async def get_recipe(recipe_id: str, current_user: dict = Depends(get_current_us
     )
 
 
-@app.put("/recipes/{recipe_id}", response_model=EnhancedRecipeResponse)
+@app.put("/recipes/{recipe_id}", response_model=RecipeResponse)
 async def update_recipe(
         recipe_id: str,
         recipe_update: RecipeUpdate,
@@ -724,8 +672,8 @@ async def create_rating(
         "username": current_user["username"],
         "rating": rating_data.rating,
         "review": rating_data.review,
-        "created_at": datetime.now(),
-        "updated_at": datetime.now()
+        "created_at": Database.get_current_datetime(),
+        "updated_at": Database.get_current_datetime()
     }
 
     result = db.ratings.insert_one(rating_doc)
@@ -827,7 +775,7 @@ async def update_rating(
     if rating_doc["user_id"] != str(current_user["_id"]):
         raise HTTPException(status_code=403, detail="Not authorized to edit this rating")
 
-    update_doc = {"updated_at": datetime.now()}
+    update_doc = {"updated_at": Database.get_current_datetime()}
     if rating_update.rating is not None:
         update_doc["rating"] = rating_update.rating
     if rating_update.review is not None:
@@ -892,7 +840,7 @@ async def add_to_favorites(recipe_id: str, current_user: dict = Depends(get_curr
     favorite_doc = {
         "recipe_id": recipe_id,
         "user_id": str(current_user["_id"]),
-        "created_at": datetime.now()
+        "created_at": Database.get_current_datetime()
     }
 
     result = db.favorites.insert_one(favorite_doc)
@@ -935,10 +883,15 @@ async def get_user_favorites(current_user: dict = Depends(get_current_user)):
                 recipes.append(RecipeResponse(
                     id=str(recipe_doc["_id"]),
                     recipe_name=recipe_doc["recipe_name"],
+                    description=recipe_doc.get("description"),
                     ingredients=ingredients,
                     instructions=recipe_doc["instructions"],
                     serving_size=recipe_doc["serving_size"],
                     genre=Genre(recipe_doc["genre"]),
+                    prep_time=recipe_doc.get("prep_time", 0),
+                    cook_time=recipe_doc.get("cook_time", 0),
+                    notes=recipe_doc.get("notes", []),
+                    dietary_restrictions=recipe_doc.get("dietary_restrictions", []),
                     created_by=recipe_doc["created_by"],
                     created_at=recipe_doc["created_at"]
                 ))
@@ -968,7 +921,7 @@ async def ai_chat(chat_data: ChatMessage, current_user: dict = Depends(get_curre
         if not ai_helper.is_configured():
             return ChatResponse(
                 response="AI features are currently unavailable. Please contact the administrator to configure the OpenAI API key.",
-                timestamp=datetime.now()
+                timestamp=Database.get_current_datetime()
             )
 
         # Process the chat message
@@ -979,14 +932,14 @@ async def ai_chat(chat_data: ChatMessage, current_user: dict = Depends(get_curre
 
         return ChatResponse(
             response=response_text,
-            timestamp=datetime.now()
+            timestamp=Database.get_current_datetime()
         )
 
     except Exception as e:
         logger.error(f"Error in AI chat: {e}")
         return ChatResponse(
             response="I'm sorry, I encountered an error while processing your request. Please try again.",
-            timestamp=datetime.now()
+            timestamp=Database.get_current_datetime()
         )
 
 
@@ -1114,7 +1067,7 @@ async def update_user(
             current_user["role"] not in ["admin", "owner"]):
         raise HTTPException(status_code=403, detail="Not authorized to edit this user")
 
-    update_doc = {"updated_at": datetime.now()}
+    update_doc = {"updated_at": Database.get_current_datetime()}
 
     # Update email if provided
     if user_update.email is not None:
@@ -1150,9 +1103,8 @@ async def update_user(
 
     # Only perform update if there are changes
     if len(update_doc) > 1:  # More than just "updated_at"
-        print(f"Updating user {user_id} with: {update_doc}")
         result = db.users.update_one({"_id": ObjectId(user_id)}, {"$set": update_doc})
-        print(f"Update result: {result.modified_count} documents modified")
+        logger.info(f"Update result: {result.modified_count} documents modified")
 
     # Get the updated user document
     updated_user = db.users.find_one({"_id": ObjectId(user_id)})
@@ -1192,22 +1144,6 @@ async def delete_user(
     return {"message": "User deleted successfully"}
 
 
-# AI AGENT ROUTES (Legacy compatibility)
-@app.post("/ai/chat", response_model=AIResponse)
-async def ai_chat_legacy(message: AIMessage, current_user: dict = Depends(get_current_user)):
-    """Legacy AI chat endpoint for backward compatibility"""
-    try:
-        if not ai_helper.is_configured():
-            response_text = "AI features require OpenAI API key configuration."
-        else:
-            response_text = await ai_helper.general_cooking_chat(message.message)
-
-        return AIResponse(response=response_text)
-    except Exception as e:
-        logger.error(f"Error in legacy AI chat: {e}")
-        return AIResponse(response="I'm sorry, I encountered an error. Please try again.")
-
-
 # UTILITY ROUTES
 @app.get("/measuring-units")
 async def get_measuring_units():
@@ -1220,25 +1156,6 @@ async def get_genres():
 
 
 # ADMIN UTILITY ROUTES
-@app.get("/admin/update-recipe-times", include_in_schema=False)
-async def update_recipe_times():
-    """Add prep_time and cook_time fields to all recipes that don't have them"""
-    try:
-        result = db.recipes.update_many(
-            {"prep_time": {"$exists": False}},  # Find recipes without prep_time
-            {"$set": {"prep_time": 0, "cook_time": 0}}  # Set default values
-        )
-
-        return {
-            "success": True,
-            "modified_count": result.modified_count,
-            "matched_count": result.matched_count,
-            "message": f"Updated {result.modified_count} recipes"
-        }
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
 @app.get("/admin/reset-owner-password", include_in_schema=False)
 async def reset_owner_password():
     owner = db.users.find_one({"username": "owner"})
@@ -1251,8 +1168,8 @@ async def reset_owner_password():
             "email": "owner@ondekrecipe.com",
             "password": hashed_password,
             "role": "owner",
-            "created_at": datetime.now(),
-            "updated_at": datetime.now()
+            "created_at": Database.get_current_datetime(),
+            "updated_at": Database.get_current_datetime()
         }
         db.users.insert_one(owner_user)
         return {"message": "Owner user created successfully"}
@@ -1261,12 +1178,11 @@ async def reset_owner_password():
         hashed_password = hash_password("admin123")
         db.users.update_one(
             {"username": "owner"},
-            {"$set": {"password": hashed_password, "updated_at": datetime.now()}}
+            {"$set": {"password": hashed_password, "updated_at": Database.get_current_datetime()}}
         )
         return {"message": "Owner password reset successfully"}
 
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=8000)

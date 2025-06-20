@@ -436,7 +436,7 @@ class AIHelper:
                     logger.error(f"Error getting recipe suggestions: {e}")
                     return "Sorry, I couldn't retrieve recipe suggestions at the moment."
 
-            # Keep existing methods from original ai_helper.py for backward compatibility
+            # Legacy methods for backward compatibility
             async def generate_recipe_suggestions(self, ingredients: List[str]) -> str:
                 """Generate recipe suggestions based on available ingredients (legacy method)"""
                 return self.get_recipe_suggestions_by_ingredients(ingredients)
@@ -579,7 +579,7 @@ class AIHelper:
                     return recipe_data
 
                 except Exception as e:
-                    print(f"Error parsing recipe: {e}")
+                    logger.error(f"Error parsing recipe: {e}")
                     return None
 
             def suggest_ingredient_substitutions(self, ingredient_name: str) -> List[str]:
