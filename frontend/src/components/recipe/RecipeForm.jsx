@@ -1,4 +1,4 @@
-// RecipeForm.jsx - Fixed to clear sessionStorage for new recipes
+// RecipeForm.jsx - Updated to handle AI recipe auto-population
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -33,12 +33,12 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
   // Form state
   const [formData, setFormData] = useState({
     recipe_name: '',
-    description: '', // Add description field
+    description: '',
     serving_size: 1,
     genre: 'dinner',
     prep_time: 0,
     cook_time: 0,
-    dietary_restrictions: [] // Add dietary restrictions array
+    dietary_restrictions: []
   });
 
   const [ingredients, setIngredients] = useState([
@@ -51,12 +51,12 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
   const [notes, setNotes] = useState(['']);
 
   // Options state
-const [availableUnits, setAvailableUnits] = useState([
-  'cup', 'cups', 'tablespoon', 'tablespoons', 'teaspoon', 'teaspoons',
-  'ounce', 'ounces', 'pound', 'pounds', 'gram', 'grams',
-  'kilogram', 'kilograms', 'liter', 'liters', 'milliliter', 'milliliters',
-  'piece', 'pieces', 'whole', 'stick', 'sticks', 'pinch', 'dash'  // Added 'stick', 'sticks'
-]);
+  const [availableUnits, setAvailableUnits] = useState([
+    'cup', 'cups', 'tablespoon', 'tablespoons', 'teaspoon', 'teaspoons',
+    'ounce', 'ounces', 'pound', 'pounds', 'gram', 'grams',
+    'kilogram', 'kilograms', 'liter', 'liters', 'milliliter', 'milliliters',
+    'piece', 'pieces', 'whole', 'stick', 'sticks', 'pinch', 'dash'
+  ]);
 
   const [availableGenres, setAvailableGenres] = useState([
     'breakfast', 'lunch', 'dinner', 'snack', 'dessert', 'appetizer'
@@ -71,14 +71,141 @@ const [availableUnits, setAvailableUnits] = useState([
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [isLoadingTempRecipe, setIsLoadingTempRecipe] = useState(false);
 
-  // Check for duplicate recipe in sessionStorage only if duplicating
+  // Authentication check
   useEffect(() => {
+    if (!isAuthenticated()) {
+      navigate('/login');
+    }
+  }, [isAuthenticated, navigate]);
+
+  // NEW: Handle AI recipe auto-population from temp_id
+  useEffect(() => {
+    const loadTempRecipe = async () => {
+      const urlParams = new URLSearchParams(location.search);
+      const tempId = urlParams.get('temp_id');
+
+      if (tempId) {
+        console.log('Found temp_id in URL:', tempId);
+        setIsLoadingTempRecipe(true);
+
+        try {
+          console.log('Fetching temp recipe from:', `${apiBaseUrl}/temp-recipe/${tempId}`);
+          const response = await axios.get(`${apiBaseUrl}/temp-recipe/${tempId}`);
+          const tempRecipeData = response.data.recipe_data;
+
+          console.log('Loaded temp recipe data:', tempRecipeData);
+
+          if (tempRecipeData) {
+            // Populate form with AI recipe data
+            setFormData({
+              recipe_name: tempRecipeData.recipe_name || '',
+              description: tempRecipeData.description || '',
+              serving_size: tempRecipeData.serving_size || 1,
+              genre: tempRecipeData.genre || 'dinner',
+              prep_time: tempRecipeData.prep_time || 0,
+              cook_time: tempRecipeData.cook_time || 0,
+              dietary_restrictions: tempRecipeData.dietary_restrictions || []
+            });
+
+            // Populate ingredients
+            if (tempRecipeData.ingredients && tempRecipeData.ingredients.length > 0) {
+              setIngredients(tempRecipeData.ingredients.map(ing => ({
+                name: ing.name || '',
+                quantity: ing.quantity || '',
+                unit: ing.unit || 'cup'
+              })));
+            }
+
+            // Populate instructions
+            if (tempRecipeData.instructions && tempRecipeData.instructions.length > 0) {
+              setInstructions([...tempRecipeData.instructions]);
+            }
+
+            // Populate notes
+            if (tempRecipeData.notes && tempRecipeData.notes.length > 0) {
+              setNotes([...tempRecipeData.notes]);
+            }
+
+            setSuccess('✨ Recipe from Ralph loaded successfully! Review and modify as needed.');
+          }
+        } catch (error) {
+          console.error('Error loading temp recipe:', error);
+          if (error.response?.status === 404) {
+            setError('The recipe link has expired. Please ask Ralph for a new recipe suggestion.');
+          } else {
+            setError('Failed to load recipe data. Please try asking Ralph again.');
+          }
+        } finally {
+          setIsLoadingTempRecipe(false);
+        }
+      }
+    };
+
+    // Only load temp recipe if not in edit mode
+    if (!editMode) {
+      loadTempRecipe();
+    }
+  }, [location.search, editMode, apiBaseUrl]);
+
+  // Handle edit mode separately
+  useEffect(() => {
+    console.log('Edit mode useEffect running:', { editMode, existingRecipe: !!existingRecipe });
+
+    if (editMode && existingRecipe) {
+      console.log('Setting form data from existing recipe:', {
+        recipeName: existingRecipe.recipe_name,
+        description: existingRecipe.description,
+        hasDescription: !!existingRecipe.description
+      });
+
+      setFormData({
+        recipe_name: existingRecipe.recipe_name,
+        description: existingRecipe.description || '',
+        serving_size: existingRecipe.serving_size,
+        genre: existingRecipe.genre,
+        prep_time: existingRecipe.prep_time || 0,
+        cook_time: existingRecipe.cook_time || 0,
+        dietary_restrictions: existingRecipe.dietary_restrictions || []
+      });
+
+      setIngredients(existingRecipe.ingredients.map(ing => ({
+        name: ing.name,
+        quantity: ing.quantity,
+        unit: ing.unit
+      })));
+
+      setInstructions([...existingRecipe.instructions]);
+
+      if (existingRecipe.notes && existingRecipe.notes.length > 0) {
+        setNotes([...existingRecipe.notes]);
+      } else {
+        setNotes(['']);
+      }
+
+      console.log('Form data set for edit mode');
+    }
+  }, [editMode, existingRecipe]);
+
+  // Handle duplication (separate from AI temp recipes)
+  useEffect(() => {
+    console.log('Duplication useEffect running:', { editMode });
+
+    // Skip this effect if in edit mode or if we're loading a temp recipe
+    if (editMode) {
+      console.log('Skipping duplication useEffect because in edit mode');
+      return;
+    }
+
     const urlParams = new URLSearchParams(location.search);
     const isDuplicating = urlParams.get('duplicate') === 'true';
+    const hasTempId = urlParams.get('temp_id');
 
-    if (isDuplicating) {
-      // Check if we're duplicating a recipe from sessionStorage
+    // Only handle duplication if there's no temp_id (AI recipe)
+    if (isDuplicating && !hasTempId) {
+      console.log('Handling duplication (not AI recipe)');
+
       const duplicateRecipeStr = sessionStorage.getItem('duplicateRecipe');
       console.log('Duplicating - checking for duplicated recipe:', duplicateRecipeStr ? 'Found' : 'Not found');
 
@@ -89,12 +216,12 @@ const [availableUnits, setAvailableUnits] = useState([
 
           setFormData({
             recipe_name: duplicateRecipe.recipe_name,
-            description: duplicateRecipe.description || '', // Load description
+            description: duplicateRecipe.description || '',
             serving_size: duplicateRecipe.serving_size,
             genre: duplicateRecipe.genre,
             prep_time: duplicateRecipe.prep_time || 0,
             cook_time: duplicateRecipe.cook_time || 0,
-            dietary_restrictions: duplicateRecipe.dietary_restrictions || [] // Load dietary restrictions
+            dietary_restrictions: duplicateRecipe.dietary_restrictions || []
           });
 
           setIngredients(duplicateRecipe.ingredients.map(ing => ({
@@ -114,16 +241,15 @@ const [availableUnits, setAvailableUnits] = useState([
           console.error('Error parsing duplicated recipe:', error);
         }
       }
-    } else {
-      // NOT duplicating - clear any existing sessionStorage data and reset to blank form
-      console.log('Not duplicating - clearing sessionStorage and resetting form');
+    } else if (!isDuplicating && !hasTempId) {
+      // NOT duplicating and no temp_id - clear sessionStorage and reset to blank form
+      console.log('Not duplicating and no temp_id - clearing sessionStorage and resetting form');
       sessionStorage.removeItem('duplicateRecipe');
       sessionStorage.removeItem('originalRecipe');
 
-      // Reset to blank form
       setFormData({
         recipe_name: '',
-        description: '', // Reset description
+        description: '',
         serving_size: 1,
         genre: 'dinner',
         prep_time: 0,
@@ -135,134 +261,15 @@ const [availableUnits, setAvailableUnits] = useState([
       setInstructions(['']);
       setNotes(['']);
     }
-  }, [location.search]);
-
-  // Handle edit mode separately
-useEffect(() => {
-  console.log('Edit mode useEffect running:', { editMode, existingRecipe: !!existingRecipe });
-
-  if (editMode && existingRecipe) {
-    console.log('Setting form data from existing recipe:', {
-      recipeName: existingRecipe.recipe_name,
-      description: existingRecipe.description,
-      hasDescription: !!existingRecipe.description
-    });
-
-    setFormData({
-      recipe_name: existingRecipe.recipe_name,
-      description: existingRecipe.description || '', // Load description
-      serving_size: existingRecipe.serving_size,
-      genre: existingRecipe.genre,
-      prep_time: existingRecipe.prep_time || 0,
-      cook_time: existingRecipe.cook_time || 0,
-      dietary_restrictions: existingRecipe.dietary_restrictions || []
-    });
-
-    setIngredients(existingRecipe.ingredients.map(ing => ({
-      name: ing.name,
-      quantity: ing.quantity,
-      unit: ing.unit
-    })));
-
-    setInstructions([...existingRecipe.instructions]);
-
-    if (existingRecipe.notes && existingRecipe.notes.length > 0) {
-      setNotes([...existingRecipe.notes]);
-    } else {
-      setNotes(['']);
-    }
-
-    console.log('Form data set for edit mode');
-  }
-}, [editMode, existingRecipe]);
-
-// 2. Handle duplication and new recipe creation (only when NOT in edit mode)
-useEffect(() => {
-  console.log('Duplication/New recipe useEffect running:', { editMode });
-
-  // Skip this effect entirely if in edit mode
-  if (editMode) {
-    console.log('Skipping duplication useEffect because in edit mode');
-    return;
-  }
-
-  const urlParams = new URLSearchParams(location.search);
-  const isDuplicating = urlParams.get('duplicate') === 'true';
-
-  console.log('Duplication check:', { isDuplicating });
-
-  if (isDuplicating) {
-    const duplicateRecipeStr = sessionStorage.getItem('duplicateRecipe');
-    console.log('Duplicating - checking for duplicated recipe:', duplicateRecipeStr ? 'Found' : 'Not found');
-
-    if (duplicateRecipeStr) {
-      try {
-        const duplicateRecipe = JSON.parse(duplicateRecipeStr);
-        console.log('Found duplicated recipe to load:', duplicateRecipe);
-
-        setFormData({
-          recipe_name: duplicateRecipe.recipe_name,
-          description: duplicateRecipe.description || '',
-          serving_size: duplicateRecipe.serving_size,
-          genre: duplicateRecipe.genre,
-          prep_time: duplicateRecipe.prep_time || 0,
-          cook_time: duplicateRecipe.cook_time || 0,
-          dietary_restrictions: duplicateRecipe.dietary_restrictions || []
-        });
-
-        setIngredients(duplicateRecipe.ingredients.map(ing => ({
-          name: ing.name,
-          quantity: ing.quantity,
-          unit: ing.unit
-        })));
-
-        setInstructions([...duplicateRecipe.instructions]);
-
-        if (duplicateRecipe.notes && duplicateRecipe.notes.length > 0) {
-          setNotes([...duplicateRecipe.notes]);
-        } else {
-          setNotes(['']);
-        }
-      } catch (error) {
-        console.error('Error parsing duplicated recipe:', error);
-      }
-    }
-  } else {
-    // NOT duplicating - clear sessionStorage and reset to blank form
-    console.log('Not duplicating - clearing sessionStorage and resetting form');
-    sessionStorage.removeItem('duplicateRecipe');
-    sessionStorage.removeItem('originalRecipe');
-
-    setFormData({
-      recipe_name: '',
-      description: '',
-      serving_size: 1,
-      genre: 'dinner',
-      prep_time: 0,
-      cook_time: 0,
-      dietary_restrictions: []
-    });
-
-    setIngredients([{ name: '', quantity: '', unit: 'cup' }]);
-    setInstructions(['']);
-    setNotes(['']);
-  }
-}, [location.search, editMode]);
-
-  // Authentication check
-  useEffect(() => {
-    if (!isAuthenticated()) {
-      navigate('/login');
-    }
-  }, [isAuthenticated, navigate]);
+  }, [location.search, editMode]);
 
   // Fetch options from API
   useEffect(() => {
     const fetchOptions = async () => {
       try {
         const [unitsRes, genresRes] = await Promise.all([
-          axios.get(`http://127.0.0.1:8000/measuring-units`),
-          axios.get(`http://127.0.0.1:8000/genres`)
+          axios.get(`${apiBaseUrl}/measuring-units`),
+          axios.get(`${apiBaseUrl}/genres`)
         ]);
         setAvailableUnits(unitsRes.data.units);
 
@@ -285,182 +292,182 @@ useEffect(() => {
   }, [isAuthenticated, apiBaseUrl]);
 
   // Fraction utilities - Robust
-const formatQuantity = (value) => {
-  if (value === undefined || value === null || value === '') return '';
+  const formatQuantity = (value) => {
+    if (value === undefined || value === null || value === '') return '';
 
-  try {
-    // Convert to number first
-    const numValue = typeof value === 'number' ? value : parseFloat(value);
+    try {
+      // Convert to number first
+      const numValue = typeof value === 'number' ? value : parseFloat(value);
 
-    // Handle integer values
-    if (Number.isInteger(numValue)) {
-      return String(numValue);
+      // Handle integer values
+      if (Number.isInteger(numValue)) {
+        return String(numValue);
+      }
+
+      // Use a more robust fraction conversion
+      return convertDecimalToMixedNumber(numValue);
+    } catch (e) {
+      console.error("Error formatting fraction:", e);
+      return String(value);
     }
-
-    // Use a more robust fraction conversion
-    return convertDecimalToMixedNumber(numValue);
-  } catch (e) {
-    console.error("Error formatting fraction:", e);
-    return String(value);
-  }
-};
-
-const convertDecimalToMixedNumber = (decimal) => {
-  try {
-    // Handle edge cases
-    if (decimal === 0) return "0";
-    if (decimal < 0) return String(decimal); // Handle negative numbers as decimals
-
-    // Get the whole number part
-    const wholePart = Math.floor(decimal);
-    const fractionalPart = decimal - wholePart;
-
-    // If no fractional part, return whole number
-    if (fractionalPart === 0) {
-      return String(wholePart);
-    }
-
-    // Convert fractional part to fraction
-    const fraction = decimalToFraction(fractionalPart);
-
-    // Return appropriate format
-    if (wholePart === 0) {
-      return fraction; // Just the fraction (e.g., "1/2")
-    } else {
-      return `${wholePart} ${fraction}`; // Mixed number (e.g., "1 1/2")
-    }
-  } catch (e) {
-    console.error("Error converting to mixed number:", e);
-    return String(decimal);
-  }
-};
-
-const decimalToFraction = (decimal) => {
-  // Common fractions lookup for better accuracy
-  const commonFractions = {
-    0.125: "1/8",
-    0.25: "1/4",
-    0.375: "3/8",
-    0.5: "1/2",
-    0.625: "5/8",
-    0.75: "3/4",
-    0.875: "7/8",
-    0.333: "1/3",
-    0.667: "2/3",
-    0.2: "1/5",
-    0.4: "2/5",
-    0.6: "3/5",
-    0.8: "4/5"
   };
 
-  // Check for common fractions first (with tolerance)
-  for (const [dec, frac] of Object.entries(commonFractions)) {
-    if (Math.abs(decimal - parseFloat(dec)) < 0.001) {
-      return frac;
+  const convertDecimalToMixedNumber = (decimal) => {
+    try {
+      // Handle edge cases
+      if (decimal === 0) return "0";
+      if (decimal < 0) return String(decimal); // Handle negative numbers as decimals
+
+      // Get the whole number part
+      const wholePart = Math.floor(decimal);
+      const fractionalPart = decimal - wholePart;
+
+      // If no fractional part, return whole number
+      if (fractionalPart === 0) {
+        return String(wholePart);
+      }
+
+      // Convert fractional part to fraction
+      const fraction = decimalToFraction(fractionalPart);
+
+      // Return appropriate format
+      if (wholePart === 0) {
+        return fraction; // Just the fraction (e.g., "1/2")
+      } else {
+        return `${wholePart} ${fraction}`; // Mixed number (e.g., "1 1/2")
+      }
+    } catch (e) {
+      console.error("Error converting to mixed number:", e);
+      return String(decimal);
     }
-  }
+  };
 
-  // Use algorithm to find fraction
-  let tolerance = 1e-6;
-  let h1 = 1, h2 = 0, k1 = 0, k2 = 1;
-  let b = decimal;
+  const decimalToFraction = (decimal) => {
+    // Common fractions lookup for better accuracy
+    const commonFractions = {
+      0.125: "1/8",
+      0.25: "1/4",
+      0.375: "3/8",
+      0.5: "1/2",
+      0.625: "5/8",
+      0.75: "3/4",
+      0.875: "7/8",
+      0.333: "1/3",
+      0.667: "2/3",
+      0.2: "1/5",
+      0.4: "2/5",
+      0.6: "3/5",
+      0.8: "4/5"
+    };
 
-  do {
-    let a = Math.floor(b);
-    let aux = h1; h1 = a * h1 + h2; h2 = aux;
-    aux = k1; k1 = a * k1 + k2; k2 = aux;
-    b = 1 / (b - a);
-  } while (Math.abs(decimal - h1 / k1) > decimal * tolerance);
-
-  return `${h1}/${k1}`;
-};
-
-const isValidFractionInput = (input) => {
-  if (input === undefined || input === null) return true;
-
-  const inputStr = String(input).trim();
-  if (inputStr === '') return true;
-
-  // Allow simple numbers
-  if (!isNaN(inputStr) && !inputStr.includes('/')) return true;
-
-  // Allow partial input during typing
-  if (inputStr === '/') return true;
-  if (/^\d+\/$/.test(inputStr)) return true;  // "1/"
-  if (/^\/\d+$/.test(inputStr)) return true;  // "/2"
-  if (/^\d+ $/.test(inputStr)) return true;   // "1 " (space after number)
-  if (/^\d+ \/$/.test(inputStr)) return true; // "1 /"
-  if (/^\d+ \d+\/$/.test(inputStr)) return true; // "1 1/"
-
-  // Validate complete fractions and mixed numbers
-  try {
-    // Simple fraction like "1/2"
-    if (/^\d+\/\d+$/.test(inputStr)) {
-      const [num, denom] = inputStr.split('/');
-      return !isNaN(num) && !isNaN(denom) && parseInt(denom) !== 0;
-    }
-
-    // Mixed number like "1 1/2"
-    if (/^\d+\s+\d+\/\d+$/.test(inputStr)) {
-      const parts = inputStr.split(' ');
-      const whole = parts[0];
-      const [num, denom] = parts[1].split('/');
-      return !isNaN(whole) && !isNaN(num) && !isNaN(denom) && parseInt(denom) !== 0;
-    }
-
-    // Just a number
-    return !isNaN(inputStr);
-  } catch (e) {
-    return false;
-  }
-};
-
-const parseQuantity = (value) => {
-  if (value === undefined || value === null || value === '') return '';
-
-  try {
-    if (typeof value === 'number') return value;
-
-    const stringValue = String(value).trim();
-
-    // Handle simple numeric values
-    if (!stringValue.includes('/')) {
-      const parsed = parseFloat(stringValue);
-      return isNaN(parsed) ? stringValue : parsed;
+    // Check for common fractions first (with tolerance)
+    for (const [dec, frac] of Object.entries(commonFractions)) {
+      if (Math.abs(decimal - parseFloat(dec)) < 0.001) {
+        return frac;
+      }
     }
 
-    // Handle mixed numbers (e.g., "1 1/2")
-    if (stringValue.includes(' ')) {
-      const parts = stringValue.split(' ');
-      if (parts.length !== 2) return stringValue;
+    // Use algorithm to find fraction
+    let tolerance = 1e-6;
+    let h1 = 1, h2 = 0, k1 = 0, k2 = 1;
+    let b = decimal;
 
-      const whole = parseFloat(parts[0]);
-      const fractionPart = parts[1];
+    do {
+      let a = Math.floor(b);
+      let aux = h1; h1 = a * h1 + h2; h2 = aux;
+      aux = k1; k1 = a * k1 + k2; k2 = aux;
+      b = 1 / (b - a);
+    } while (Math.abs(decimal - h1 / k1) > decimal * tolerance);
 
-      if (isNaN(whole) || !fractionPart.includes('/')) return stringValue;
+    return `${h1}/${k1}`;
+  };
 
-      const [numerator, denominator] = fractionPart.split('/');
+  const isValidFractionInput = (input) => {
+    if (input === undefined || input === null) return true;
+
+    const inputStr = String(input).trim();
+    if (inputStr === '') return true;
+
+    // Allow simple numbers
+    if (!isNaN(inputStr) && !inputStr.includes('/')) return true;
+
+    // Allow partial input during typing
+    if (inputStr === '/') return true;
+    if (/^\d+\/$/.test(inputStr)) return true;  // "1/"
+    if (/^\/\d+$/.test(inputStr)) return true;  // "/2"
+    if (/^\d+ $/.test(inputStr)) return true;   // "1 " (space after number)
+    if (/^\d+ \/$/.test(inputStr)) return true; // "1 /"
+    if (/^\d+ \d+\/$/.test(inputStr)) return true; // "1 1/"
+
+    // Validate complete fractions and mixed numbers
+    try {
+      // Simple fraction like "1/2"
+      if (/^\d+\/\d+$/.test(inputStr)) {
+        const [num, denom] = inputStr.split('/');
+        return !isNaN(num) && !isNaN(denom) && parseInt(denom) !== 0;
+      }
+
+      // Mixed number like "1 1/2"
+      if (/^\d+\s+\d+\/\d+$/.test(inputStr)) {
+        const parts = inputStr.split(' ');
+        const whole = parts[0];
+        const [num, denom] = parts[1].split('/');
+        return !isNaN(whole) && !isNaN(num) && !isNaN(denom) && parseInt(denom) !== 0;
+      }
+
+      // Just a number
+      return !isNaN(inputStr);
+    } catch (e) {
+      return false;
+    }
+  };
+
+  const parseQuantity = (value) => {
+    if (value === undefined || value === null || value === '') return '';
+
+    try {
+      if (typeof value === 'number') return value;
+
+      const stringValue = String(value).trim();
+
+      // Handle simple numeric values
+      if (!stringValue.includes('/')) {
+        const parsed = parseFloat(stringValue);
+        return isNaN(parsed) ? stringValue : parsed;
+      }
+
+      // Handle mixed numbers (e.g., "1 1/2")
+      if (stringValue.includes(' ')) {
+        const parts = stringValue.split(' ');
+        if (parts.length !== 2) return stringValue;
+
+        const whole = parseFloat(parts[0]);
+        const fractionPart = parts[1];
+
+        if (isNaN(whole) || !fractionPart.includes('/')) return stringValue;
+
+        const [numerator, denominator] = fractionPart.split('/');
+        const num = parseInt(numerator);
+        const denom = parseInt(denominator);
+
+        if (isNaN(num) || isNaN(denom) || denom === 0) return stringValue;
+
+        return whole + (num / denom);
+      }
+
+      // Handle simple fractions (e.g., "1/2")
+      const [numerator, denominator] = stringValue.split('/');
       const num = parseInt(numerator);
       const denom = parseInt(denominator);
 
       if (isNaN(num) || isNaN(denom) || denom === 0) return stringValue;
 
-      return whole + (num / denom);
+      return num / denom;
+    } catch (e) {
+      console.error("Error parsing quantity:", e);
+      return value;
     }
-
-    // Handle simple fractions (e.g., "1/2")
-    const [numerator, denominator] = stringValue.split('/');
-    const num = parseInt(numerator);
-    const denom = parseInt(denominator);
-
-    if (isNaN(num) || isNaN(denom) || denom === 0) return stringValue;
-
-    return num / denom;
-  } catch (e) {
-    console.error("Error parsing quantity:", e);
-    return value;
-  }
-};
+  };
 
   // Form handlers
   const handleInputChange = (e) => {
@@ -789,7 +796,7 @@ const parseQuantity = (value) => {
 
       const recipeData = {
         recipe_name: formData.recipe_name.trim(),
-        description: formData.description.trim() || null, // Include description
+        description: formData.description.trim() || null,
         serving_size: parseInt(formData.serving_size),
         genre: formData.genre,
         prep_time: parseInt(formData.prep_time || 0),
@@ -797,12 +804,13 @@ const parseQuantity = (value) => {
         ingredients: processedIngredients,
         instructions: validInstructions.map(inst => inst.trim()),
         notes: validNotes.map(note => note.trim()),
-        dietary_restrictions: formData.dietary_restrictions // Include dietary restrictions
+        dietary_restrictions: formData.dietary_restrictions
       };
 
       // Check if this is a duplication attempt by checking URL parameters
       const urlParams = new URLSearchParams(location.search);
       const isDuplicating = urlParams.get('duplicate') === 'true';
+      const tempId = urlParams.get('temp_id'); // Check for AI recipe
 
       // If duplicating, check if any changes were made compared to the original
       if (isDuplicating) {
@@ -845,23 +853,39 @@ const parseQuantity = (value) => {
         sessionStorage.removeItem('duplicateRecipe');
       }
 
+      // If there's a temp_id, clean it up after successful submission
+      if (tempId) {
+        try {
+          await axios.delete(`${apiBaseUrl}/temp-recipe/${tempId}`);
+          console.log('Cleaned up temp recipe:', tempId);
+        } catch (cleanupError) {
+          console.warn('Could not clean up temp recipe:', cleanupError);
+          // Don't fail the submission if cleanup fails
+        }
+      }
+
       let response;
 
       if (editMode && existingRecipe) {
         // Update existing recipe
         console.log('Updating recipe:', recipeData);
-        response = await axios.put(`http://127.0.0.1:8000/recipes/${existingRecipe.id}`, recipeData);
+        response = await axios.put(`${apiBaseUrl}/recipes/${existingRecipe.id}`, recipeData);
         setSuccess('Recipe updated successfully! 🎉');
       } else {
         // Create new recipe
         console.log('Creating recipe:', recipeData);
-        response = await axios.post(`http://127.0.0.1:8000/recipes`, recipeData);
-        setSuccess('Recipe created successfully! 🎉');
+        response = await axios.post(`${apiBaseUrl}/recipes`, recipeData);
+
+        if (tempId) {
+          setSuccess('✨ Recipe from Ralph saved successfully! 🎉');
+        } else {
+          setSuccess('Recipe created successfully! 🎉');
+        }
 
         // Reset form for new recipe
         setFormData({
           recipe_name: '',
-          description: '', // Reset description
+          description: '',
           serving_size: 1,
           genre: 'dinner',
           prep_time: 0,
@@ -1001,6 +1025,45 @@ const parseQuantity = (value) => {
   // Render guard
   if (!isAuthenticated()) {
     return null;
+  }
+
+  // Show loading state for temp recipe
+  if (isLoadingTempRecipe) {
+    return (
+      <div style={containerStyle}>
+        <div style={formContainerStyle}>
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            padding: '3rem',
+            textAlign: 'center'
+          }}>
+            <div style={{
+              width: '50px',
+              height: '50px',
+              border: '4px solid #f0f8ff',
+              borderTop: '4px solid #003366',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite',
+              marginBottom: '1rem'
+            }}></div>
+            <h2 style={{ color: '#003366', marginBottom: '1rem' }}>
+              ✨ Loading Recipe from Ralph...
+            </h2>
+            <p style={{ color: '#666' }}>
+              Preparing your recipe data for the form! 🍳
+            </p>
+          </div>
+        </div>
+        <style>{`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}</style>
+      </div>
+    );
   }
 
   return (

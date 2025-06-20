@@ -59,6 +59,89 @@ const AIChat = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // Function to parse action buttons from AI response
+  const parseActionButtons = (text) => {
+    const actionButtonRegex = /\[ACTION_BUTTON:({.*?})\]/g;
+    const buttons = [];
+    let match;
+
+    while ((match = actionButtonRegex.exec(text)) !== null) {
+      try {
+        const buttonData = JSON.parse(match[1]);
+        buttons.push(buttonData);
+      } catch (e) {
+        console.error('Error parsing action button:', e);
+      }
+    }
+
+    return buttons;
+  };
+
+  // Function to remove action button markers from text
+  const cleanResponseText = (text) => {
+    return text.replace(/\[ACTION_BUTTON:({.*?})\]/g, '').trim();
+  };
+
+  // Function to handle action button clicks
+  const handleActionButtonClick = (button) => {
+    if (button.url) {
+      if (button.url.startsWith('http')) {
+        // External URL
+        window.open(button.url, '_blank');
+      } else {
+        // Internal route
+        navigate(button.url);
+      }
+    }
+  };
+
+  // Component to render action buttons
+  const ActionButtons = ({ buttons }) => {
+    if (!buttons || buttons.length === 0) return null;
+
+    return (
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.5rem',
+        marginTop: '1rem'
+      }}>
+        {buttons.map((button, index) => (
+          <button
+            key={index}
+            onClick={() => handleActionButtonClick(button)}
+            style={{
+              padding: '10px 16px',
+              backgroundColor: '#003366',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: '500',
+              transition: 'all 0.3s ease',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = '#0066cc';
+              e.target.style.transform = 'translateY(-1px)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = '#003366';
+              e.target.style.transform = 'translateY(0)';
+            }}
+          >
+            <span>🍳</span>
+            {button.text || 'Action'}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
   const sendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return;
 
@@ -70,7 +153,8 @@ const AIChat = () => {
       id: Date.now(),
       type: 'user',
       content: userMessage,
-      timestamp: new Date()
+      timestamp: new Date(),
+      actionButtons: []
     };
 
     setMessages(prev => [...prev, newUserMessage]);
@@ -89,12 +173,18 @@ const AIChat = () => {
         conversation_history: conversationHistory
       });
 
+      // Parse action buttons from response
+      const rawResponse = response.data.response;
+      const actionButtons = parseActionButtons(rawResponse);
+      const cleanedResponse = cleanResponseText(rawResponse);
+
       // Add AI response to chat
       const aiMessage = {
         id: Date.now() + 1,
         type: 'ai',
-        content: response.data.response,
-        timestamp: new Date(response.data.timestamp)
+        content: cleanedResponse,
+        timestamp: new Date(response.data.timestamp),
+        actionButtons: actionButtons
       };
 
       setMessages(prev => [...prev, aiMessage]);
@@ -105,7 +195,8 @@ const AIChat = () => {
         id: Date.now() + 1,
         type: 'error',
         content: 'Sorry, I encountered an error while processing your request. Please try again.',
-        timestamp: new Date()
+        timestamp: new Date(),
+        actionButtons: []
       };
       setMessages(prev => [...prev, errorMessage]);
     } finally {
@@ -151,7 +242,7 @@ const AIChat = () => {
 
   // Styles matching the app theme - Updated with smaller header
   const containerStyle = {
-    padding: '1.25rem', // Further reduced from 1.5rem
+    padding: '1.25rem',
     backgroundColor: '#f0f8ff',
     minHeight: 'calc(100vh - 80px)',
     display: 'flex',
@@ -162,16 +253,16 @@ const AIChat = () => {
     background: 'white',
     border: '2px solid #003366',
     borderRadius: '15px',
-    padding: '1.25rem', // Further reduced from 1.5rem
-    marginBottom: '1.25rem', // Further reduced from 1.5rem
+    padding: '1.25rem',
+    marginBottom: '1.25rem',
     boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)',
     textAlign: 'center'
   };
 
   const titleStyle = {
     color: '#003366',
-    fontSize: '1.8rem', // Further reduced from 2rem
-    marginBottom: '0.5rem' // Further reduced from 0.75rem
+    fontSize: '1.8rem',
+    marginBottom: '0.5rem'
   };
 
   const chatContainerStyle = {
@@ -184,7 +275,7 @@ const AIChat = () => {
     display: 'flex',
     flexDirection: 'column',
     minHeight: '600px',
-    maxHeight: '75vh' // Reduced from 78vh to ensure input box is fully visible
+    maxHeight: '75vh'
   };
 
   const messagesAreaStyle = {
@@ -241,18 +332,18 @@ const AIChat = () => {
   const quickActionsStyle = {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: '0.3rem', // Further reduced from 0.4rem
-    marginBottom: '0.5rem' // Further reduced from 0.75rem
+    gap: '0.3rem',
+    marginBottom: '0.5rem'
   };
 
   const quickActionButtonStyle = {
-    padding: '5px 8px', // Further reduced from 6px 10px
+    padding: '5px 8px',
     backgroundColor: '#f0f8ff',
     color: '#003366',
     border: '1px solid #003366',
     borderRadius: '6px',
     cursor: 'pointer',
-    fontSize: '12px', // Further reduced from 13px
+    fontSize: '12px',
     textAlign: 'left',
     transition: 'all 0.3s ease'
   };
@@ -273,21 +364,21 @@ const AIChat = () => {
             justifyContent: 'center',
             gap: '1rem',
             marginBottom: '0.5rem',
-            flexWrap: 'wrap' // Allow wrapping on smaller screens
+            flexWrap: 'wrap'
           }}>
             <h1 style={titleStyle}>🤖 Ralph the Recipe Assistant</h1>
             {/* AI Status - moved inline */}
             {aiStatus && (
               <div style={{
                 display: 'inline-block',
-                padding: '4px 10px', // Further reduced from 6px 12px
+                padding: '4px 10px',
                 backgroundColor: aiStatus.ai_configured ? '#d4edda' : '#f8d7da',
                 color: aiStatus.ai_configured ? '#155724' : '#721c24',
                 borderRadius: '6px',
-                fontSize: '12px', // Further reduced from 13px
+                fontSize: '12px',
                 border: `1px solid ${aiStatus.ai_configured ? '#c3e6cb' : '#f5c6cb'}`,
                 whiteSpace: 'nowrap',
-                flexShrink: 0 // Prevent shrinking
+                flexShrink: 0
               }}>
                 {aiStatus.ai_configured ? '✅ Ralph is Ready' : '❌ Ralph is Not Available'}
               </div>
@@ -398,6 +489,10 @@ const AIChat = () => {
                     <div style={{ whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>
                       {message.content}
                     </div>
+
+                    {/* Render Action Buttons */}
+                    <ActionButtons buttons={message.actionButtons} />
+
                     <div style={{
                       fontSize: '12px',
                       opacity: 0.7,

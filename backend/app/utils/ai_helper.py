@@ -1,4 +1,4 @@
-# backend/app/utils/ai_helper.py - Enhanced version with recipe creation support
+# backend/app/utils/ai_helper.py - Fixed version with better error handling
 
 import os
 from openai import OpenAI
@@ -868,41 +868,93 @@ Guidelines:
 
     async def search_external_recipes(self, criteria: Dict[str, Any],
                                       search_params: Dict[str, Any] = None) -> List[Dict]:
-        """Search for recipes from external sources"""
+        """Search for recipes from external sources with better error handling"""
         try:
             # This is a placeholder for external recipe search
             # You would implement actual API calls to recipe websites here
 
             search_query = self._build_external_search_query(criteria, search_params)
 
+            # Get source with proper error handling
+            default_source = "allrecipes.com"
+            source = default_source
+
+            if search_params and search_params.get('specific_websites'):
+                websites = search_params.get('specific_websites', [])
+                if isinstance(websites, list) and len(websites) > 0:
+                    source = websites[0]
+                else:
+                    source = default_source
+
+            # Get ingredient with fallback
+            ingredient = criteria.get('ingredient', 'cookies') if criteria else 'cookies'
+
             # Simulate external search results with properly formatted data
             external_results = [
                 {
-                    "name": f"Delicious {criteria.get('ingredient', 'Chicken')} Recipe",
-                    "source": search_params.get('specific_websites', ['allrecipes.com'])[
-                        0] if search_params else "allrecipes.com",
-                    "description": "A flavorful and easy-to-make recipe perfect for any occasion",
-                    "url": "https://example.com/recipe",
+                    "name": f"Classic {ingredient.title()} Recipe",
+                    "source": source,
+                    "description": f"A delicious and easy-to-make {ingredient} recipe perfect for any occasion",
+                    "url": f"https://{source}/recipe/classic-{ingredient.lower().replace(' ', '-')}",
                     "ingredients": [
-                        "2 pounds chicken breast",
-                        "1 tablespoon olive oil",
-                        "1 teaspoon salt",
-                        "1/2 teaspoon black pepper",
-                        "2 cloves garlic, minced"
+                        "2 cups all-purpose flour",
+                        "1 cup butter, softened",
+                        "3/4 cup granulated sugar",
+                        "1/2 cup brown sugar",
+                        "2 large eggs",
+                        "1 teaspoon vanilla extract",
+                        "1 teaspoon baking soda",
+                        "1/2 teaspoon salt"
                     ],
                     "instructions": [
                         "Preheat oven to 375°F (190°C)",
-                        "Season chicken with salt and pepper",
-                        "Heat olive oil in a large oven-safe skillet",
-                        "Add chicken and cook for 5-6 minutes per side",
-                        "Add garlic and cook for 1 minute",
-                        "Transfer to oven and bake for 15-20 minutes"
+                        "In a large bowl, cream together butter and sugars until light and fluffy",
+                        "Beat in eggs one at a time, then add vanilla",
+                        "In separate bowl, whisk together flour, baking soda, and salt",
+                        "Gradually mix dry ingredients into wet ingredients",
+                        "Drop rounded tablespoons of dough onto ungreased baking sheets",
+                        "Bake for 9-11 minutes until golden brown",
+                        "Cool on baking sheet for 5 minutes before transferring to wire rack"
                     ],
-                    "serving_size": 4,
+                    "serving_size": 24,
                     "prep_time": 15,
-                    "cook_time": 30,
-                    "genre": criteria.get('genre', 'dinner'),
-                    "notes": ["Let chicken rest for 5 minutes before slicing"],
+                    "cook_time": 10,
+                    "genre": criteria.get('genre', 'dessert'),
+                    "notes": ["Store in airtight container for up to 1 week"],
+                    "cuisine_type": search_params.get('cuisine_type', 'american') if search_params else "american"
+                },
+                {
+                    "name": f"Gourmet {ingredient.title()} Delight",
+                    "source": source,
+                    "description": f"An elevated version of the classic {ingredient} with premium ingredients",
+                    "url": f"https://{source}/recipe/gourmet-{ingredient.lower().replace(' ', '-')}",
+                    "ingredients": [
+                        "2 1/4 cups cake flour",
+                        "1 cup European butter",
+                        "1/2 cup turbinado sugar",
+                        "1/2 cup coconut sugar",
+                        "2 organic eggs",
+                        "1 tablespoon pure vanilla extract",
+                        "1 teaspoon baking soda",
+                        "1/2 teaspoon sea salt",
+                        "1 cup premium chocolate chips"
+                    ],
+                    "instructions": [
+                        "Preheat oven to 350°F (175°C)",
+                        "Cream butter and sugars in stand mixer until very light",
+                        "Add eggs and vanilla, mixing until well combined",
+                        "Sift together flour, baking soda, and salt",
+                        "Fold dry ingredients into wet mixture",
+                        "Fold in chocolate chips",
+                        "Scoop dough onto parchment-lined baking sheets",
+                        "Bake 12-14 minutes until edges are set",
+                        "Cool completely before serving"
+                    ],
+                    "serving_size": 18,
+                    "prep_time": 20,
+                    "cook_time": 14,
+                    "genre": criteria.get('genre', 'dessert'),
+                    "notes": ["Use high-quality chocolate for best results", "Can be frozen for up to 3 months"],
                     "cuisine_type": search_params.get('cuisine_type', 'american') if search_params else "american"
                 }
             ]
@@ -918,12 +970,14 @@ Guidelines:
         """Build search query for external APIs"""
         query_parts = []
 
-        if criteria.get('ingredient'):
+        if criteria and criteria.get('ingredient'):
             query_parts.append(f"recipe {criteria['ingredient']}")
-        if criteria.get('genre'):
-            query_parts.append(criteria['genre'])
-        if criteria.get('name'):
+        elif criteria and criteria.get('genre'):
+            query_parts.append(f"{criteria['genre']} recipe")
+        elif criteria and criteria.get('name'):
             query_parts.append(criteria['name'])
+        else:
+            query_parts.append("cookie recipe")  # Default fallback
 
         if search_params:
             if search_params.get('cuisine_type'):
@@ -931,7 +985,7 @@ Guidelines:
             if search_params.get('difficulty_level'):
                 query_parts.append(search_params['difficulty_level'])
 
-        return " ".join(query_parts) if query_parts else "recipes"
+        return " ".join(query_parts) if query_parts else "cookie recipe"
 
     async def _generate_internal_response(self, user_message: str, recipes: List[Dict],
                                           conversation_history: Optional[List[Dict]],
