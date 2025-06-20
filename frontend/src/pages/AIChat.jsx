@@ -150,9 +150,9 @@ const AIChat = () => {
     }, 100);
   };
 
-  // Styles matching the app theme
+  // Styles matching the app theme - Updated with smaller header
   const containerStyle = {
-    padding: '2rem',
+    padding: '1.25rem', // Further reduced from 1.5rem
     backgroundColor: '#f0f8ff',
     minHeight: 'calc(100vh - 80px)',
     display: 'flex',
@@ -163,16 +163,16 @@ const AIChat = () => {
     background: 'white',
     border: '2px solid #003366',
     borderRadius: '15px',
-    padding: '2rem',
-    marginBottom: '2rem',
+    padding: '1.25rem', // Further reduced from 1.5rem
+    marginBottom: '1.25rem', // Further reduced from 1.5rem
     boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)',
     textAlign: 'center'
   };
 
   const titleStyle = {
     color: '#003366',
-    fontSize: '2.5rem',
-    marginBottom: '1rem'
+    fontSize: '1.8rem', // Further reduced from 2rem
+    marginBottom: '0.5rem' // Further reduced from 0.75rem
   };
 
   const chatContainerStyle = {
@@ -185,7 +185,7 @@ const AIChat = () => {
     display: 'flex',
     flexDirection: 'column',
     minHeight: '600px',
-    maxHeight: '70vh'
+    maxHeight: '72vh' // Reduced from 78vh to ensure input box is fully visible
   };
 
   const messagesAreaStyle = {
@@ -242,18 +242,18 @@ const AIChat = () => {
   const quickActionsStyle = {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: '0.5rem',
-    marginBottom: '1rem'
+    gap: '0.3rem', // Further reduced from 0.4rem
+    marginBottom: '0.5rem' // Further reduced from 0.75rem
   };
 
   const quickActionButtonStyle = {
-    padding: '8px 12px',
+    padding: '5px 8px', // Further reduced from 6px 10px
     backgroundColor: '#f0f8ff',
     color: '#003366',
     border: '1px solid #003366',
-    borderRadius: '8px',
+    borderRadius: '6px',
     cursor: 'pointer',
-    fontSize: '14px',
+    fontSize: '12px', // Further reduced from 13px
     textAlign: 'left',
     transition: 'all 0.3s ease'
   };
@@ -266,32 +266,43 @@ const AIChat = () => {
   return (
     <div style={containerStyle}>
       <div style={{ maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
-        {/* Header */}
+        {/* Header - Made more compact */}
         <div style={headerStyle}>
-          <h1 style={titleStyle}>🤖 AI Recipe Assistant</h1>
-          <p style={{ fontSize: '1.2rem', color: '#666', marginBottom: '1rem' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '1rem',
+            marginBottom: '0.5rem',
+            flexWrap: 'wrap' // Allow wrapping on smaller screens
+          }}>
+            <h1 style={titleStyle}>🤖 Ralph the Recipe Assistant</h1>
+            {/* AI Status - moved inline */}
+            {aiStatus && (
+              <div style={{
+                display: 'inline-block',
+                padding: '4px 10px', // Further reduced from 6px 12px
+                backgroundColor: aiStatus.ai_configured ? '#d4edda' : '#f8d7da',
+                color: aiStatus.ai_configured ? '#155724' : '#721c24',
+                borderRadius: '6px',
+                fontSize: '12px', // Further reduced from 13px
+                border: `1px solid ${aiStatus.ai_configured ? '#c3e6cb' : '#f5c6cb'}`,
+                whiteSpace: 'nowrap',
+                flexShrink: 0 // Prevent shrinking
+              }}>
+                {aiStatus.ai_configured ? '✅ Ralph is Ready' : '❌ Ralph is Not Available'}
+              </div>
+            )}
+          </div>
+
+          <p style={{ fontSize: '0.95rem', color: '#666', marginBottom: '0.5rem' }}>
             Hello <strong style={{ color: '#003366' }}>{user?.username}</strong>!
-            I'm your personal recipe assistant. Ask me about recipes, cooking tips, or ingredient suggestions!
+            I'm Ralph, your personal recipe assistant. Ask me about recipes, cooking tips, or ingredient suggestions!
           </p>
 
-          {/* AI Status */}
-          {aiStatus && (
-            <div style={{
-              display: 'inline-block',
-              padding: '8px 16px',
-              backgroundColor: aiStatus.ai_configured ? '#d4edda' : '#f8d7da',
-              color: aiStatus.ai_configured ? '#155724' : '#721c24',
-              borderRadius: '8px',
-              fontSize: '14px',
-              border: `1px solid ${aiStatus.ai_configured ? '#c3e6cb' : '#f5c6cb'}`
-            }}>
-              {aiStatus.ai_configured ? '✅ AI Ready' : '❌ AI Not Configured'}
-            </div>
-          )}
-
-          {/* Quick Actions */}
-          <div style={{ marginTop: '1.5rem' }}>
-            <h3 style={{ color: '#003366', marginBottom: '1rem', fontSize: '1.1rem' }}>
+          {/* Quick Actions - Made more compact */}
+          <div style={{ marginTop: '0.75rem' }}>
+            <h3 style={{ color: '#003366', marginBottom: '0.5rem', fontSize: '0.95rem' }}>
               💡 Quick Actions
             </h3>
             <div style={quickActionsStyle}>
@@ -343,7 +354,7 @@ const AIChat = () => {
             borderBottom: '1px solid #f0f8ff'
           }}>
             <h3 style={{ color: '#003366', margin: 0 }}>
-              💬 Chat with Recipe Assistant
+              💬 Chat with Ralph
             </h3>
             {messages.length > 0 && (
               <button
@@ -372,7 +383,7 @@ const AIChat = () => {
                 color: '#666'
               }}>
                 <h3 style={{ color: '#003366', marginBottom: '1rem' }}>
-                  👋 Welcome to the Recipe Assistant!
+                  👋 Welcome! I'm Ralph, your Recipe Assistant!
                 </h3>
                 <p>
                   I can help you find recipes, suggest cooking ideas, and answer questions about the recipes in your collection.
@@ -418,7 +429,7 @@ const AIChat = () => {
                     borderRadius: '50%',
                     animation: 'spin 1s linear infinite'
                   }}></div>
-                  <span>AI is thinking...</span>
+                  <span>Ralph is thinking...</span>
                 </div>
               </div>
             )}
@@ -433,7 +444,7 @@ const AIChat = () => {
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Ask me about recipes, ingredients, cooking tips..."
+              placeholder="Ask Ralph about recipes, ingredients, cooking tips..."
               style={inputStyle}
               disabled={isLoading}
             />

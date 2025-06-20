@@ -186,7 +186,7 @@ const Navbar = () => {
                       }
                     }}
                   >
-                    👥 Users
+                    👥 Profile
                   </Link>
                 </li>
               )}

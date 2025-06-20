@@ -1,6 +1,6 @@
 # backend/app/utils/ai_helper.py
 import os
-import openai
+from openai import OpenAI
 from typing import Optional, List, Dict, Any
 import json
 import re
@@ -15,13 +15,14 @@ logger = logging.getLogger(__name__)
 class AIHelper:
     def __init__(self):
         self.api_key = os.getenv("OPENAI_API_KEY")
+        self.client = None
         if self.api_key:
-            openai.api_key = self.api_key
+            self.client = OpenAI(api_key=self.api_key)
         self.model = "gpt-3.5-turbo"
 
     def is_configured(self) -> bool:
         """Check if OpenAI API key is configured"""
-        return bool(self.api_key)
+        return bool(self.api_key and self.client)
 
     def get_recipes_data(self, limit: int = 50) -> List[Dict]:
         """Retrieve recipes from database for AI context"""
@@ -149,7 +150,7 @@ class AIHelper:
             If no criteria found, return: {{}}
             """
 
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=200,
@@ -225,7 +226,7 @@ Remember: Always be helpful and provide specific recipe recommendations when app
             # Add current user message
             messages.append({"role": "user", "content": user_message})
 
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 max_tokens=800,
@@ -312,7 +313,7 @@ Remember: Always be helpful and provide specific recipe recommendations when app
         """
 
         try:
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system",
