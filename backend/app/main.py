@@ -368,7 +368,7 @@ class RecipeValidationResponse(BaseModel):
 class RecipeImportRequest(BaseModel):
     source_url: Optional[str] = None
     recipe_text: Optional[str] = None
-    import_type: str = Field(..., regex="^(url|text)$")
+    import_type: str = Field(..., pattern="^(url|text)$")
 
 class RecipeImportResponse(BaseModel):
     success: bool
