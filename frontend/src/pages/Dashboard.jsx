@@ -180,7 +180,7 @@ const Dashboard = () => {
           }}
           onClick={() => navigate('/ai-chat')}>
             <h3 style={{ color: '#003366', marginBottom: '1rem' }}>
-              🤖 AI Assistant
+              🤖 Rupert
             </h3>
             <p>Get cooking help and recipe suggestions from your personal AI assistant</p>
             <div style={{

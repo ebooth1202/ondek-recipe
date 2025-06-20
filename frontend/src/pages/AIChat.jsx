@@ -1,4 +1,4 @@
-// frontend/src/pages/AIChat.jsx - Complete version with file upload functionality
+// frontend/src/pages/AIChat.jsx - Updated with small upload button
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -506,7 +506,7 @@ Please try:
   const inputAreaStyle = {
     display: 'flex',
     flexDirection: 'column',
-    gap: '1rem'
+    gap: '0.5rem'
   };
 
   const inputRowStyle = {
@@ -538,15 +538,6 @@ Please try:
     minHeight: '50px'
   };
 
-  const fileUploadAreaStyle = {
-    border: `2px dashed ${dragOver ? '#003366' : '#ccc'}`,
-    borderRadius: '10px',
-    padding: '1rem',
-    textAlign: 'center',
-    backgroundColor: dragOver ? '#f0f8ff' : '#f9f9f9',
-    transition: 'all 0.3s ease'
-  };
-
   const selectedFileStyle = {
     display: 'flex',
     alignItems: 'center',
@@ -555,7 +546,8 @@ Please try:
     backgroundColor: '#e6f0ff',
     border: '1px solid #003366',
     borderRadius: '8px',
-    fontSize: '14px'
+    fontSize: '12px',
+    marginBottom: '0.5rem'
   };
 
   const quickActionsStyle = {
@@ -595,7 +587,7 @@ Please try:
             marginBottom: '0.5rem',
             flexWrap: 'wrap'
           }}>
-            <h1 style={titleStyle}>🤖 Ralph the Recipe Assistant</h1>
+            <h1 style={titleStyle}>🤖 Rupert the Recipe Assistant</h1>
             {/* AI Status */}
             {aiStatus && (
               <div style={{
@@ -609,14 +601,14 @@ Please try:
                 whiteSpace: 'nowrap',
                 flexShrink: 0
               }}>
-                {aiStatus.ai_configured ? '✅ Ralph is Ready' : '❌ Ralph is Not Available'}
+                {aiStatus.ai_configured ? '✅ Rupert is Ready' : '❌ Rupert is Not Available'}
               </div>
             )}
           </div>
 
           <p style={{ fontSize: '0.95rem', color: '#666', marginBottom: '0.5rem' }}>
             Hello <strong style={{ color: '#003366' }}>{user?.username}</strong>!
-            I'm Ralph, your personal recipe assistant. Ask me about recipes, cooking tips, or upload recipe files!
+            I'm Rupert, your personal recipe assistant. Ask me about recipes, cooking tips, or upload recipe files!
           </p>
 
           {/* Quick Actions */}
@@ -662,7 +654,12 @@ Please try:
         )}
 
         {/* Chat Container */}
-        <div style={chatContainerStyle}>
+        <div
+          style={chatContainerStyle}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
           {/* Chat Header */}
           <div style={{
             display: 'flex',
@@ -673,7 +670,7 @@ Please try:
             borderBottom: '1px solid #f0f8ff'
           }}>
             <h3 style={{ color: '#003366', margin: 0 }}>
-              💬 Chat with Ralph
+              💬 Chat with Rupert
             </h3>
             {messages.length > 0 && (
               <button
@@ -702,7 +699,7 @@ Please try:
                 color: '#666'
               }}>
                 <h3 style={{ color: '#003366', marginBottom: '1rem' }}>
-                  👋 Welcome! I'm Ralph, your Recipe Assistant!
+                  👋 Welcome! I'm Rupert, your Recipe Assistant!
                 </h3>
                 <p>
                   I can help you find recipes, suggest cooking ideas, and parse recipes from uploaded files.
@@ -752,7 +749,7 @@ Please try:
                     borderRadius: '50%',
                     animation: 'spin 1s linear infinite'
                   }}></div>
-                  <span>{isUploadingFile ? 'Processing your file...' : 'Ralph is thinking...'}</span>
+                  <span>{isUploadingFile ? 'Processing your file...' : 'Rupert is thinking...'}</span>
                 </div>
               </div>
             )}
@@ -762,63 +759,26 @@ Please try:
 
           {/* Input Area */}
           <div style={inputAreaStyle}>
-            {/* File Upload Area */}
-            <div
-              style={fileUploadAreaStyle}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-            >
-              {selectedFile ? (
-                <div style={selectedFileStyle}>
-                  <span>📎</span>
-                  <span>{selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)</span>
-                  <button
-                    onClick={clearSelectedFile}
-                    style={{
-                      marginLeft: 'auto',
-                      background: 'none',
-                      border: 'none',
-                      color: '#dc3545',
-                      cursor: 'pointer',
-                      fontSize: '16px'
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
-              ) : (
-                <div>
-                  <p style={{ margin: '0 0 0.5rem 0', color: '#666' }}>
-                    📎 Upload a recipe file (PDF, images, text files)
-                  </p>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    onChange={handleFileSelect}
-                    accept=".pdf,.jpg,.jpeg,.png,.bmp,.tiff,.txt,.csv,.md"
-                    style={{ display: 'none' }}
-                  />
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    style={{
-                      padding: '8px 16px',
-                      backgroundColor: '#28a745',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      fontSize: '14px'
-                    }}
-                  >
-                    Choose File
-                  </button>
-                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '12px', color: '#999' }}>
-                    Or drag and drop a file here
-                  </p>
-                </div>
-              )}
-            </div>
+            {/* Show selected file info if file is selected */}
+            {selectedFile && (
+              <div style={selectedFileStyle}>
+                <span>📎</span>
+                <span>{selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)</span>
+                <button
+                  onClick={clearSelectedFile}
+                  style={{
+                    marginLeft: 'auto',
+                    background: 'none',
+                    border: 'none',
+                    color: '#dc3545',
+                    cursor: 'pointer',
+                    fontSize: '16px'
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
 
             {/* Text Input Row */}
             <div style={inputRowStyle}>
@@ -827,7 +787,7 @@ Please try:
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder={selectedFile ? "Click Send to upload file or type a message..." : "Ask Ralph about recipes, ingredients, cooking tips..."}
+                placeholder={selectedFile ? "Click Send to upload file or type a message..." : "Ask Rupert about recipes, ingredients, cooking tips..."}
                 style={inputStyle}
                 disabled={isLoading || isUploadingFile}
               />
@@ -844,13 +804,62 @@ Please try:
               </button>
             </div>
 
-            {/* Tips */}
+            {/* Bottom Row: Tips and Upload Button */}
             <div style={{
-              fontSize: '12px',
-              color: '#666',
-              textAlign: 'center'
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '1rem'
             }}>
-              💡 Tip: Press Enter to send, Shift+Enter for new line. Upload recipe files for automatic parsing!
+              {/* Tips */}
+              <div style={{
+                fontSize: '12px',
+                color: '#666',
+                flex: 1
+              }}>
+                💡 Tip: Press Enter to send, Shift+Enter for new line
+              </div>
+
+              {/* Small Upload Button */}
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  onChange={handleFileSelect}
+                  accept=".pdf,.jpg,.jpeg,.png,.bmp,.tiff,.txt,.csv,.md"
+                  style={{ display: 'none' }}
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isLoading || isUploadingFile}
+                  title="Upload recipe file (PDF, images, text files)"
+                  style={{
+                    padding: '8px 12px',
+                    backgroundColor: isLoading || isUploadingFile ? '#ccc' : '#28a745',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: isLoading || isUploadingFile ? 'not-allowed' : 'pointer',
+                    fontSize: '14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.3rem',
+                    transition: 'background-color 0.3s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isLoading && !isUploadingFile) {
+                      e.target.style.backgroundColor = '#218838';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isLoading && !isUploadingFile) {
+                      e.target.style.backgroundColor = '#28a745';
+                    }
+                  }}
+                >
+                  📎 Upload
+                </button>
+              </div>
             </div>
           </div>
         </div>

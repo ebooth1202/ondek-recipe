@@ -14,12 +14,13 @@ from urllib.parse import quote_plus
 import uuid
 import asyncio
 from fractions import Fraction
-import PyPDF2
-import pytesseract
-from PIL import Image
+# import PyPDF2
+# import pytesseract
+# from PIL import Image
+# import magic
 import csv
 import io
-import magic
+
 import tempfile
 
 logger = logging.getLogger(__name__)
@@ -888,7 +889,7 @@ The recipe data has been prepared and is ready to be added to your collection! C
                                                conversation_history: Optional[List[Dict]]) -> str:
         """Generate response for recipe creation help"""
         try:
-            system_message = """You are Ralph, a helpful cooking assistant for the Ondek Recipe app. The user is asking for help creating or adding a new recipe. 
+            system_message = """You are Rupert, a helpful cooking assistant for the Ondek Recipe app. The user is asking for help creating or adding a new recipe. 
 
 Provide helpful guidance about recipe creation, including:
 - Tips for organizing ingredients and measurements
@@ -951,7 +952,7 @@ Be encouraging and offer to help them get started with the recipe creation proce
                 if search_params.get('cuisine_type'):
                     search_info += f"Cuisine focus: {search_params['cuisine_type']}\n"
 
-            system_message = f"""You are Ralph, a helpful cooking assistant. The user asked you to search the internet for recipes since nothing was found in their personal database.
+            system_message = f"""You are Rupert, a helpful cooking assistant. The user asked you to search the internet for recipes since nothing was found in their personal database.
 
 External search results: Found {len(external_recipes)} recipes from the internet.
 {search_info}
@@ -1358,7 +1359,7 @@ Guidelines:
                     recipe_context += f"   - Dietary: {', '.join(recipe['dietary_restrictions'])}\n"
                 recipe_context += f"   - Created by: {recipe['created_by']}\n"
 
-            system_message = f"""You are Ralph, a helpful cooking assistant for the Ondek Recipe app. You have access to the user's personal recipe database and should provide helpful information based on what's available.
+            system_message = f"""You are Rupert, a helpful cooking assistant for the Ondek Recipe app. You have access to the user's personal recipe database and should provide helpful information based on what's available.
 
 IMPORTANT: You are currently working with recipes from the user's personal database only. These are recipes they have saved or created.
 
