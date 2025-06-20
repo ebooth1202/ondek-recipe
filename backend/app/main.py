@@ -6,7 +6,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from bson import ObjectId
 from bson.errors import InvalidId
 import bcrypt
-import jwt
+from jose import jwt  # ✅ This is correct
 from datetime import datetime, timedelta
 from typing import List, Optional
 import os
@@ -26,8 +26,30 @@ import json
 # Load environment variables first
 # load_dotenv()
 from pathlib import Path
-env_path = Path(__file__).parent.parent.parent / '.env'
-load_dotenv(dotenv_path=env_path)
+# env_path = Path(__file__).parent.parent.parent / '.env'
+# load_dotenv(dotenv_path=env_path)
+
+possible_env_paths = [
+    Path(__file__).parent.parent.parent / '.env',  # Original calculation
+    Path.cwd() / '.env',  # Current working directory
+    Path(__file__).parent.parent / '.env',  # Backend directory
+    Path.cwd().parent / '.env' if 'backend' in str(Path.cwd()) else Path.cwd() / '.env'
+]
+
+env_loaded = False
+for env_path in possible_env_paths:
+    if env_path.exists():
+        print(f"Loading .env from: {env_path}")
+        load_dotenv(dotenv_path=env_path)
+        env_loaded = True
+        break
+
+if not env_loaded:
+    print("Warning: No .env file found in any expected location")
+    print("Tried paths:")
+    for path in possible_env_paths:
+        print(f"  - {path} (exists: {path.exists()})")
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -84,6 +106,16 @@ class UserRole(str, Enum):
     ADMIN = "admin"
     USER = "user"
 
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    password: Optional[str] = None
+
+class RoleUpdate(BaseModel):
+    role: UserRole
 
 class Genre(str, Enum):
     BREAKFAST = "breakfast"
@@ -392,6 +424,198 @@ async def get_current_user_info(current_user: dict = Depends(get_current_user)):
         created_at=current_user["created_at"]
     )
 
+# Add this route to your main.py file, around line 400 (after your auth routes)
+
+@app.get("/users", response_model=List[UserResponse])
+async def get_users(
+    skip: int = Query(0, ge=0, description="Number of users to skip"),
+    limit: int = Query(50, ge=1, le=100, description="Number of users to return"),
+    current_user: dict = Depends(require_role([UserRole.ADMIN, UserRole.OWNER]))
+):
+    """Get all users - Admin/Owner only"""
+    if not db_available:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    cursor = db.users.find({}).skip(skip).limit(limit).sort("created_at", -1)
+    users = []
+
+    for user_doc in cursor:
+        users.append(UserResponse(
+            id=str(user_doc["_id"]),
+            username=user_doc["username"],
+            email=user_doc["email"],
+            first_name=user_doc.get("first_name"),
+            last_name=user_doc.get("last_name"),
+            role=UserRole(user_doc["role"]),
+            created_at=user_doc["created_at"]
+        ))
+
+    return users
+
+@app.get("/users/{user_id}", response_model=UserResponse)
+async def get_user_by_id(
+    user_id: str,
+    current_user: dict = Depends(require_role([UserRole.ADMIN, UserRole.OWNER]))
+):
+    """Get a specific user by ID - Admin/Owner only"""
+    if not db_available:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=400, detail="Invalid user ID")
+
+    user_doc = db.users.find_one({"_id": ObjectId(user_id)})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return UserResponse(
+        id=str(user_doc["_id"]),
+        username=user_doc["username"],
+        email=user_doc["email"],
+        first_name=user_doc.get("first_name"),
+        last_name=user_doc.get("last_name"),
+        role=UserRole(user_doc["role"]),
+        created_at=user_doc["created_at"]
+    )
+
+@app.put("/users/{user_id}", response_model=UserResponse)
+async def update_user(
+    user_id: str,
+    user_update: UserUpdate,
+    current_user: dict = Depends(require_role([UserRole.ADMIN, UserRole.OWNER]))
+):
+    """Update a user - Admin/Owner only"""
+    if not db_available:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=400, detail="Invalid user ID")
+
+    existing_user = db.users.find_one({"_id": ObjectId(user_id)})
+    if not existing_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Build update document
+    update_doc = {"updated_at": datetime.now()}
+
+    if user_update.first_name is not None:
+        update_doc["first_name"] = user_update.first_name
+    if user_update.last_name is not None:
+        update_doc["last_name"] = user_update.last_name
+    if user_update.email is not None:
+        if not validate_email(user_update.email):
+            raise HTTPException(status_code=400, detail="Invalid email format")
+        # Check if email is already taken by another user
+        email_check = db.users.find_one({"email": user_update.email, "_id": {"$ne": ObjectId(user_id)}})
+        if email_check:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        update_doc["email"] = user_update.email
+
+    # Update the user
+    result = db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": update_doc}
+    )
+
+    if result.modified_count == 0:
+        raise HTTPException(status_code=400, detail="No changes were made")
+
+    # Return the updated user
+    updated_user = db.users.find_one({"_id": ObjectId(user_id)})
+    return UserResponse(
+        id=str(updated_user["_id"]),
+        username=updated_user["username"],
+        email=updated_user["email"],
+        first_name=updated_user.get("first_name"),
+        last_name=updated_user.get("last_name"),
+        role=UserRole(updated_user["role"]),
+        created_at=updated_user["created_at"]
+    )
+
+@app.delete("/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    current_user: dict = Depends(require_role([UserRole.OWNER]))  # Only owners can delete users
+):
+    """Delete a user - Owner only"""
+    if not db_available:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=400, detail="Invalid user ID")
+
+    # Don't allow deleting yourself
+    if str(current_user["_id"]) == user_id:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+
+    user_doc = db.users.find_one({"_id": ObjectId(user_id)})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Don't allow deleting other owners
+    if user_doc["role"] == "owner":
+        raise HTTPException(status_code=403, detail="Cannot delete owner accounts")
+
+    # Delete the user
+    db.users.delete_one({"_id": ObjectId(user_id)})
+
+    # Optional: Also delete user's recipes, ratings, and favorites
+    # db.recipes.delete_many({"created_by": user_doc["username"]})
+    # db.ratings.delete_many({"user_id": user_id})
+    # db.favorites.delete_many({"user_id": user_id})
+
+    return {"message": "User deleted successfully"}
+
+
+@app.put("/users/{user_id}/role", response_model=UserResponse)
+async def change_user_role(
+    user_id: str,
+    role_update: RoleUpdate,
+    current_user: dict = Depends(require_role([UserRole.ADMIN, UserRole.OWNER]))
+):
+    """Change a user's role - Admin/Owner only"""
+    if not db_available:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=400, detail="Invalid user ID")
+
+    existing_user = db.users.find_one({"_id": ObjectId(user_id)})
+    if not existing_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Don't allow changing your own role
+    if str(current_user["_id"]) == user_id:
+        raise HTTPException(status_code=400, detail="Cannot change your own role")
+
+    # Don't allow changing owner roles unless you're an owner
+    if existing_user["role"] == "owner" and current_user["role"] != "owner":
+        raise HTTPException(status_code=403, detail="Cannot change owner role")
+
+    # Don't allow non-owners to assign owner role
+    if role_update.role == UserRole.OWNER and current_user["role"] != "owner":
+        raise HTTPException(status_code=403, detail="Only owners can assign owner role")
+
+    # Update the user's role
+    result = db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"role": role_update.role.value, "updated_at": datetime.now()}}
+    )
+
+    if result.modified_count == 0:
+        raise HTTPException(status_code=400, detail="No changes were made")
+
+    # Return the updated user
+    updated_user = db.users.find_one({"_id": ObjectId(user_id)})
+    return UserResponse(
+        id=str(updated_user["_id"]),
+        username=updated_user["username"],
+        email=updated_user["email"],
+        first_name=updated_user.get("first_name"),
+        last_name=updated_user.get("last_name"),
+        role=UserRole(updated_user["role"]),
+        created_at=updated_user["created_at"]
+    )
 
 # Recipe routes
 @app.post("/recipes", response_model=RecipeResponse)
