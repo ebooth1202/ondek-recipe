@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, status, Query
+from fastapi import FastAPI, HTTPException, Depends, status, Query, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from bson import ObjectId
@@ -16,6 +16,14 @@ from statistics import mean
 import logging
 import uuid
 import asyncio
+import tempfile
+import magic
+import PyPDF2
+import pytesseract
+from PIL import Image
+import csv
+import io
+import json
 
 # Database import
 from .database import db, Database
@@ -376,6 +384,23 @@ class RecipeImportResponse(BaseModel):
     recipe_data: Optional[FormattedRecipe] = None
     error: Optional[str] = None
     warnings: List[str] = []
+
+# NEW FILE UPLOAD MODELS
+class FileUploadResponse(BaseModel):
+    success: bool
+    message: str
+    temp_id: Optional[str] = None
+    file_type: Optional[str] = None
+    parsed_content: Optional[str] = None
+    recipe_data: Optional[FormattedRecipe] = None
+    error: Optional[str] = None
+
+class FileParsingResult(BaseModel):
+    file_name: str
+    file_type: str
+    parsed_text: str
+    recipe_data: Optional[FormattedRecipe] = None
+    confidence: float = 0.0
 
 
 # Utility functions
@@ -1034,7 +1059,7 @@ async def check_favorite_status(recipe_id: str, current_user: dict = Depends(get
 @app.post("/ai/chat", response_model=ChatResponse)
 async def ai_chat(chat_data: ChatMessage, current_user: dict = Depends(get_current_user)):
     """
-    Main AI chat endpoint for recipe-related conversations
+    Enhanced AI chat endpoint for recipe-related conversations with recipe creation support
     """
     try:
         if not ai_helper.is_configured():
@@ -1043,7 +1068,7 @@ async def ai_chat(chat_data: ChatMessage, current_user: dict = Depends(get_curre
                 timestamp=Database.get_current_datetime()
             )
 
-        # Process the chat message
+        # Process the chat message with enhanced recipe creation support
         response_text = await ai_helper.chat_about_recipes(
             user_message=chat_data.message,
             conversation_history=chat_data.conversation_history
@@ -1151,6 +1176,112 @@ async def ai_status():
     }
 
 
+# NEW FILE UPLOAD ROUTES
+@app.post("/ai/upload-recipe-file", response_model=FileUploadResponse)
+async def upload_recipe_file(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Upload and parse a file containing recipe information
+    """
+    try:
+        if not ai_helper.is_configured():
+            return FileUploadResponse(
+                success=False,
+                error="AI features are currently unavailable. Please contact the administrator."
+            )
+
+        # Validate file size (10MB limit)
+        file_content = await file.read()
+        if len(file_content) > 10 * 1024 * 1024:  # 10MB
+            return FileUploadResponse(
+                success=False,
+                error="File size too large. Please upload files smaller than 10MB."
+            )
+
+        # Reset file pointer
+        await file.seek(0)
+
+        # Detect file type
+        file_type = magic.from_buffer(file_content, mime=True)
+        file_extension = os.path.splitext(file.filename.lower())[1]
+
+        logger.info(f"Processing file: {file.filename}, type: {file_type}, extension: {file_extension}")
+
+        # Parse the file based on type
+        parsing_result = await ai_helper.parse_recipe_file(
+            file_content=file_content,
+            filename=file.filename,
+            file_type=file_type,
+            file_extension=file_extension
+        )
+
+        if not parsing_result:
+            return FileUploadResponse(
+                success=False,
+                error="Could not extract recipe information from the uploaded file."
+            )
+
+        # If we successfully extracted recipe data, store it temporarily
+        temp_id = None
+        if parsing_result.recipe_data:
+            temp_id = ai_helper.store_temp_recipe(parsing_result.recipe_data.dict())
+
+        return FileUploadResponse(
+            success=True,
+            message=f"Successfully parsed recipe from {file.filename}!",
+            temp_id=temp_id,
+            file_type=parsing_result.file_type,
+            parsed_content=parsing_result.parsed_text[:500] + "..." if len(parsing_result.parsed_text) > 500 else parsing_result.parsed_text,
+            recipe_data=parsing_result.recipe_data
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing uploaded file: {e}")
+        return FileUploadResponse(
+            success=False,
+            error=f"Error processing file: {str(e)}"
+        )
+
+
+@app.post("/ai/parse-recipe-from-text")
+async def parse_recipe_from_text_advanced(
+    text_content: str = Form(...),
+    source_info: Optional[str] = Form(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Parse recipe information from raw text content
+    """
+    try:
+        if not ai_helper.is_configured():
+            return {"success": False, "error": "AI features are currently unavailable."}
+
+        # Use AI to parse the text
+        recipe_data = await ai_helper.parse_recipe_from_text_advanced(
+            text_content,
+            source_info=source_info
+        )
+
+        if not recipe_data:
+            return {"success": False, "error": "Could not extract recipe information from the provided text."}
+
+        # Store temporarily
+        temp_id = ai_helper.store_temp_recipe(recipe_data)
+
+        return {
+            "success": True,
+            "message": "Recipe parsed successfully from text!",
+            "temp_id": temp_id,
+            "recipe_data": recipe_data
+        }
+
+    except Exception as e:
+        logger.error(f"Error parsing recipe from text: {e}")
+        return {"success": False, "error": f"Error parsing text: {str(e)}"}
+
+
 # RECIPE CREATION SUPPORT ROUTES
 @app.get("/temp-recipe/{temp_id}")
 async def get_temp_recipe(temp_id: str):
@@ -1231,38 +1362,6 @@ async def cleanup_temp_recipes():
     except Exception as e:
         logger.error(f"Error during cleanup: {e}")
         raise HTTPException(status_code=500, detail="Error during cleanup")
-
-
-# ENHANCED AI CHAT ROUTE (replace the existing one)
-@app.post("/ai/chat", response_model=ChatResponse)
-async def ai_chat(chat_data: ChatMessage, current_user: dict = Depends(get_current_user)):
-    """
-    Enhanced AI chat endpoint for recipe-related conversations with recipe creation support
-    """
-    try:
-        if not ai_helper.is_configured():
-            return ChatResponse(
-                response="AI features are currently unavailable. Please contact the administrator to configure the OpenAI API key.",
-                timestamp=Database.get_current_datetime()
-            )
-
-        # Process the chat message with enhanced recipe creation support
-        response_text = await ai_helper.chat_about_recipes(
-            user_message=chat_data.message,
-            conversation_history=chat_data.conversation_history
-        )
-
-        return ChatResponse(
-            response=response_text,
-            timestamp=Database.get_current_datetime()
-        )
-
-    except Exception as e:
-        logger.error(f"Error in AI chat: {e}")
-        return ChatResponse(
-            response="I'm sorry, I encountered an error while processing your request. Please try again.",
-            timestamp=Database.get_current_datetime()
-        )
 
 
 # RECIPE PARSING UTILITY ROUTE

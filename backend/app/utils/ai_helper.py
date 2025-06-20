@@ -1,4 +1,4 @@
-# backend/app/utils/ai_helper.py - Fixed version with better error handling
+# backend/app/utils/ai_helper.py - Complete version with file parsing capabilities
 
 import os
 from openai import OpenAI
@@ -14,11 +14,27 @@ from urllib.parse import quote_plus
 import uuid
 import asyncio
 from fractions import Fraction
+import PyPDF2
+import pytesseract
+from PIL import Image
+import csv
+import io
+import magic
+import tempfile
 
 logger = logging.getLogger(__name__)
 
 # Temporary storage for recipe data (in production, consider using Redis)
 temp_recipe_storage = {}
+
+
+class FileParsingResult:
+    def __init__(self, file_name: str, file_type: str, parsed_text: str, recipe_data=None, confidence: float = 0.0):
+        self.file_name = file_name
+        self.file_type = file_type
+        self.parsed_text = parsed_text
+        self.recipe_data = recipe_data
+        self.confidence = confidence
 
 
 class AIHelper:
@@ -72,6 +88,343 @@ class AIHelper:
         for key in expired_keys:
             del temp_recipe_storage[key]
 
+    # NEW FILE PARSING METHODS
+    async def parse_recipe_file(self, file_content: bytes, filename: str, file_type: str, file_extension: str) -> \
+    Optional[FileParsingResult]:
+        """
+        Parse recipe information from various file types
+        """
+        try:
+            logger.info(f"Parsing file: {filename}, type: {file_type}")
+
+            # Extract text based on file type
+            extracted_text = ""
+
+            if file_type == "application/pdf" or file_extension == ".pdf":
+                extracted_text = self._extract_text_from_pdf(file_content)
+            elif file_type.startswith("image/") or file_extension.lower() in [".jpg", ".jpeg", ".png", ".bmp", ".tiff"]:
+                extracted_text = self._extract_text_from_image(file_content)
+            elif file_type == "text/csv" or file_extension == ".csv":
+                extracted_text = self._extract_text_from_csv(file_content)
+            elif file_type.startswith("text/") or file_extension in [".txt", ".md"]:
+                extracted_text = file_content.decode('utf-8', errors='ignore')
+            else:
+                # Try to decode as text anyway
+                try:
+                    extracted_text = file_content.decode('utf-8', errors='ignore')
+                except:
+                    raise ValueError(f"Unsupported file type: {file_type}")
+
+            if not extracted_text.strip():
+                logger.warning(f"No text could be extracted from {filename}")
+                return None
+
+            logger.info(f"Extracted {len(extracted_text)} characters from {filename}")
+
+            # Use AI to parse the extracted text into recipe data
+            recipe_data = await self.parse_recipe_from_text_advanced(
+                extracted_text,
+                source_info=f"Uploaded file: {filename}"
+            )
+
+            return FileParsingResult(
+                file_name=filename,
+                file_type=file_type,
+                parsed_text=extracted_text,
+                recipe_data=recipe_data,
+                confidence=0.8 if recipe_data else 0.3
+            )
+
+        except Exception as e:
+            logger.error(f"Error parsing file {filename}: {e}")
+            return None
+
+    def _extract_text_from_pdf(self, file_content: bytes) -> str:
+        """Extract text from PDF file"""
+        try:
+            pdf_file = io.BytesIO(file_content)
+            pdf_reader = PyPDF2.PdfReader(pdf_file)
+
+            text = ""
+            for page in pdf_reader.pages:
+                text += page.extract_text() + "\n"
+
+            return text.strip()
+        except Exception as e:
+            logger.error(f"Error extracting text from PDF: {e}")
+            return ""
+
+    def _extract_text_from_image(self, file_content: bytes) -> str:
+        """Extract text from image using OCR"""
+        try:
+            image = Image.open(io.BytesIO(file_content))
+
+            # Convert to RGB if necessary
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+
+            # Use pytesseract to extract text
+            text = pytesseract.image_to_string(image)
+            return text.strip()
+        except Exception as e:
+            logger.error(f"Error extracting text from image: {e}")
+            return ""
+
+    def _extract_text_from_csv(self, file_content: bytes) -> str:
+        """Extract text from CSV file"""
+        try:
+            csv_text = file_content.decode('utf-8', errors='ignore')
+            csv_file = io.StringIO(csv_text)
+
+            # Try to detect if this is a recipe CSV
+            reader = csv.DictReader(csv_file)
+            rows = list(reader)
+
+            if not rows:
+                return csv_text
+
+            # Look for recipe-like columns
+            headers = rows[0].keys() if rows else []
+            recipe_columns = ['name', 'title', 'recipe', 'ingredients', 'instructions', 'directions', 'steps']
+
+            has_recipe_data = any(
+                any(col.lower() in header.lower() for col in recipe_columns)
+                for header in headers
+            )
+
+            if has_recipe_data:
+                # Format as structured text
+                formatted_text = "Recipe Data from CSV:\n\n"
+                for i, row in enumerate(rows, 1):
+                    formatted_text += f"Recipe {i}:\n"
+                    for key, value in row.items():
+                        if value and value.strip():
+                            formatted_text += f"{key}: {value}\n"
+                    formatted_text += "\n"
+                return formatted_text
+            else:
+                # Return raw CSV text
+                return csv_text
+
+        except Exception as e:
+            logger.error(f"Error extracting text from CSV: {e}")
+            return file_content.decode('utf-8', errors='ignore')
+
+    async def parse_recipe_from_text_advanced(self, text_content: str, source_info: Optional[str] = None) -> Optional[
+        Dict[str, Any]]:
+        """
+        Advanced recipe parsing from text using AI
+        """
+        try:
+            if not self.is_configured():
+                return None
+
+            # Clean and prepare the text
+            cleaned_text = self._clean_text_for_parsing(text_content)
+
+            if len(cleaned_text) < 50:  # Too short to be a recipe
+                logger.warning("Text too short to contain recipe information")
+                return None
+
+            # Create a comprehensive prompt for recipe extraction
+            system_prompt = """You are a recipe extraction specialist. Your job is to analyze text and extract complete recipe information in a specific JSON format.
+
+IMPORTANT: You must return ONLY valid JSON with no additional text or markdown formatting.
+
+Extract the following information and return as JSON:
+{
+  "recipe_name": "string (required)",
+  "description": "string (optional, brief description)",
+  "ingredients": [
+    {
+      "name": "ingredient name",
+      "quantity": number,
+      "unit": "cup|cups|tablespoon|tablespoons|teaspoon|teaspoons|ounce|ounces|pound|pounds|gram|grams|kilogram|kilograms|liter|liters|milliliter|milliliters|piece|pieces|whole|stick|sticks|pinch|dash"
+    }
+  ],
+  "instructions": ["step 1", "step 2", ...],
+  "serving_size": number (default 4),
+  "genre": "breakfast|lunch|dinner|snack|dessert|appetizer",
+  "prep_time": number (minutes, 0 if not specified),
+  "cook_time": number (minutes, 0 if not specified),
+  "notes": ["note 1", "note 2", ...] (optional),
+  "dietary_restrictions": ["gluten_free", "dairy_free", "egg_free"] (optional)
+}
+
+Rules:
+1. Extract ALL ingredients with proper quantities and units
+2. Break down instructions into clear, numbered steps
+3. Infer reasonable serving size if not specified
+4. Classify genre based on content
+5. Extract timing information if available
+6. Include any tips, notes, or variations
+7. Identify dietary restrictions mentioned
+8. If multiple recipes exist, extract the first/main one
+9. Return ONLY the JSON object, no other text"""
+
+            user_prompt = f"""Extract recipe information from this text:
+
+Source: {source_info or 'User provided text'}
+
+Text content:
+{cleaned_text}
+
+Return the recipe data as JSON only."""
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=1500,
+                temperature=0.1
+            )
+
+            result_text = response.choices[0].message.content.strip()
+
+            # Clean up the response - remove any markdown formatting
+            if result_text.startswith("```json"):
+                result_text = result_text[7:]
+            if result_text.startswith("```"):
+                result_text = result_text[3:]
+            if result_text.endswith("```"):
+                result_text = result_text[:-3]
+
+            result_text = result_text.strip()
+
+            try:
+                recipe_data = json.loads(result_text)
+
+                # Validate and format the extracted data
+                formatted_recipe = self._validate_and_format_extracted_recipe(recipe_data)
+
+                if formatted_recipe:
+                    logger.info(f"Successfully extracted recipe: {formatted_recipe.get('recipe_name', 'Unknown')}")
+                    return formatted_recipe
+                else:
+                    logger.warning("Recipe data validation failed")
+                    return None
+
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse AI response as JSON: {e}")
+                logger.error(f"AI response was: {result_text}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error in advanced recipe parsing: {e}")
+            return None
+
+    def _clean_text_for_parsing(self, text: str) -> str:
+        """Clean and prepare text for recipe parsing"""
+        try:
+            # Remove excessive whitespace
+            text = ' '.join(text.split())
+
+            # Remove common OCR artifacts
+            text = text.replace('|', 'I')  # Common OCR error
+            text = text.replace('°', ' degrees ')
+
+            # Normalize fractions
+            text = text.replace('½', '1/2')
+            text = text.replace('¼', '1/4')
+            text = text.replace('¾', '3/4')
+            text = text.replace('⅓', '1/3')
+            text = text.replace('⅔', '2/3')
+
+            # Remove excessive newlines but preserve structure
+            text = '\n'.join(line.strip() for line in text.split('\n') if line.strip())
+
+            return text
+        except Exception as e:
+            logger.error(f"Error cleaning text: {e}")
+            return text
+
+    def _validate_and_format_extracted_recipe(self, recipe_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Validate and format extracted recipe data"""
+        try:
+            # Check required fields
+            if not recipe_data.get('recipe_name'):
+                logger.warning("No recipe name found in extracted data")
+                return None
+
+            if not recipe_data.get('ingredients') or not recipe_data.get('instructions'):
+                logger.warning("Missing ingredients or instructions in extracted data")
+                return None
+
+            # Format the recipe using existing format_recipe_for_form method
+            formatted = self.format_recipe_for_form(recipe_data)
+
+            if formatted:
+                # Additional validation
+                if len(formatted['ingredients']) == 0:
+                    logger.warning("No valid ingredients found after formatting")
+                    return None
+
+                if len(formatted['instructions']) == 0:
+                    logger.warning("No valid instructions found after formatting")
+                    return None
+
+            return formatted
+
+        except Exception as e:
+            logger.error(f"Error validating extracted recipe: {e}")
+            return None
+
+    def create_file_parsing_action_button(self, temp_id: str, filename: str) -> Dict[str, Any]:
+        """Create action button for parsed file recipe"""
+        return {
+            "type": "action_button",
+            "text": f"Add Recipe from {filename}",
+            "action": "create_recipe_from_file",
+            "url": f"/add-recipe?temp_id={temp_id}",
+            "metadata": {
+                "temp_id": temp_id,
+                "source": filename,
+                "type": "file_upload"
+            }
+        }
+
+    async def generate_file_parsing_response(self, parsing_result: FileParsingResult,
+                                             temp_id: Optional[str] = None) -> str:
+        """Generate a user-friendly response for file parsing results"""
+        try:
+            if not parsing_result.recipe_data:
+                return f"""I processed your file "{parsing_result.file_name}" but couldn't extract a complete recipe from it. 
+
+Here's what I found:
+{parsing_result.parsed_text[:300]}{'...' if len(parsing_result.parsed_text) > 300 else ''}
+
+You can try:
+- Uploading a clearer image if it was a photo
+- Providing a file with more structured recipe information
+- Manually entering the recipe information"""
+
+            recipe_name = parsing_result.recipe_data.get('recipe_name', 'Unknown Recipe')
+            ingredient_count = len(parsing_result.recipe_data.get('ingredients', []))
+            instruction_count = len(parsing_result.recipe_data.get('instructions', []))
+
+            response = f"""🎉 Great! I successfully extracted a recipe from your file "{parsing_result.file_name}"!
+
+**Recipe Found:** {recipe_name}
+- **Ingredients:** {ingredient_count} items
+- **Instructions:** {instruction_count} steps
+- **Serves:** {parsing_result.recipe_data.get('serving_size', 'Not specified')}
+- **Category:** {parsing_result.recipe_data.get('genre', 'Not specified').title()}
+
+The recipe data has been prepared and is ready to be added to your collection! Click the button below to review and save it to your recipe database."""
+
+            if temp_id:
+                button = self.create_file_parsing_action_button(temp_id, parsing_result.file_name)
+                response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error generating file parsing response: {e}")
+            return f"I processed your file but encountered an error generating the response. The recipe data may still be available."
+
+    # EXISTING METHODS (updated and enhanced)
     def format_recipe_for_form(self, raw_recipe_data: Dict[str, Any]) -> Dict[str, Any]:
         """Format raw recipe data for the add recipe form"""
         try:
@@ -91,6 +444,8 @@ class AIHelper:
             # Extract recipe name
             if "name" in raw_recipe_data:
                 formatted_recipe["recipe_name"] = raw_recipe_data["name"]
+            elif "recipe_name" in raw_recipe_data:
+                formatted_recipe["recipe_name"] = raw_recipe_data["recipe_name"]
             elif "title" in raw_recipe_data:
                 formatted_recipe["recipe_name"] = raw_recipe_data["title"]
 

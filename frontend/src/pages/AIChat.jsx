@@ -1,4 +1,4 @@
-// frontend/src/pages/AIChat.jsx
+// frontend/src/pages/AIChat.jsx - Complete version with file upload functionality
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -9,13 +9,17 @@ const AIChat = () => {
   const navigate = useNavigate();
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   // State management
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [aiStatus, setAiStatus] = useState(null);
   const [error, setError] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
 
   // Authentication check
   useEffect(() => {
@@ -57,6 +61,199 @@ const AIChat = () => {
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // File handling functions
+  const handleFileSelect = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      setSelectedFile(file);
+    }
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      setSelectedFile(files[0]);
+    }
+  };
+
+  const validateFile = (file) => {
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    const allowedTypes = [
+      'application/pdf',
+      'image/jpeg',
+      'image/jpg',
+      'image/png',
+      'image/bmp',
+      'image/tiff',
+      'text/plain',
+      'text/csv',
+      'text/markdown'
+    ];
+
+    if (file.size > maxSize) {
+      return 'File size must be less than 10MB';
+    }
+
+    const fileExtension = file.name.toLowerCase().split('.').pop();
+    const allowedExtensions = ['pdf', 'jpg', 'jpeg', 'png', 'bmp', 'tiff', 'txt', 'csv', 'md'];
+
+    if (!allowedExtensions.includes(fileExtension) && !allowedTypes.includes(file.type)) {
+      return 'Unsupported file type. Please upload PDF, images (JPG, PNG, etc.), or text files.';
+    }
+
+    return null;
+  };
+
+  const uploadFile = async () => {
+    if (!selectedFile) return;
+
+    const validationError = validateFile(selectedFile);
+    if (validationError) {
+      alert(validationError);
+      setSelectedFile(null);
+      return;
+    }
+
+    try {
+      setIsUploadingFile(true);
+
+      // Add user message showing file upload
+      const fileMessage = {
+        id: Date.now(),
+        type: 'user',
+        content: `📎 Uploaded file: ${selectedFile.name} (${(selectedFile.size / 1024 / 1024).toFixed(2)} MB)`,
+        timestamp: new Date(),
+        actionButtons: [],
+        isFile: true,
+        fileName: selectedFile.name
+      };
+      setMessages(prev => [...prev, fileMessage]);
+
+      // Create form data
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+
+      // Upload and parse file
+      const response = await axios.post(`${apiBaseUrl}/ai/upload-recipe-file`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      // Generate AI response based on the parsing result
+      let aiResponseContent = '';
+      let actionButtons = [];
+
+      if (response.data.success) {
+        if (response.data.temp_id && response.data.recipe_data) {
+          // Successfully parsed recipe
+          const recipeName = response.data.recipe_data.recipe_name || 'Unknown Recipe';
+          const ingredientCount = response.data.recipe_data.ingredients?.length || 0;
+          const instructionCount = response.data.recipe_data.instructions?.length || 0;
+
+          aiResponseContent = `🎉 Excellent! I successfully extracted a recipe from your file "${selectedFile.name}"!
+
+**Recipe Found:** ${recipeName}
+- **Ingredients:** ${ingredientCount} items
+- **Instructions:** ${instructionCount} steps
+- **Serves:** ${response.data.recipe_data.serving_size || 'Not specified'}
+- **Category:** ${(response.data.recipe_data.genre || 'Not specified').charAt(0).toUpperCase() + (response.data.recipe_data.genre || 'Not specified').slice(1)}
+
+The recipe data has been prepared and is ready to be added to your collection! Click the button below to review and save it to your recipe database.`;
+
+          actionButtons = [{
+            type: "action_button",
+            text: `Add Recipe from ${selectedFile.name}`,
+            action: "create_recipe_from_file",
+            url: `/add-recipe?temp_id=${response.data.temp_id}`
+          }];
+
+        } else {
+          // File processed but no recipe found
+          aiResponseContent = `I processed your file "${selectedFile.name}" but couldn't extract a complete recipe from it.
+
+${response.data.parsed_content ? `Here's what I found:\n${response.data.parsed_content}` : ''}
+
+You can try:
+- Uploading a clearer image if it was a photo
+- Providing a file with more structured recipe information  
+- Manually entering the recipe information using the Add Recipe form`;
+
+          actionButtons = [{
+            type: "action_button",
+            text: "Add Recipe Manually",
+            action: "create_recipe",
+            url: "/add-recipe"
+          }];
+        }
+      } else {
+        // Error processing file
+        aiResponseContent = `I encountered an issue processing your file "${selectedFile.name}": ${response.data.error}
+
+Please try:
+- Uploading a different file format (PDF, JPG, PNG, TXT)
+- Ensuring the file contains clear, readable recipe information
+- Using the manual recipe entry form instead`;
+
+        actionButtons = [{
+          type: "action_button",
+          text: "Add Recipe Manually",
+          action: "create_recipe",
+          url: "/add-recipe"
+        }];
+      }
+
+      // Add AI response to chat
+      const aiMessage = {
+        id: Date.now() + 1,
+        type: 'ai',
+        content: aiResponseContent,
+        timestamp: new Date(),
+        actionButtons: actionButtons
+      };
+
+      setMessages(prev => [...prev, aiMessage]);
+
+    } catch (error) {
+      console.error('Error uploading file:', error);
+
+      const errorMessage = {
+        id: Date.now() + 1,
+        type: 'error',
+        content: `Sorry, I encountered an error while processing your file "${selectedFile.name}". Please try again or contact support if the issue persists.`,
+        timestamp: new Date(),
+        actionButtons: []
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsUploadingFile(false);
+      setSelectedFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const clearSelectedFile = () => {
+    setSelectedFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   // Function to parse action buttons from AI response
@@ -143,7 +340,13 @@ const AIChat = () => {
   };
 
   const sendMessage = async () => {
-    if (!inputMessage.trim() || isLoading) return;
+    if ((!inputMessage.trim() && !selectedFile) || isLoading) return;
+
+    // If there's a file selected, upload it instead
+    if (selectedFile) {
+      await uploadFile();
+      return;
+    }
 
     const userMessage = inputMessage.trim();
     setInputMessage('');
@@ -240,7 +443,7 @@ const AIChat = () => {
     }, 100);
   };
 
-  // Styles matching the app theme - Updated with smaller header
+  // Styles matching the app theme
   const containerStyle = {
     padding: '1.25rem',
     backgroundColor: '#f0f8ff',
@@ -302,6 +505,12 @@ const AIChat = () => {
 
   const inputAreaStyle = {
     display: 'flex',
+    flexDirection: 'column',
+    gap: '1rem'
+  };
+
+  const inputRowStyle = {
+    display: 'flex',
     gap: '1rem',
     alignItems: 'flex-end'
   };
@@ -327,6 +536,26 @@ const AIChat = () => {
     fontSize: '16px',
     fontWeight: '500',
     minHeight: '50px'
+  };
+
+  const fileUploadAreaStyle = {
+    border: `2px dashed ${dragOver ? '#003366' : '#ccc'}`,
+    borderRadius: '10px',
+    padding: '1rem',
+    textAlign: 'center',
+    backgroundColor: dragOver ? '#f0f8ff' : '#f9f9f9',
+    transition: 'all 0.3s ease'
+  };
+
+  const selectedFileStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+    padding: '0.5rem',
+    backgroundColor: '#e6f0ff',
+    border: '1px solid #003366',
+    borderRadius: '8px',
+    fontSize: '14px'
   };
 
   const quickActionsStyle = {
@@ -356,7 +585,7 @@ const AIChat = () => {
   return (
     <div style={containerStyle}>
       <div style={{ maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
-        {/* Header - Made more compact */}
+        {/* Header */}
         <div style={headerStyle}>
           <div style={{
             display: 'flex',
@@ -367,7 +596,7 @@ const AIChat = () => {
             flexWrap: 'wrap'
           }}>
             <h1 style={titleStyle}>🤖 Ralph the Recipe Assistant</h1>
-            {/* AI Status - moved inline */}
+            {/* AI Status */}
             {aiStatus && (
               <div style={{
                 display: 'inline-block',
@@ -387,10 +616,10 @@ const AIChat = () => {
 
           <p style={{ fontSize: '0.95rem', color: '#666', marginBottom: '0.5rem' }}>
             Hello <strong style={{ color: '#003366' }}>{user?.username}</strong>!
-            I'm Ralph, your personal recipe assistant. Ask me about recipes, cooking tips, or ingredient suggestions!
+            I'm Ralph, your personal recipe assistant. Ask me about recipes, cooking tips, or upload recipe files!
           </p>
 
-          {/* Quick Actions - Made more compact */}
+          {/* Quick Actions */}
           <div style={{ marginTop: '0.75rem' }}>
             <h3 style={{ color: '#003366', marginBottom: '0.5rem', fontSize: '0.95rem' }}>
               💡 Quick Actions
@@ -476,10 +705,10 @@ const AIChat = () => {
                   👋 Welcome! I'm Ralph, your Recipe Assistant!
                 </h3>
                 <p>
-                  I can help you find recipes, suggest cooking ideas, and answer questions about the recipes in your collection.
+                  I can help you find recipes, suggest cooking ideas, and parse recipes from uploaded files.
                 </p>
                 <p style={{ marginTop: '1rem', fontSize: '14px', fontStyle: 'italic' }}>
-                  Try asking me something like "Show me chicken recipes" or "What can I make for dinner?"
+                  Try asking me something like "Show me chicken recipes" or upload a recipe file!
                 </p>
               </div>
             ) : (
@@ -507,7 +736,7 @@ const AIChat = () => {
             )}
 
             {/* Loading indicator */}
-            {isLoading && (
+            {(isLoading || isUploadingFile) && (
               <div style={messageStyle('ai')}>
                 <div style={{
                   ...messageBubbleStyle('ai'),
@@ -523,7 +752,7 @@ const AIChat = () => {
                     borderRadius: '50%',
                     animation: 'spin 1s linear infinite'
                   }}></div>
-                  <span>Ralph is thinking...</span>
+                  <span>{isUploadingFile ? 'Processing your file...' : 'Ralph is thinking...'}</span>
                 </div>
               </div>
             )}
@@ -533,36 +762,96 @@ const AIChat = () => {
 
           {/* Input Area */}
           <div style={inputAreaStyle}>
-            <textarea
-              ref={inputRef}
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="Ask Ralph about recipes, ingredients, cooking tips..."
-              style={inputStyle}
-              disabled={isLoading}
-            />
-            <button
-              onClick={sendMessage}
-              disabled={isLoading || !inputMessage.trim()}
-              style={{
-                ...buttonStyle,
-                backgroundColor: (isLoading || !inputMessage.trim()) ? '#ccc' : '#003366',
-                cursor: (isLoading || !inputMessage.trim()) ? 'not-allowed' : 'pointer'
-              }}
+            {/* File Upload Area */}
+            <div
+              style={fileUploadAreaStyle}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
             >
-              {isLoading ? '⏳' : '🚀'}
-            </button>
-          </div>
+              {selectedFile ? (
+                <div style={selectedFileStyle}>
+                  <span>📎</span>
+                  <span>{selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)</span>
+                  <button
+                    onClick={clearSelectedFile}
+                    style={{
+                      marginLeft: 'auto',
+                      background: 'none',
+                      border: 'none',
+                      color: '#dc3545',
+                      cursor: 'pointer',
+                      fontSize: '16px'
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <p style={{ margin: '0 0 0.5rem 0', color: '#666' }}>
+                    📎 Upload a recipe file (PDF, images, text files)
+                  </p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    onChange={handleFileSelect}
+                    accept=".pdf,.jpg,.jpeg,.png,.bmp,.tiff,.txt,.csv,.md"
+                    style={{ display: 'none' }}
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{
+                      padding: '8px 16px',
+                      backgroundColor: '#28a745',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '14px'
+                    }}
+                  >
+                    Choose File
+                  </button>
+                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '12px', color: '#999' }}>
+                    Or drag and drop a file here
+                  </p>
+                </div>
+              )}
+            </div>
 
-          {/* Tips */}
-          <div style={{
-            fontSize: '12px',
-            color: '#666',
-            marginTop: '0.5rem',
-            textAlign: 'center'
-          }}>
-            💡 Tip: Press Enter to send, Shift+Enter for new line
+            {/* Text Input Row */}
+            <div style={inputRowStyle}>
+              <textarea
+                ref={inputRef}
+                value={inputMessage}
+                onChange={(e) => setInputMessage(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder={selectedFile ? "Click Send to upload file or type a message..." : "Ask Ralph about recipes, ingredients, cooking tips..."}
+                style={inputStyle}
+                disabled={isLoading || isUploadingFile}
+              />
+              <button
+                onClick={sendMessage}
+                disabled={isLoading || isUploadingFile || (!inputMessage.trim() && !selectedFile)}
+                style={{
+                  ...buttonStyle,
+                  backgroundColor: (isLoading || isUploadingFile || (!inputMessage.trim() && !selectedFile)) ? '#ccc' : '#003366',
+                  cursor: (isLoading || isUploadingFile || (!inputMessage.trim() && !selectedFile)) ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {isUploadingFile ? '⏳' : selectedFile ? '📎' : '🚀'}
+              </button>
+            </div>
+
+            {/* Tips */}
+            <div style={{
+              fontSize: '12px',
+              color: '#666',
+              textAlign: 'center'
+            }}>
+              💡 Tip: Press Enter to send, Shift+Enter for new line. Upload recipe files for automatic parsing!
+            </div>
           </div>
         </div>
       </div>
