@@ -5,6 +5,7 @@ from openai import OpenAI
 from typing import Optional, List, Dict, Any
 import json
 import re
+import re
 from datetime import datetime, timedelta
 from ..database import db
 from bson import ObjectId
@@ -91,7 +92,7 @@ class AIHelper:
 
     # NEW FILE PARSING METHODS
     async def parse_recipe_file(self, file_content: bytes, filename: str, file_type: str, file_extension: str) -> \
-    Optional[FileParsingResult]:
+            Optional[FileParsingResult]:
         """
         Parse recipe information from various file types
         """
@@ -787,6 +788,20 @@ The recipe data has been prepared and is ready to be added to your collection! C
 
         return False
 
+    def create_recipe_view_button(self, recipe: Dict[str, Any]) -> Dict[str, Any]:
+        """Create action button to view a specific recipe"""
+        return {
+            "type": "action_button",
+            "text": f"View {recipe['name']}",
+            "action": "view_recipe",
+            "url": f"/recipes/{recipe['id']}",
+            "metadata": {
+                "recipe_id": recipe['id'],
+                "recipe_name": recipe['name'],
+                "type": "view_recipe"
+            }
+        }
+
     def create_recipe_action_button(self, recipe_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Create action button data for recipe creation"""
         button_data = {
@@ -815,8 +830,9 @@ The recipe data has been prepared and is ready to be added to your collection! C
             # Step 1: Check for recipe creation intent
             creation_intent = self._detect_recipe_creation_intent(user_message)
 
-            # Step 2: Always check internal database first
+            # Step 2: Extract search criteria and log for debugging
             search_criteria = self.extract_search_intent(user_message)
+            logger.info(f"Extracted search criteria: {search_criteria}")
 
             # Search internal database
             internal_recipes = []
@@ -825,17 +841,20 @@ The recipe data has been prepared and is ready to be added to your collection! C
             if search_criteria:
                 internal_recipes = self.search_recipes_by_criteria(search_criteria)
                 recipe_count = self.count_recipes_by_criteria(search_criteria)
+                logger.info(
+                    f"Found {len(internal_recipes)} recipes, count: {recipe_count}, matching criteria: {search_criteria}")
             else:
                 # For general queries, get a sample
                 internal_recipes = self.get_recipes_data(limit=10)
                 recipe_count = len(internal_recipes)
+                logger.info(f"No specific criteria found, returning {recipe_count} general recipes")
 
             # Step 3: Handle different scenarios
             if creation_intent == "help_create":
                 # User wants help creating a recipe
                 return await self._generate_creation_help_response(user_message, conversation_history)
 
-            elif internal_recipes and recipe_count > 0:
+            elif internal_recipes and len(internal_recipes) > 0:
                 # We found recipes in the database
                 response = await self._generate_internal_response(user_message, internal_recipes,
                                                                   conversation_history, search_criteria)
@@ -1033,17 +1052,93 @@ Guidelines:
             logger.error(f"Error retrieving recipes: {e}")
             return []
 
-    def search_recipes_by_criteria(self, criteria: Dict[str, Any]) -> List[Dict]:
-        """Search recipes based on specific criteria"""
+    def debug_database_contents(self, ingredient_term: str = None, genre_term: str = None) -> Dict[str, Any]:
+        """Debug method to see what's actually in the database"""
         try:
+            # Get a sample of recipes to see their structure
+            sample_recipes = list(db.recipes.find().limit(5))
+
+            debug_info = {
+                "total_recipes": db.recipes.count_documents({}),
+                "sample_structures": []
+            }
+
+            for recipe in sample_recipes:
+                debug_info["sample_structures"].append({
+                    "name": recipe.get("recipe_name", ""),
+                    "genre": recipe.get("genre", ""),
+                    "ingredients": [ing.get("name", "") for ing in recipe.get("ingredients", [])],
+                    "first_ingredient_example": recipe.get("ingredients", [{}])[0] if recipe.get("ingredients") else {}
+                })
+
+            # If specific terms provided, search for them
+            if ingredient_term:
+                ingredient_matches = list(db.recipes.find({
+                    "ingredients.name": {"$regex": ingredient_term, "$options": "i"}
+                }).limit(3))
+                debug_info["ingredient_matches"] = len(ingredient_matches)
+                debug_info["ingredient_examples"] = [
+                    {
+                        "name": r.get("recipe_name", ""),
+                        "ingredients": [ing.get("name", "") for ing in r.get("ingredients", [])]
+                    } for r in ingredient_matches
+                ]
+
+            if genre_term:
+                genre_matches = list(db.recipes.find({
+                    "genre": {"$regex": genre_term, "$options": "i"}
+                }).limit(3))
+                debug_info["genre_matches"] = len(genre_matches)
+                debug_info["genre_examples"] = [
+                    {
+                        "name": r.get("recipe_name", ""),
+                        "genre": r.get("genre", "")
+                    } for r in genre_matches
+                ]
+
+            logger.info(f"Database debug info: {debug_info}")
+            return debug_info
+
+        except Exception as e:
+            logger.error(f"Error debugging database: {e}")
+            return {"error": str(e)}
+
+    def search_recipes_by_criteria(self, criteria: Dict[str, Any]) -> List[Dict]:
+        """Search recipes based on specific criteria with flexible matching"""
+        try:
+            # First, debug what's in the database
+            if criteria.get('ingredient'):
+                self.debug_database_contents(ingredient_term=criteria['ingredient'])
+            if criteria.get('genre'):
+                self.debug_database_contents(genre_term=criteria['genre'])
+
             query = {}
 
-            # Handle different search criteria
+            # Handle different search criteria - build proper AND query
             if "genre" in criteria:
-                query["genre"] = {"$regex": criteria["genre"], "$options": "i"}
+                # More flexible genre matching - handle plural/singular
+                genre_term = criteria["genre"].lower()
+                genre_patterns = [genre_term]
+                if genre_term.endswith('s'):
+                    genre_patterns.append(genre_term[:-1])  # Remove 's'
+                else:
+                    genre_patterns.append(genre_term + 's')  # Add 's'
+
+                query["genre"] = {"$regex": "|".join(genre_patterns), "$options": "i"}
 
             if "ingredient" in criteria:
-                query["ingredients.name"] = {"$regex": criteria["ingredient"], "$options": "i"}
+                # More flexible ingredient matching - split compound ingredients
+                ingredient_term = criteria["ingredient"].lower()
+                ingredient_patterns = [ingredient_term]
+
+                # Handle compound ingredients like "peanut butter"
+                if " " in ingredient_term:
+                    words = ingredient_term.split()
+                    ingredient_patterns.extend(words)  # Add individual words
+
+                # Create OR pattern for ingredients
+                ingredient_regex = "|".join(ingredient_patterns)
+                query["ingredients.name"] = {"$regex": ingredient_regex, "$options": "i"}
 
             if "name" in criteria:
                 query["recipe_name"] = {"$regex": criteria["name"], "$options": "i"}
@@ -1060,7 +1155,106 @@ Guidelines:
             if "dietary_restrictions" in criteria:
                 query["dietary_restrictions"] = {"$in": criteria["dietary_restrictions"]}
 
+            logger.info(f"MongoDB query: {query}")
             recipes = list(db.recipes.find(query).limit(20))
+            logger.info(f"Found {len(recipes)} recipes from database")
+
+            # If no results and we have both genre and ingredient, try fallback searches
+            if len(recipes) == 0 and "genre" in criteria and "ingredient" in criteria:
+                logger.info("No results with combined criteria, trying ingredient-only search")
+                fallback_query = {"ingredients.name": query["ingredients.name"]}
+                recipes = list(db.recipes.find(fallback_query).limit(20))
+                logger.info(f"Fallback ingredient search found {len(recipes)} recipes")
+
+                # Filter by genre in code if we found ingredient matches
+                if recipes and "genre" in criteria:
+                    genre_term = criteria["genre"].lower()
+                    filtered_recipes = []
+                    for recipe in recipes:
+                        recipe_genre = recipe.get("genre", "").lower()
+                        if (genre_term in recipe_genre or
+                                recipe_genre in genre_term or
+                                (genre_term + "s") == recipe_genre or
+                                genre_term == (recipe_genre + "s")):
+                            filtered_recipes.append(recipe)
+                    recipes = filtered_recipes
+                    logger.info(f"After genre filtering: {len(recipes)} recipes")
+
+            return [self._format_recipe_for_ai(recipe) for recipe in recipes]
+
+        except Exception as e:
+            logger.error(f"Error searching recipes: {e}")
+            return []
+        """Search recipes based on specific criteria with flexible matching"""
+        try:
+            query = {}
+
+            # Handle different search criteria - build proper AND query
+            if "genre" in criteria:
+                # More flexible genre matching - handle plural/singular
+                genre_term = criteria["genre"].lower()
+                genre_patterns = [genre_term]
+                if genre_term.endswith('s'):
+                    genre_patterns.append(genre_term[:-1])  # Remove 's'
+                else:
+                    genre_patterns.append(genre_term + 's')  # Add 's'
+
+                query["genre"] = {"$regex": "|".join(genre_patterns), "$options": "i"}
+
+            if "ingredient" in criteria:
+                # More flexible ingredient matching - split compound ingredients
+                ingredient_term = criteria["ingredient"].lower()
+                ingredient_patterns = [ingredient_term]
+
+                # Handle compound ingredients like "peanut butter"
+                if " " in ingredient_term:
+                    words = ingredient_term.split()
+                    ingredient_patterns.extend(words)  # Add individual words
+
+                # Create OR pattern for ingredients
+                ingredient_regex = "|".join(ingredient_patterns)
+                query["ingredients.name"] = {"$regex": ingredient_regex, "$options": "i"}
+
+            if "name" in criteria:
+                query["recipe_name"] = {"$regex": criteria["name"], "$options": "i"}
+
+            if "max_time" in criteria:
+                # Search by total time
+                query["$expr"] = {
+                    "$lte": [
+                        {"$add": [{"$ifNull": ["$prep_time", 0]}, {"$ifNull": ["$cook_time", 0]}]},
+                        criteria["max_time"]
+                    ]
+                }
+
+            if "dietary_restrictions" in criteria:
+                query["dietary_restrictions"] = {"$in": criteria["dietary_restrictions"]}
+
+            logger.info(f"MongoDB query: {query}")
+            recipes = list(db.recipes.find(query).limit(20))
+            logger.info(f"Found {len(recipes)} recipes from database")
+
+            # If no results and we have both genre and ingredient, try fallback searches
+            if len(recipes) == 0 and "genre" in criteria and "ingredient" in criteria:
+                logger.info("No results with combined criteria, trying ingredient-only search")
+                fallback_query = {"ingredients.name": query["ingredients.name"]}
+                recipes = list(db.recipes.find(fallback_query).limit(20))
+                logger.info(f"Fallback ingredient search found {len(recipes)} recipes")
+
+                # Filter by genre in code if we found ingredient matches
+                if recipes and "genre" in criteria:
+                    genre_term = criteria["genre"].lower()
+                    filtered_recipes = []
+                    for recipe in recipes:
+                        recipe_genre = recipe.get("genre", "").lower()
+                        if (genre_term in recipe_genre or
+                                recipe_genre in genre_term or
+                                (genre_term + "s") == recipe_genre or
+                                genre_term == (recipe_genre + "s")):
+                            filtered_recipes.append(recipe)
+                    recipes = filtered_recipes
+                    logger.info(f"After genre filtering: {len(recipes)} recipes")
+
             return [self._format_recipe_for_ai(recipe) for recipe in recipes]
 
         except Exception as e:
@@ -1068,16 +1262,27 @@ Guidelines:
             return []
 
     def count_recipes_by_criteria(self, criteria: Dict[str, Any]) -> int:
-        """Count recipes matching criteria without retrieving them"""
+        """Count recipes matching criteria using the same logic as search"""
         try:
             query = {}
 
             if "genre" in criteria:
-                query["genre"] = {"$regex": criteria["genre"], "$options": "i"}
+                genre_term = criteria["genre"].lower()
+                genre_patterns = [genre_term]
+                if genre_term.endswith('s'):
+                    genre_patterns.append(genre_term[:-1])
+                else:
+                    genre_patterns.append(genre_term + 's')
+                query["genre"] = {"$regex": "|".join(genre_patterns), "$options": "i"}
+
             if "ingredient" in criteria:
-                query["ingredients.name"] = {"$regex": criteria["ingredient"], "$options": "i"}
+                # EXACT ingredient matching - same as search function
+                ingredient_term = criteria["ingredient"]
+                query["ingredients.name"] = {"$regex": f"\\b{re.escape(ingredient_term)}\\b", "$options": "i"}
+
             if "name" in criteria:
                 query["recipe_name"] = {"$regex": criteria["name"], "$options": "i"}
+
             if "max_time" in criteria:
                 query["$expr"] = {
                     "$lte": [
@@ -1088,7 +1293,10 @@ Guidelines:
             if "dietary_restrictions" in criteria:
                 query["dietary_restrictions"] = {"$in": criteria["dietary_restrictions"]}
 
-            return db.recipes.count_documents(query)
+            logger.info(f"Count query: {query}")
+            count = db.recipes.count_documents(query)
+            logger.info(f"Count result: {count}")
+            return count
         except Exception as e:
             logger.error(f"Error counting recipes: {e}")
             return 0
@@ -1141,13 +1349,20 @@ Guidelines:
 
             Extract any of these criteria if mentioned:
             - genre: breakfast, lunch, dinner, snack, dessert, appetizer
-            - ingredient: any ingredient name mentioned
+            - ingredient: any ingredient name mentioned (be very specific - if they say "peanut butter", extract exactly "peanut butter")
             - name: recipe name if specifically mentioned
             - max_time: maximum cooking time in minutes if mentioned
             - dietary_restrictions: gluten_free, dairy_free, egg_free
 
+            IMPORTANT: 
+            - When both genre AND ingredient are mentioned (like "desserts with peanut butter"), include BOTH in the result
+            - Be precise with ingredient names - extract them exactly as mentioned
+            - If someone says "show me desserts with chocolate", extract both "genre": "dessert" AND "ingredient": "chocolate"
+
             Return only valid JSON like:
-            {{"genre": "dinner", "ingredient": "chicken", "max_time": 30}}
+            {{"genre": "dessert", "ingredient": "peanut butter"}}
+            {{"ingredient": "chicken"}}
+            {{"genre": "breakfast"}}
 
             If no criteria found, return: {{}}
             """
@@ -1160,8 +1375,12 @@ Guidelines:
             )
 
             result = response.choices[0].message.content.strip()
+            logger.info(f"AI search extraction result: {result}")
+
             try:
-                return json.loads(result)
+                criteria = json.loads(result)
+                logger.info(f"Parsed search criteria: {criteria}")
+                return criteria
             except json.JSONDecodeError:
                 logger.warning(f"Could not parse AI search criteria: {result}")
                 return {}
@@ -1346,56 +1565,45 @@ Guidelines:
     async def _generate_internal_response(self, user_message: str, recipes: List[Dict],
                                           conversation_history: Optional[List[Dict]],
                                           search_criteria: Dict[str, Any]) -> str:
-        """Generate response based on internal database recipes"""
+        """Generate response based on internal database recipes with individual recipe buttons"""
         try:
-            # Build context for AI
-            recipe_context = f"\n\nI found {len(recipes)} recipe(s) in your database:\n"
-            for i, recipe in enumerate(recipes[:10], 1):
-                recipe_context += f"\n{i}. **{recipe['name']}** ({recipe['genre']})\n"
-                recipe_context += f"   - Serves: {recipe['serving_size']}\n"
-                recipe_context += f"   - Total time: {recipe['total_time']} minutes\n"
-                recipe_context += f"   - Key ingredients: {', '.join(recipe['ingredients'][:3])}...\n"
-                if recipe['dietary_restrictions']:
-                    recipe_context += f"   - Dietary: {', '.join(recipe['dietary_restrictions'])}\n"
-                recipe_context += f"   - Created by: {recipe['created_by']}\n"
+            # Build a short, focused response
+            criteria_description = ""
+            if search_criteria:
+                if search_criteria.get('ingredient') and search_criteria.get('genre'):
+                    criteria_description = f"{search_criteria['genre']} recipes with {search_criteria['ingredient']}"
+                elif search_criteria.get('ingredient'):
+                    criteria_description = f"recipes with {search_criteria['ingredient']}"
+                elif search_criteria.get('genre'):
+                    criteria_description = f"{search_criteria['genre']} recipes"
 
-            system_message = f"""You are Rupert, a helpful cooking assistant for the Ondek Recipe app. You have access to the user's personal recipe database and should provide helpful information based on what's available.
+            if criteria_description:
+                response = f"I found {len(recipes)} {criteria_description} in your database."
+            else:
+                response = f"I found {len(recipes)} recipes in your database."
 
-IMPORTANT: You are currently working with recipes from the user's personal database only. These are recipes they have saved or created.
+            # Add individual recipe buttons
+            for recipe in recipes[:10]:  # Limit to 10 recipes to avoid too many buttons
+                button = self.create_recipe_view_button(recipe)
+                response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
 
-Current results: Found {len(recipes)} recipes matching their request.
-
-{recipe_context}
-
-Guidelines:
-- Be friendly and enthusiastic about the recipes found in their database
-- Provide specific recommendations from their collection
-- Include practical cooking tips
-- If they want more options, offer to search the internet for additional recipes
-- Always prioritize their saved recipes first"""
-
-            messages = [{"role": "system", "content": system_message}]
-
-            if conversation_history:
-                messages.extend(conversation_history[-6:])
-
-            messages.append({"role": "user", "content": user_message})
-
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=800,
-                temperature=0.7
-            )
-
-            return response.choices[0].message.content.strip()
+            return response
 
         except Exception as e:
             logger.error(f"Error generating internal response: {e}")
-            return "I found recipes in your database, but encountered an error formatting the response."
+            criteria_text = ""
+            if search_criteria:
+                if search_criteria.get('ingredient') and search_criteria.get('genre'):
+                    criteria_text = f"{search_criteria['genre']} recipes with {search_criteria['ingredient']}"
+                elif search_criteria.get('ingredient'):
+                    criteria_text = f"recipes with {search_criteria['ingredient']}"
+                elif search_criteria.get('genre'):
+                    criteria_text = f"{search_criteria['genre']} recipes"
+
+            return f"I found {len(recipes)} {criteria_text} in your database, but encountered an error formatting the response."
 
     def _generate_permission_request(self, search_criteria: Dict[str, Any], user_message: str) -> str:
-        """Generate a request for permission to search externally"""
+        """Generate a helpful response when no exact matches are found"""
         criteria_text = ""
         if search_criteria:
             criteria_parts = []
@@ -1413,17 +1621,36 @@ Guidelines:
             if criteria_parts:
                 criteria_text = f" matching {' and '.join(criteria_parts)}"
 
-        return f"""I've searched your personal recipe database but couldn't find anything{criteria_text} that matches what you're looking for.
+        # Main response about not finding the specific request
+        response = f"""I couldn't find any recipes in your database{criteria_text}."""
 
-Would you like me to search the internet to find some recipes that match your request? If so, I can help you find options and you can decide if you want to save any of them to your database.
+        # Only offer internet search and recipe creation - don't show unrelated recipes
+        if search_criteria and search_criteria.get('genre') and search_criteria.get('ingredient'):
+            genre = search_criteria['genre']
+            ingredient = search_criteria['ingredient']
 
-You can also specify:
-- Particular websites you'd like me to focus on (like AllRecipes, Food Network, etc.)
-- Specific cuisine types or cooking styles
-- Difficulty level preferences
-- Any other search parameters
+            response += f"\n\nI can help you in these ways:"
+            response += f"\n• Search the internet for {genre} recipes with {ingredient}"
+            response += f"\n• Help you create a new {ingredient} {genre} recipe"
 
-Just let me know if you'd like me to proceed with an internet search and any specific preferences you have!"""
+            # Add creation button
+            button = self.create_recipe_action_button()
+            response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+        else:
+            response += "\n\nWould you like me to search the internet to find some recipes that match your request? If so, I can help you find options and you can decide if you want to save any of them to your database."
+
+            # Add creation button
+            button = self.create_recipe_action_button()
+            response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+
+        response += "\n\nFor internet search, you can also specify:"
+        response += "\n- Particular websites you'd like me to focus on (like AllRecipes, Food Network, etc.)"
+        response += "\n- Specific cuisine types or cooking styles"
+        response += "\n- Difficulty level preferences"
+
+        response += "\n\nJust let me know if you'd like me to proceed with an internet search!"
+
+        return response
 
     # Keep existing legacy methods for backward compatibility
     def get_recipe_suggestions_by_ingredients(self, ingredients: List[str]) -> str:
