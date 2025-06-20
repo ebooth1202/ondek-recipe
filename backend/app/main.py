@@ -752,6 +752,9 @@ async def update_rating(
     )
 
 
+
+
+
 @app.delete("/recipes/{recipe_id}/ratings/{rating_id}")
 async def delete_rating(
         recipe_id: str,
@@ -926,6 +929,82 @@ class FileUploadResponse(BaseModel):
     parsed_content: Optional[str] = None
     recipe_data: Optional[dict] = None
     error: Optional[str] = None
+
+@app.put("/recipes/{recipe_id}", response_model=RecipeResponse)
+async def update_recipe(
+        recipe_id: str,
+        recipe_update: RecipeUpdate,
+        current_user: dict = Depends(get_current_user)
+):
+    """Update an existing recipe"""
+    if not db_available:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    if not ObjectId.is_valid(recipe_id):
+        raise HTTPException(status_code=400, detail="Invalid recipe ID")
+
+    # Find the existing recipe
+    existing_recipe = db.recipes.find_one({"_id": ObjectId(recipe_id)})
+    if not existing_recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    # Check if user owns the recipe or is admin/owner
+    if (existing_recipe["created_by"] != current_user["username"] and
+            current_user["role"] not in ["admin", "owner"]):
+        raise HTTPException(status_code=403, detail="Not authorized to edit this recipe")
+
+    # Build update document
+    update_doc = {"updated_at": datetime.now()}
+
+    if recipe_update.recipe_name is not None:
+        update_doc["recipe_name"] = recipe_update.recipe_name
+    if recipe_update.description is not None:
+        update_doc["description"] = recipe_update.description
+    if recipe_update.ingredients is not None:
+        update_doc["ingredients"] = [ing.dict() for ing in recipe_update.ingredients]
+    if recipe_update.instructions is not None:
+        update_doc["instructions"] = recipe_update.instructions
+    if recipe_update.serving_size is not None:
+        update_doc["serving_size"] = recipe_update.serving_size
+    if recipe_update.genre is not None:
+        update_doc["genre"] = recipe_update.genre.value
+    if recipe_update.prep_time is not None:
+        update_doc["prep_time"] = recipe_update.prep_time
+    if recipe_update.cook_time is not None:
+        update_doc["cook_time"] = recipe_update.cook_time
+    if recipe_update.notes is not None:
+        update_doc["notes"] = recipe_update.notes
+    if recipe_update.dietary_restrictions is not None:
+        update_doc["dietary_restrictions"] = recipe_update.dietary_restrictions
+
+    # Update the recipe
+    result = db.recipes.update_one(
+        {"_id": ObjectId(recipe_id)},
+        {"$set": update_doc}
+    )
+
+    if result.modified_count == 0:
+        raise HTTPException(status_code=400, detail="No changes were made")
+
+    # Return the updated recipe
+    updated_recipe = db.recipes.find_one({"_id": ObjectId(recipe_id)})
+    ingredients = [Ingredient(**ing) for ing in updated_recipe["ingredients"]]
+
+    return RecipeResponse(
+        id=str(updated_recipe["_id"]),
+        recipe_name=updated_recipe["recipe_name"],
+        description=updated_recipe.get("description"),
+        ingredients=ingredients,
+        instructions=updated_recipe["instructions"],
+        serving_size=updated_recipe["serving_size"],
+        genre=Genre(updated_recipe["genre"]),
+        prep_time=updated_recipe.get("prep_time", 0),
+        cook_time=updated_recipe.get("cook_time", 0),
+        notes=updated_recipe.get("notes", []),
+        dietary_restrictions=updated_recipe.get("dietary_restrictions", []),
+        created_by=updated_recipe["created_by"],
+        created_at=updated_recipe["created_at"]
+    )
 
 
 @app.get("/ai/status")

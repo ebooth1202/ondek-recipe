@@ -849,13 +849,22 @@ The recipe data has been prepared and is ready to be added to your collection! C
                 recipe_count = len(internal_recipes)
                 logger.info(f"No specific criteria found, returning {recipe_count} general recipes")
 
-            # Step 3: Handle different scenarios
+            # Step 3: Handle different scenarios - CHECK EXTERNAL REQUEST FIRST
             if creation_intent == "help_create":
                 # User wants help creating a recipe
                 return await self._generate_creation_help_response(user_message, conversation_history)
 
+            elif self.detect_external_search_request(user_message):
+                # User specifically requested external/online search - prioritize this
+                search_params = self.extract_search_parameters(user_message)
+                external_recipes = await self.search_external_recipes(search_criteria, search_params)
+
+                return await self._generate_external_response(user_message, external_recipes,
+                                                              search_criteria, search_params,
+                                                              conversation_history)
+
             elif internal_recipes and len(internal_recipes) > 0:
-                # We found recipes in the database
+                # We found recipes in the database (and user didn't specifically ask for external)
                 response = await self._generate_internal_response(user_message, internal_recipes,
                                                                   conversation_history, search_criteria)
 
@@ -865,15 +874,6 @@ The recipe data has been prepared and is ready to be added to your collection! C
                     response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
 
                 return response
-
-            elif self.detect_external_search_request(user_message):
-                # User has given permission for external search
-                search_params = self.extract_search_parameters(user_message)
-                external_recipes = await self.search_external_recipes(search_criteria, search_params)
-
-                return await self._generate_external_response(user_message, external_recipes,
-                                                              search_criteria, search_params,
-                                                              conversation_history)
 
             else:
                 # Step 4: Ask for permission to search externally
@@ -1104,8 +1104,11 @@ Guidelines:
             return {"error": str(e)}
 
     def search_recipes_by_criteria(self, criteria: Dict[str, Any]) -> List[Dict]:
-        """Search recipes based on specific criteria with flexible matching"""
+        """Search recipes based on specific criteria with exact phrase matching for ingredients"""
         try:
+            # DEBUG: Print to confirm we're using the new version
+            logger.info("DEBUG: Using NEW search_recipes_by_criteria method - FIXED VERSION")
+
             # First, debug what's in the database
             if criteria.get('ingredient'):
                 self.debug_database_contents(ingredient_term=criteria['ingredient'])
@@ -1127,93 +1130,21 @@ Guidelines:
                 query["genre"] = {"$regex": "|".join(genre_patterns), "$options": "i"}
 
             if "ingredient" in criteria:
-                # More flexible ingredient matching - split compound ingredients
-                ingredient_term = criteria["ingredient"].lower()
-                ingredient_patterns = [ingredient_term]
+                # DEBUG: Show what we're processing
+                logger.info(f"DEBUG: Processing ingredient '{criteria['ingredient']}'")
 
-                # Handle compound ingredients like "peanut butter"
-                if " " in ingredient_term:
-                    words = ingredient_term.split()
-                    ingredient_patterns.extend(words)  # Add individual words
+                # EXACT phrase matching for ingredients - NO word splitting
+                ingredient_term = criteria["ingredient"]
 
-                # Create OR pattern for ingredients
-                ingredient_regex = "|".join(ingredient_patterns)
-                query["ingredients.name"] = {"$regex": ingredient_regex, "$options": "i"}
+                # Use word boundaries for exact phrase matching
+                # This will match "peanut butter" as a complete phrase, not just "butter"
+                escaped_ingredient = re.escape(ingredient_term)
+                logger.info(f"DEBUG: Escaped ingredient: '{escaped_ingredient}'")
 
-            if "name" in criteria:
-                query["recipe_name"] = {"$regex": criteria["name"], "$options": "i"}
+                regex_pattern = f"\\b{escaped_ingredient}\\b"
+                logger.info(f"DEBUG: Final regex pattern: '{regex_pattern}'")
 
-            if "max_time" in criteria:
-                # Search by total time
-                query["$expr"] = {
-                    "$lte": [
-                        {"$add": [{"$ifNull": ["$prep_time", 0]}, {"$ifNull": ["$cook_time", 0]}]},
-                        criteria["max_time"]
-                    ]
-                }
-
-            if "dietary_restrictions" in criteria:
-                query["dietary_restrictions"] = {"$in": criteria["dietary_restrictions"]}
-
-            logger.info(f"MongoDB query: {query}")
-            recipes = list(db.recipes.find(query).limit(20))
-            logger.info(f"Found {len(recipes)} recipes from database")
-
-            # If no results and we have both genre and ingredient, try fallback searches
-            if len(recipes) == 0 and "genre" in criteria and "ingredient" in criteria:
-                logger.info("No results with combined criteria, trying ingredient-only search")
-                fallback_query = {"ingredients.name": query["ingredients.name"]}
-                recipes = list(db.recipes.find(fallback_query).limit(20))
-                logger.info(f"Fallback ingredient search found {len(recipes)} recipes")
-
-                # Filter by genre in code if we found ingredient matches
-                if recipes and "genre" in criteria:
-                    genre_term = criteria["genre"].lower()
-                    filtered_recipes = []
-                    for recipe in recipes:
-                        recipe_genre = recipe.get("genre", "").lower()
-                        if (genre_term in recipe_genre or
-                                recipe_genre in genre_term or
-                                (genre_term + "s") == recipe_genre or
-                                genre_term == (recipe_genre + "s")):
-                            filtered_recipes.append(recipe)
-                    recipes = filtered_recipes
-                    logger.info(f"After genre filtering: {len(recipes)} recipes")
-
-            return [self._format_recipe_for_ai(recipe) for recipe in recipes]
-
-        except Exception as e:
-            logger.error(f"Error searching recipes: {e}")
-            return []
-        """Search recipes based on specific criteria with flexible matching"""
-        try:
-            query = {}
-
-            # Handle different search criteria - build proper AND query
-            if "genre" in criteria:
-                # More flexible genre matching - handle plural/singular
-                genre_term = criteria["genre"].lower()
-                genre_patterns = [genre_term]
-                if genre_term.endswith('s'):
-                    genre_patterns.append(genre_term[:-1])  # Remove 's'
-                else:
-                    genre_patterns.append(genre_term + 's')  # Add 's'
-
-                query["genre"] = {"$regex": "|".join(genre_patterns), "$options": "i"}
-
-            if "ingredient" in criteria:
-                # More flexible ingredient matching - split compound ingredients
-                ingredient_term = criteria["ingredient"].lower()
-                ingredient_patterns = [ingredient_term]
-
-                # Handle compound ingredients like "peanut butter"
-                if " " in ingredient_term:
-                    words = ingredient_term.split()
-                    ingredient_patterns.extend(words)  # Add individual words
-
-                # Create OR pattern for ingredients
-                ingredient_regex = "|".join(ingredient_patterns)
-                query["ingredients.name"] = {"$regex": ingredient_regex, "$options": "i"}
+                query["ingredients.name"] = {"$regex": regex_pattern, "$options": "i"}
 
             if "name" in criteria:
                 query["recipe_name"] = {"$regex": criteria["name"], "$options": "i"}
@@ -1234,32 +1165,24 @@ Guidelines:
             recipes = list(db.recipes.find(query).limit(20))
             logger.info(f"Found {len(recipes)} recipes from database")
 
-            # If no results and we have both genre and ingredient, try fallback searches
-            if len(recipes) == 0 and "genre" in criteria and "ingredient" in criteria:
-                logger.info("No results with combined criteria, trying ingredient-only search")
-                fallback_query = {"ingredients.name": query["ingredients.name"]}
-                recipes = list(db.recipes.find(fallback_query).limit(20))
-                logger.info(f"Fallback ingredient search found {len(recipes)} recipes")
+            # If no exact matches found and ingredient contains spaces (compound ingredient),
+            # try a fallback search with individual words only as last resort
+            if len(recipes) == 0 and "ingredient" in criteria and " " in criteria["ingredient"]:
+                logger.info("No exact phrase matches found, trying fallback with individual words")
+                words = criteria["ingredient"].split()
+                word_patterns = [f"\\b{re.escape(word)}\\b" for word in words]
+                fallback_query = query.copy()
+                fallback_query["ingredients.name"] = {"$regex": "|".join(word_patterns), "$options": "i"}
 
-                # Filter by genre in code if we found ingredient matches
-                if recipes and "genre" in criteria:
-                    genre_term = criteria["genre"].lower()
-                    filtered_recipes = []
-                    for recipe in recipes:
-                        recipe_genre = recipe.get("genre", "").lower()
-                        if (genre_term in recipe_genre or
-                                recipe_genre in genre_term or
-                                (genre_term + "s") == recipe_genre or
-                                genre_term == (recipe_genre + "s")):
-                            filtered_recipes.append(recipe)
-                    recipes = filtered_recipes
-                    logger.info(f"After genre filtering: {len(recipes)} recipes")
+                recipes = list(db.recipes.find(fallback_query).limit(20))
+                logger.info(f"Fallback word search found {len(recipes)} recipes")
 
             return [self._format_recipe_for_ai(recipe) for recipe in recipes]
 
         except Exception as e:
             logger.error(f"Error searching recipes: {e}")
             return []
+
 
     def count_recipes_by_criteria(self, criteria: Dict[str, Any]) -> int:
         """Count recipes matching criteria using the same logic as search"""
@@ -1276,9 +1199,13 @@ Guidelines:
                 query["genre"] = {"$regex": "|".join(genre_patterns), "$options": "i"}
 
             if "ingredient" in criteria:
-                # EXACT ingredient matching - same as search function
+                # EXACT phrase matching for ingredients - NO word splitting
                 ingredient_term = criteria["ingredient"]
-                query["ingredients.name"] = {"$regex": f"\\b{re.escape(ingredient_term)}\\b", "$options": "i"}
+
+                # Use word boundaries for exact phrase matching
+                # This will match "peanut butter" as a complete phrase, not just "butter"
+                escaped_ingredient = re.escape(ingredient_term)
+                query["ingredients.name"] = {"$regex": f"\\b{escaped_ingredient}\\b", "$options": "i"}
 
             if "name" in criteria:
                 query["recipe_name"] = {"$regex": criteria["name"], "$options": "i"}
@@ -1394,7 +1321,8 @@ Guidelines:
         external_keywords = [
             "search the internet", "look online", "find on web", "search web",
             "yes, search", "go ahead", "please search", "look it up",
-            "from the internet", "online recipes", "web search"
+            "from the internet", "online recipes", "web search",
+            "recipe online", "find online", "search online", " online"
         ]
 
         user_lower = user_message.lower()
