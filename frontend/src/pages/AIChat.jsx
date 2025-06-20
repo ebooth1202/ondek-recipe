@@ -184,8 +184,8 @@ const AIChat = () => {
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
-    minHeight: '600px',
-    maxHeight: '72vh' // Reduced from 78vh to ensure input box is fully visible
+    minHeight: '700px',
+    maxHeight: '90vh' // Reduced from 78vh to ensure input box is fully visible
   };
 
   const messagesAreaStyle = {
