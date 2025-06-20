@@ -14,6 +14,8 @@ from enum import Enum
 import re
 from statistics import mean
 import logging
+import uuid
+import asyncio
 
 # Database import
 from .database import db, Database
@@ -244,19 +246,136 @@ class EnhancedRecipeResponse(BaseModel):
     user_rating: Optional[int] = None
 
 
-# AI-RELATED MODELS
+# ENHANCED AI AND RECIPE CREATION MODELS
 class ChatMessage(BaseModel):
     message: str
     conversation_history: Optional[List[dict]] = []
-
 
 class ChatResponse(BaseModel):
     response: str
     timestamp: datetime
 
-
 class RecipeSearchRequest(BaseModel):
     ingredients: List[str]
+
+class RecipeParseRequest(BaseModel):
+    recipe_text: str = Field(..., min_length=10, description="Recipe text to parse")
+
+class RecipeCreationHelpRequest(BaseModel):
+    question: str = Field(..., min_length=1, description="Question about recipe creation")
+    partial_recipe: Optional[dict] = Field(None, description="Partial recipe data for specific help")
+
+class TempRecipeRequest(BaseModel):
+    recipe_data: dict = Field(..., description="Recipe data to store temporarily")
+
+class TempRecipeResponse(BaseModel):
+    temp_id: str
+    message: str
+    expires_in_hours: int
+
+class RecipeParseResponse(BaseModel):
+    temp_id: Optional[str] = None
+    recipe_data: Optional[dict] = None
+    message: str
+    error: Optional[str] = None
+
+class RecipeCreationHelpResponse(BaseModel):
+    response: str
+    add_recipe_url: str
+
+class RecipeSuggestionsWithFormResponse(BaseModel):
+    response: str
+    suggestions: List[dict]
+    total_found: int
+
+class ActionButton(BaseModel):
+    type: str = "action_button"
+    text: str
+    action: str
+    url: str
+
+# ENHANCED RECIPE MODELS FOR FORM POPULATION
+class FormattedIngredient(BaseModel):
+    name: str = Field(..., min_length=1, description="Ingredient name")
+    quantity: float = Field(..., gt=0, description="Quantity amount")
+    unit: MeasuringUnit = Field(..., description="Measurement unit")
+
+class FormattedRecipe(BaseModel):
+    recipe_name: str = Field(..., min_length=1, max_length=200, description="Recipe name")
+    description: Optional[str] = Field(None, max_length=500, description="Recipe description")
+    ingredients: List[FormattedIngredient] = Field(..., min_items=1, description="List of ingredients")
+    instructions: List[str] = Field(..., min_items=1, description="Cooking instructions")
+    serving_size: int = Field(..., gt=0, le=100, description="Number of servings")
+    genre: Genre = Field(..., description="Recipe category")
+    prep_time: Optional[int] = Field(0, ge=0, le=1440, description="Preparation time in minutes")
+    cook_time: Optional[int] = Field(0, ge=0, le=1440, description="Cooking time in minutes")
+    notes: Optional[List[str]] = Field([], description="Additional notes")
+    dietary_restrictions: Optional[List[str]] = Field([], description="Dietary restrictions")
+
+class TempRecipeData(BaseModel):
+    data: FormattedRecipe
+    timestamp: datetime
+    expires_at: datetime
+
+# EXTERNAL RECIPE MODELS
+class ExternalRecipe(BaseModel):
+    name: str
+    source: str
+    description: Optional[str] = None
+    url: Optional[str] = None
+    ingredients: List[str]
+    instructions: List[str]
+    serving_size: Optional[int] = 4
+    prep_time: Optional[int] = 0
+    cook_time: Optional[int] = 0
+    genre: Optional[str] = "dinner"
+    notes: Optional[List[str]] = []
+    cuisine_type: Optional[str] = None
+
+class RecipeFormPopulationRequest(BaseModel):
+    temp_id: str = Field(..., description="Temporary recipe ID")
+
+class RecipeFormPopulationResponse(BaseModel):
+    recipe_data: FormattedRecipe
+    message: str
+
+# AI RESPONSE WITH ACTIONS
+class EnhancedChatResponse(BaseModel):
+    response: str
+    timestamp: datetime
+    actions: Optional[List[ActionButton]] = []
+    temp_recipe_ids: Optional[List[str]] = []
+
+# RECIPE INGREDIENT PARSING MODELS
+class IngredientParseRequest(BaseModel):
+    ingredient_text: str
+
+class IngredientParseResponse(BaseModel):
+    parsed_ingredients: List[FormattedIngredient]
+    unparsed_lines: List[str]
+
+# RECIPE VALIDATION MODELS
+class RecipeValidationRequest(BaseModel):
+    recipe_data: dict
+
+class RecipeValidationResponse(BaseModel):
+    is_valid: bool
+    errors: List[str]
+    warnings: List[str]
+    suggestions: List[str]
+
+# RECIPE IMPORT MODELS
+class RecipeImportRequest(BaseModel):
+    source_url: Optional[str] = None
+    recipe_text: Optional[str] = None
+    import_type: str = Field(..., regex="^(url|text)$")
+
+class RecipeImportResponse(BaseModel):
+    success: bool
+    temp_id: Optional[str] = None
+    recipe_data: Optional[FormattedRecipe] = None
+    error: Optional[str] = None
+    warnings: List[str] = []
 
 
 # Utility functions
@@ -1030,6 +1149,276 @@ async def ai_status():
         "model": ai_helper.model if ai_helper.is_configured() else None,
         "database_connected": db is not None
     }
+
+
+# RECIPE CREATION SUPPORT ROUTES
+@app.get("/temp-recipe/{temp_id}")
+async def get_temp_recipe(temp_id: str):
+    """
+    Retrieve temporary recipe data for form auto-population
+    """
+    try:
+        recipe_data = ai_helper.get_temp_recipe(temp_id)
+
+        if not recipe_data:
+            raise HTTPException(status_code=404, detail="Temporary recipe not found or expired")
+
+        return {"recipe_data": recipe_data}
+
+    except Exception as e:
+        logger.error(f"Error retrieving temp recipe: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving recipe data")
+
+
+@app.post("/store-temp-recipe")
+async def store_temp_recipe(
+        recipe_data: dict,
+        current_user: dict = Depends(get_current_user)
+):
+    """
+    Store recipe data temporarily for later retrieval
+    """
+    try:
+        # Validate and format the recipe data
+        formatted_data = ai_helper.format_recipe_for_form(recipe_data)
+
+        if not formatted_data:
+            raise HTTPException(status_code=400, detail="Invalid recipe data format")
+
+        temp_id = ai_helper.store_temp_recipe(formatted_data)
+
+        return {
+            "temp_id": temp_id,
+            "message": "Recipe data stored temporarily",
+            "expires_in_hours": 2
+        }
+
+    except Exception as e:
+        logger.error(f"Error storing temp recipe: {e}")
+        raise HTTPException(status_code=500, detail="Error storing recipe data")
+
+
+@app.delete("/temp-recipe/{temp_id}")
+async def delete_temp_recipe(temp_id: str):
+    """
+    Delete temporary recipe data (cleanup)
+    """
+    try:
+        if temp_id in ai_helper.temp_recipe_storage:
+            del ai_helper.temp_recipe_storage[temp_id]
+            return {"message": "Temporary recipe data deleted"}
+        else:
+            raise HTTPException(status_code=404, detail="Temporary recipe not found")
+
+    except Exception as e:
+        logger.error(f"Error deleting temp recipe: {e}")
+        raise HTTPException(status_code=500, detail="Error deleting recipe data")
+
+
+@app.get("/temp-recipes/cleanup")
+async def cleanup_temp_recipes():
+    """
+    Manual cleanup of expired temporary recipes (admin utility)
+    """
+    try:
+        ai_helper._cleanup_expired_temp_recipes()
+        remaining_count = len(ai_helper.temp_recipe_storage)
+        return {
+            "message": "Cleanup completed",
+            "remaining_temp_recipes": remaining_count
+        }
+
+    except Exception as e:
+        logger.error(f"Error during cleanup: {e}")
+        raise HTTPException(status_code=500, detail="Error during cleanup")
+
+
+# ENHANCED AI CHAT ROUTE (replace the existing one)
+@app.post("/ai/chat", response_model=ChatResponse)
+async def ai_chat(chat_data: ChatMessage, current_user: dict = Depends(get_current_user)):
+    """
+    Enhanced AI chat endpoint for recipe-related conversations with recipe creation support
+    """
+    try:
+        if not ai_helper.is_configured():
+            return ChatResponse(
+                response="AI features are currently unavailable. Please contact the administrator to configure the OpenAI API key.",
+                timestamp=Database.get_current_datetime()
+            )
+
+        # Process the chat message with enhanced recipe creation support
+        response_text = await ai_helper.chat_about_recipes(
+            user_message=chat_data.message,
+            conversation_history=chat_data.conversation_history
+        )
+
+        return ChatResponse(
+            response=response_text,
+            timestamp=Database.get_current_datetime()
+        )
+
+    except Exception as e:
+        logger.error(f"Error in AI chat: {e}")
+        return ChatResponse(
+            response="I'm sorry, I encountered an error while processing your request. Please try again.",
+            timestamp=Database.get_current_datetime()
+        )
+
+
+# RECIPE PARSING UTILITY ROUTE
+@app.post("/ai/parse-recipe")
+async def parse_recipe_text(
+        recipe_text: str,
+        current_user: dict = Depends(get_current_user)
+):
+    """
+    Parse recipe text and return formatted data for the add recipe form
+    """
+    try:
+        if not ai_helper.is_configured():
+            return {"error": "AI features are currently unavailable."}
+
+        # Parse the recipe text
+        parsed_recipe = ai_helper.parse_recipe_from_text(recipe_text)
+
+        if not parsed_recipe:
+            return {"error": "Could not parse recipe from the provided text"}
+
+        # Format for the form
+        formatted_recipe = ai_helper.format_recipe_for_form(parsed_recipe)
+
+        if not formatted_recipe:
+            return {"error": "Could not format recipe for form"}
+
+        # Store temporarily and return ID
+        temp_id = ai_helper.store_temp_recipe(formatted_recipe)
+
+        return {
+            "temp_id": temp_id,
+            "recipe_data": formatted_recipe,
+            "message": "Recipe parsed successfully"
+        }
+
+    except Exception as e:
+        logger.error(f"Error parsing recipe: {e}")
+        return {"error": "Error parsing recipe text"}
+
+
+# RECIPE SUGGESTION WITH AUTO-POPULATION
+@app.post("/ai/recipe-suggestions-with-form")
+async def get_recipe_suggestions_with_form(
+        search_request: RecipeSearchRequest,
+        current_user: dict = Depends(get_current_user)
+):
+    """
+    Get recipe suggestions and prepare them for form auto-population
+    """
+    try:
+        if not ai_helper.is_configured():
+            return {"response": "AI features are currently unavailable.", "suggestions": []}
+
+        # Get suggestions
+        suggestions_text = ai_helper.get_recipe_suggestions_by_ingredients(
+            search_request.ingredients
+        )
+
+        # Also search for external recipes if requested
+        search_criteria = {"ingredient": search_request.ingredients[0]} if search_request.ingredients else {}
+        external_recipes = await ai_helper.search_external_recipes(search_criteria)
+
+        # Format external recipes for form population
+        formatted_suggestions = []
+        for recipe in external_recipes[:3]:  # Limit to 3 suggestions
+            formatted = ai_helper.format_recipe_for_form(recipe)
+            if formatted:
+                temp_id = ai_helper.store_temp_recipe(formatted)
+                formatted_suggestions.append({
+                    "recipe_name": formatted["recipe_name"],
+                    "description": formatted["description"],
+                    "temp_id": temp_id,
+                    "source": recipe.get("source", "web")
+                })
+
+        return {
+            "response": suggestions_text,
+            "suggestions": formatted_suggestions,
+            "total_found": len(formatted_suggestions)
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting recipe suggestions with form: {e}")
+        return {"response": "Sorry, I couldn't retrieve recipe suggestions at the moment.", "suggestions": []}
+
+
+# RECIPE CREATION ASSISTANCE ROUTE
+@app.post("/ai/recipe-creation-help")
+async def get_recipe_creation_help(
+        help_request: dict,
+        current_user: dict = Depends(get_current_user)
+):
+    """
+    Get AI assistance for recipe creation process
+    """
+    try:
+        if not ai_helper.is_configured():
+            return {"response": "AI features are currently unavailable."}
+
+        user_question = help_request.get("question", "How do I create a good recipe?")
+        partial_recipe = help_request.get("partial_recipe", {})
+
+        # Generate helpful response
+        if partial_recipe:
+            # User has some recipe data, provide specific help
+            prompt = f"""
+            The user is creating a recipe and needs help. They have provided this partial recipe data:
+            {json.dumps(partial_recipe, indent=2)}
+
+            Their question: {user_question}
+
+            Provide helpful, specific advice for improving their recipe. Focus on:
+            - Missing or unclear information
+            - Suggestions for better organization
+            - Cooking tips and techniques
+            - Improvements to ingredients or instructions
+            """
+        else:
+            # General recipe creation help
+            prompt = f"""
+            The user is asking for help with recipe creation: {user_question}
+
+            Provide helpful guidance about:
+            - How to organize recipe information
+            - Tips for writing clear instructions
+            - Advice on ingredient measurements
+            - General cooking best practices
+            - How to categorize and tag recipes
+            """
+
+        if ai_helper.is_configured():
+            response = ai_helper.client.chat.completions.create(
+                model=ai_helper.model,
+                messages=[
+                    {"role": "system",
+                     "content": "You are Ralph, a helpful cooking assistant providing guidance on recipe creation."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=600,
+                temperature=0.7
+            )
+
+            advice = response.choices[0].message.content.strip()
+        else:
+            advice = "I'd be happy to help you create a great recipe! Consider organizing your ingredients by the order you'll use them, write clear step-by-step instructions, and don't forget to include cooking times and temperatures."
+
+        return {
+            "response": advice,
+            "add_recipe_url": "/add-recipe"
+        }
+
+    except Exception as e:
+        logger.error(f"Error providing recipe creation help: {e}")
+        return {
+            "response": "I'm here to help you create great recipes! Feel free to ask any specific questions about the recipe creation process."}
 
 
 # USER MANAGEMENT ROUTES
