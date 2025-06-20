@@ -1,8 +1,7 @@
+// frontend/src/context/AuthContext.jsx - Fixed version with correct import order
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import axios from 'axios';
-
-// Set a consistent base URL for all API calls
-const API_BASE_URL = 'http://127.0.0.1:8000';
+import { API_BASE_URL, buildApiUrl, API_ENDPOINTS } from '../utils/api';
 
 const AuthContext = createContext();
 
@@ -33,7 +32,7 @@ export const AuthProvider = ({ children }) => {
     const checkAuth = async () => {
       if (token) {
         try {
-          const response = await axios.get(`${API_BASE_URL}/auth/me`);
+          const response = await axios.get(buildApiUrl(API_ENDPOINTS.ME));
           setUser(response.data);
         } catch (error) {
           console.error('Auth check failed:', error);
@@ -48,8 +47,8 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (username, password) => {
     try {
-      // console.log('Attempting login for:', username);
-      const response = await axios.post(`${API_BASE_URL}/auth/login`, {
+      console.log('Attempting login to:', buildApiUrl(API_ENDPOINTS.LOGIN));
+      const response = await axios.post(buildApiUrl(API_ENDPOINTS.LOGIN), {
         username,
         password,
       });
@@ -61,37 +60,37 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('token', access_token);
       axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
 
-      // console.log('Login successful:', userData);
+      console.log('Login successful:', userData);
       return { success: true };
     } catch (error) {
       console.error('Login error:', error);
-      const message = error.response?.data?.detail || 'Login failed';
+      const message = error.response?.data?.detail || error.message || 'Network error - backend may not be running';
       return { success: false, error: message };
     }
   };
 
   const register = async (username, email, password) => {
     try {
-      // console.log('Attempting registration for:', username);
-      const response = await axios.post(`${API_BASE_URL}/auth/register`, {
+      console.log('Attempting registration to:', buildApiUrl(API_ENDPOINTS.REGISTER));
+      const response = await axios.post(buildApiUrl(API_ENDPOINTS.REGISTER), {
         username,
         email,
         password,
       });
 
-      // console.log('Registration successful, now logging in...');
+      console.log('Registration successful, now logging in...');
       // Auto-login after successful registration
       const loginResult = await login(username, password);
       return loginResult;
     } catch (error) {
       console.error('Registration error:', error);
-      const message = error.response?.data?.detail || 'Registration failed';
+      const message = error.response?.data?.detail || error.message || 'Registration failed';
       return { success: false, error: message };
     }
   };
 
   const logout = () => {
-    // console.log('Logging out user');
+    console.log('Logging out user');
     setUser(null);
     setToken(null);
     localStorage.removeItem('token');
@@ -111,7 +110,6 @@ export const AuthProvider = ({ children }) => {
   };
 
   const updateUser = (updatedUserData) => {
-    // Update the user data in context
     setUser(prevUser => ({
       ...prevUser,
       ...updatedUserData
@@ -120,7 +118,7 @@ export const AuthProvider = ({ children }) => {
 
   const value = {
     user,
-    setUser: updateUser,  // Added function to update user data
+    setUser: updateUser,
     token,
     loading,
     login,
@@ -128,7 +126,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     isAuthenticated,
     hasRole,
-    apiBaseUrl: API_BASE_URL, // Expose the base URL for other components to use
+    apiBaseUrl: API_BASE_URL, // Use the centralized API_BASE_URL
   };
 
   if (loading) {
