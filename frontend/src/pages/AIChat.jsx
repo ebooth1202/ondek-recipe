@@ -477,8 +477,8 @@ Please try:
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
-    minHeight: '600px',
-    maxHeight: '75vh'
+    minHeight: '500px',
+    maxHeight: '750px'
   };
 
   const messagesAreaStyle = {
