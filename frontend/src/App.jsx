@@ -11,6 +11,7 @@ import AddRecipe from './pages/AddRecipe';
 import RecipeDetail from './pages/RecipeDetail';
 import Users from './pages/Users';
 import UserManagement from './components/user/UserManagement';
+import AIChat from './pages/AIChat'; // Add this import
 
 function App() {
   return (
@@ -29,6 +30,7 @@ function App() {
               <Route path="/recipes/:id" element={<RecipeDetail />} />
               <Route path="/users" element={<Users />} />
               <Route path="/user-management" element={<UserManagement />} />
+              <Route path="/ai-chat" element={<AIChat />} /> {/* Add this route */}
             </Routes>
           </main>
         </div>

@@ -161,6 +161,7 @@ const Dashboard = () => {
             </div>
           </div>
 
+          {/* Updated AI Assistant Card */}
           <div style={{
             background: 'white',
             border: '2px solid #003366',
@@ -177,11 +178,11 @@ const Dashboard = () => {
           onMouseLeave={(e) => {
             e.currentTarget.style.transform = 'translateY(0)';
           }}
-          onClick={() => alert('AI assistant coming soon! 🤖')}>
+          onClick={() => navigate('/ai-chat')}>
             <h3 style={{ color: '#003366', marginBottom: '1rem' }}>
               🤖 AI Assistant
             </h3>
-            <p>Get cooking help and recipe suggestions</p>
+            <p>Get cooking help and recipe suggestions from your personal AI assistant</p>
             <div style={{
               background: '#f0f8ff',
               color: '#003366',
@@ -191,7 +192,7 @@ const Dashboard = () => {
               marginTop: '1rem',
               fontSize: '0.9rem'
             }}>
-              Coming Soon
+              Chat Now
             </div>
           </div>
         </div>

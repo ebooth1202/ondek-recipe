@@ -46,7 +46,7 @@ const Navbar = () => {
         <ul style={{
           display: 'flex',
           listStyle: 'none',
-          gap: '2rem',
+          gap: '1.5rem', // Reduced gap from 2rem to 1.5rem
           alignItems: 'center',
           margin: 0,
           padding: 0
@@ -59,10 +59,11 @@ const Navbar = () => {
                   style={{
                     color: 'white',
                     textDecoration: 'none',
-                    padding: '0.5rem 1rem',
+                    padding: '0.5rem 0.75rem', // Reduced padding
                     borderRadius: '8px',
                     transition: 'background-color 0.3s ease',
-                    backgroundColor: isActive('/dashboard') ? '#0066cc' : 'transparent'
+                    backgroundColor: isActive('/dashboard') ? '#0066cc' : 'transparent',
+                    fontSize: '0.9rem' // Slightly smaller font
                   }}
                   onMouseEnter={(e) => {
                     if (!isActive('/dashboard')) {
@@ -85,10 +86,11 @@ const Navbar = () => {
                   style={{
                     color: 'white',
                     textDecoration: 'none',
-                    padding: '0.5rem 1rem',
+                    padding: '0.5rem 0.75rem',
                     borderRadius: '8px',
                     transition: 'background-color 0.3s ease',
-                    backgroundColor: isActive('/recipes') ? '#0066cc' : 'transparent'
+                    backgroundColor: isActive('/recipes') ? '#0066cc' : 'transparent',
+                    fontSize: '0.9rem'
                   }}
                   onMouseEnter={(e) => {
                     if (!isActive('/recipes')) {
@@ -111,10 +113,11 @@ const Navbar = () => {
                   style={{
                     color: 'white',
                     textDecoration: 'none',
-                    padding: '0.5rem 1rem',
+                    padding: '0.5rem 0.75rem',
                     borderRadius: '8px',
                     transition: 'background-color 0.3s ease',
-                    backgroundColor: isActive('/add-recipe') ? '#0066cc' : 'transparent'
+                    backgroundColor: isActive('/add-recipe') ? '#0066cc' : 'transparent',
+                    fontSize: '0.9rem'
                   }}
                   onMouseEnter={(e) => {
                     if (!isActive('/add-recipe')) {
@@ -131,6 +134,34 @@ const Navbar = () => {
                 </Link>
               </li>
 
+              {/* AI Chat Link */}
+              <li>
+                <Link
+                  to="/ai-chat"
+                  style={{
+                    color: 'white',
+                    textDecoration: 'none',
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: '8px',
+                    transition: 'background-color 0.3s ease',
+                    backgroundColor: isActive('/ai-chat') ? '#0066cc' : 'transparent',
+                    fontSize: '0.9rem'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive('/ai-chat')) {
+                      e.target.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive('/ai-chat')) {
+                      e.target.style.backgroundColor = 'transparent';
+                    }
+                  }}
+                >
+                  🤖 AI Assistant
+                </Link>
+              </li>
+
               {hasRole(['admin', 'owner']) && (
                 <li>
                   <Link
@@ -138,10 +169,11 @@ const Navbar = () => {
                     style={{
                       color: 'white',
                       textDecoration: 'none',
-                      padding: '0.5rem 1rem',
+                      padding: '0.5rem 0.75rem',
                       borderRadius: '8px',
                       transition: 'background-color 0.3s ease',
-                      backgroundColor: isActive('/users') ? '#0066cc' : 'transparent'
+                      backgroundColor: isActive('/users') ? '#0066cc' : 'transparent',
+                      fontSize: '0.9rem'
                     }}
                     onMouseEnter={(e) => {
                       if (!isActive('/users')) {
@@ -160,15 +192,6 @@ const Navbar = () => {
               )}
 
               <li>
-                <span style={{
-                  color: '#ccc',
-                  fontSize: '0.9rem'
-                }}>
-                  Welcome, {user?.first_name}! ({user?.role})
-                </span>
-              </li>
-
-              <li>
                 <button
                   onClick={handleLogout}
                   style={{
@@ -176,9 +199,9 @@ const Navbar = () => {
                     color: '#003366',
                     border: '2px solid #f0f8ff',
                     borderRadius: '8px',
-                    padding: '0.5rem 1rem',
+                    padding: '0.5rem 0.75rem',
                     cursor: 'pointer',
-                    fontSize: '0.9rem',
+                    fontSize: '0.85rem', // Slightly smaller font
                     fontWeight: '500',
                     transition: 'all 0.3s ease'
                   }}
@@ -258,4 +281,3 @@ const Navbar = () => {
 };
 
 export default Navbar;
-

@@ -15,14 +15,22 @@ from pydantic import BaseModel, Field
 from enum import Enum
 import re
 from statistics import mean
+import logging
+
+# AI imports
+from .utils.ai_helper import recipe_ai_helper
 
 # Load environment variables
 load_dotenv()
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Initialize FastAPI app
 app = FastAPI(
     title="Ondek Recipe API",
-    description="A comprehensive recipe management API",
+    description="A comprehensive recipe management API with AI integration",
     version="1.0.0"
 )
 
@@ -126,8 +134,8 @@ class MeasuringUnit(str, Enum):
     PIECE = "piece"
     PIECES = "pieces"
     WHOLE = "whole"
-    STICK = "stick"        # ADD THIS LINE
-    STICKS = "sticks"      # ADD THIS LINE
+    STICK = "stick"
+    STICKS = "sticks"
     PINCH = "pinch"
     DASH = "dash"
 
@@ -167,25 +175,25 @@ class UserUpdate(BaseModel):
     password: Optional[str] = None
     username: Optional[str] = None
     first_name: Optional[str] = None
-    last_name: Optional[str] = None  # Added username field
+    last_name: Optional[str] = None
 
 
 class Recipe(BaseModel):
     recipe_name: str = Field(..., min_length=1, max_length=200)
-    description: Optional[str] = Field(None, max_length=500)  # Add this line
+    description: Optional[str] = Field(None, max_length=500)
     ingredients: List[Ingredient] = Field(..., min_items=1)
     instructions: List[str] = Field(..., min_items=1)
     serving_size: int = Field(..., gt=0, le=100)
     genre: Genre
-    prep_time: Optional[int] = Field(0, ge=0, le=1440)  # Max 24 hours in minutes
-    cook_time: Optional[int] = Field(0, ge=0, le=1440)  # Max 24 hours in minutes
+    prep_time: Optional[int] = Field(0, ge=0, le=1440)
+    cook_time: Optional[int] = Field(0, ge=0, le=1440)
     notes: Optional[List[str]] = []
     dietary_restrictions: Optional[List[str]] = []
 
 
 class RecipeUpdate(BaseModel):
     recipe_name: Optional[str] = None
-    description: Optional[str] = None  # Add this line
+    description: Optional[str] = None
     ingredients: Optional[List[Ingredient]] = None
     instructions: Optional[List[str]] = None
     serving_size: Optional[int] = None
@@ -199,7 +207,7 @@ class RecipeUpdate(BaseModel):
 class RecipeResponse(BaseModel):
     id: str
     recipe_name: str
-    description: Optional[str] = None  # Add this line
+    description: Optional[str] = None
     ingredients: List[Ingredient]
     instructions: List[str]
     serving_size: int
@@ -270,7 +278,7 @@ class FavoriteResponse(BaseModel):
 class EnhancedRecipeResponse(BaseModel):
     id: str
     recipe_name: str
-    description: Optional[str] = None  # ADD THIS LINE
+    description: Optional[str] = None
     ingredients: List[Ingredient]
     instructions: List[str]
     serving_size: int
@@ -285,6 +293,21 @@ class EnhancedRecipeResponse(BaseModel):
     total_ratings: int = 0
     user_has_favorited: bool = False
     user_rating: Optional[int] = None
+
+
+# AI-RELATED MODELS
+class ChatMessage(BaseModel):
+    message: str
+    conversation_history: Optional[List[dict]] = []
+
+
+class ChatResponse(BaseModel):
+    response: str
+    timestamp: datetime
+
+
+class RecipeSearchRequest(BaseModel):
+    ingredients: List[str]
 
 
 # Utility functions
@@ -465,7 +488,7 @@ async def get_current_user_info(current_user: dict = Depends(get_current_user)):
 async def create_recipe(recipe: Recipe, current_user: dict = Depends(get_current_user)):
     recipe_doc = {
         "recipe_name": recipe.recipe_name,
-        "description": recipe.description,  # Add this line
+        "description": recipe.description,
         "ingredients": [ing.dict() for ing in recipe.ingredients],
         "instructions": recipe.instructions,
         "serving_size": recipe.serving_size,
@@ -485,7 +508,7 @@ async def create_recipe(recipe: Recipe, current_user: dict = Depends(get_current
     return RecipeResponse(
         id=str(recipe_doc["_id"]),
         recipe_name=recipe_doc["recipe_name"],
-        description=recipe_doc.get("description"),  # Add this line
+        description=recipe_doc.get("description"),
         ingredients=ingredients,
         instructions=recipe_doc["instructions"],
         serving_size=recipe_doc["serving_size"],
@@ -497,6 +520,7 @@ async def create_recipe(recipe: Recipe, current_user: dict = Depends(get_current
         created_by=recipe_doc["created_by"],
         created_at=recipe_doc["created_at"]
     )
+
 
 @app.get("/recipes", response_model=List[RecipeResponse])
 async def get_recipes(
@@ -510,7 +534,7 @@ async def get_recipes(
     if search:
         query["$or"] = [
             {"recipe_name": {"$regex": search, "$options": "i"}},
-            {"description": {"$regex": search, "$options": "i"}},  # Add this line to search descriptions too
+            {"description": {"$regex": search, "$options": "i"}},
             {"ingredients.name": {"$regex": search, "$options": "i"}}
         ]
 
@@ -525,7 +549,7 @@ async def get_recipes(
         recipes.append(RecipeResponse(
             id=str(recipe_doc["_id"]),
             recipe_name=recipe_doc["recipe_name"],
-            description=recipe_doc.get("description"),  # Add this line
+            description=recipe_doc.get("description"),
             ingredients=ingredients,
             instructions=recipe_doc["instructions"],
             serving_size=recipe_doc["serving_size"],
@@ -554,7 +578,7 @@ async def get_recipe(recipe_id: str, current_user: dict = Depends(get_current_us
     return EnhancedRecipeResponse(
         id=str(recipe_doc["_id"]),
         recipe_name=recipe_doc["recipe_name"],
-        description=recipe_doc.get("description"),  # ADD THIS LINE
+        description=recipe_doc.get("description"),
         ingredients=ingredients,
         instructions=recipe_doc["instructions"],
         serving_size=recipe_doc["serving_size"],
@@ -566,6 +590,7 @@ async def get_recipe(recipe_id: str, current_user: dict = Depends(get_current_us
         created_by=recipe_doc["created_by"],
         created_at=recipe_doc["created_at"]
     )
+
 
 @app.put("/recipes/{recipe_id}", response_model=EnhancedRecipeResponse)
 async def update_recipe(
@@ -592,7 +617,7 @@ async def update_recipe(
     if recipe_update.recipe_name is not None:
         update_doc["recipe_name"] = recipe_update.recipe_name
 
-    if recipe_update.description is not None:  # Add this block
+    if recipe_update.description is not None:
         update_doc["description"] = recipe_update.description
 
     if recipe_update.ingredients is not None:
@@ -638,7 +663,7 @@ async def update_recipe(
     return RecipeResponse(
         id=str(updated_recipe["_id"]),
         recipe_name=updated_recipe["recipe_name"],
-        description=updated_recipe.get("description"),  # Add this line
+        description=updated_recipe.get("description"),
         ingredients=ingredients,
         instructions=updated_recipe["instructions"],
         serving_size=updated_recipe["serving_size"],
@@ -933,23 +958,125 @@ async def check_favorite_status(recipe_id: str, current_user: dict = Depends(get
     return {"is_favorited": favorite is not None}
 
 
-@app.get("/admin/update-recipe-times", include_in_schema=False)
-async def update_recipe_times():
-    """Add prep_time and cook_time fields to all recipes that don't have them"""
+# AI CHAT ROUTES
+@app.post("/ai/chat", response_model=ChatResponse)
+async def ai_chat(chat_data: ChatMessage, current_user: dict = Depends(get_current_user)):
+    """
+    Main AI chat endpoint for recipe-related conversations
+    """
     try:
-        result = db.recipes.update_many(
-            {"prep_time": {"$exists": False}},  # Find recipes without prep_time
-            {"$set": {"prep_time": 0, "cook_time": 0}}  # Set default values
+        if not recipe_ai_helper.is_configured():
+            return ChatResponse(
+                response="AI features are currently unavailable. Please contact the administrator to configure the OpenAI API key.",
+                timestamp=datetime.now()
+            )
+
+        # Process the chat message
+        response_text = await recipe_ai_helper.chat_about_recipes(
+            user_message=chat_data.message,
+            conversation_history=chat_data.conversation_history
         )
 
-        return {
-            "success": True,
-            "modified_count": result.modified_count,
-            "matched_count": result.matched_count,
-            "message": f"Updated {result.modified_count} recipes"
-        }
+        return ChatResponse(
+            response=response_text,
+            timestamp=datetime.now()
+        )
+
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error in AI chat: {e}")
+        return ChatResponse(
+            response="I'm sorry, I encountered an error while processing your request. Please try again.",
+            timestamp=datetime.now()
+        )
+
+
+@app.post("/ai/recipe-suggestions")
+async def get_recipe_suggestions(
+        search_request: RecipeSearchRequest,
+        current_user: dict = Depends(get_current_user)
+):
+    """
+    Get recipe suggestions based on available ingredients
+    """
+    try:
+        if not recipe_ai_helper.is_configured():
+            return {"response": "AI features are currently unavailable."}
+
+        suggestions = recipe_ai_helper.get_recipe_suggestions_by_ingredients(
+            search_request.ingredients
+        )
+
+        return {"response": suggestions}
+
+    except Exception as e:
+        logger.error(f"Error getting recipe suggestions: {e}")
+        return {"response": "Sorry, I couldn't retrieve recipe suggestions at the moment."}
+
+
+@app.get("/ai/recipe-search")
+async def search_recipes_ai(
+        query: str = Query(..., description="Natural language search query"),
+        current_user: dict = Depends(get_current_user)
+):
+    """
+    Search recipes using natural language processing
+    """
+    try:
+        if not recipe_ai_helper.is_configured():
+            return {"recipes": [], "message": "AI features are currently unavailable."}
+
+        # Extract search criteria from the query
+        search_criteria = recipe_ai_helper.extract_search_intent(query)
+
+        # Search for recipes
+        if search_criteria:
+            recipes = recipe_ai_helper.search_recipes_by_criteria(search_criteria)
+        else:
+            # If no specific criteria, return a general set
+            recipes = recipe_ai_helper.get_recipes_data(limit=10)
+
+        return {
+            "recipes": recipes,
+            "criteria_found": search_criteria,
+            "total_found": len(recipes)
+        }
+
+    except Exception as e:
+        logger.error(f"Error in AI recipe search: {e}")
+        return {"recipes": [], "message": "Error processing search query"}
+
+
+@app.get("/ai/recipe/{recipe_id}/details")
+async def get_recipe_details_ai(
+        recipe_id: str,
+        current_user: dict = Depends(get_current_user)
+):
+    """
+    Get detailed recipe information formatted for AI responses
+    """
+    try:
+        recipe = recipe_ai_helper.get_recipe_by_id(recipe_id)
+
+        if not recipe:
+            return {"error": "Recipe not found"}
+
+        return {"recipe": recipe}
+
+    except Exception as e:
+        logger.error(f"Error getting recipe details: {e}")
+        return {"error": "Error retrieving recipe details"}
+
+
+@app.get("/ai/status")
+async def ai_status():
+    """
+    Check AI service status
+    """
+    return {
+        "ai_configured": recipe_ai_helper.is_configured(),
+        "model": recipe_ai_helper.model if recipe_ai_helper.is_configured() else None,
+        "database_connected": db is not None
+    }
 
 
 # USER MANAGEMENT ROUTES
@@ -1009,26 +1136,6 @@ async def update_user(
                 raise HTTPException(status_code=400, detail="Username already registered")
             update_doc["username"] = user_update.username
 
-    # Check and update password if provided
-    if user_update.password is not None:
-        update_doc["password"] = hash_password(user_update.password)
-
-    # Only perform update if there are changes
-    if update_doc.keys() != ["updated_at"]:
-        # Debug logging
-        print(f"Updating user {user_id} with: {update_doc}")
-        result = db.users.update_one({"_id": ObjectId(user_id)}, {"$set": update_doc})
-        print(f"Update result: {result.modified_count} documents modified")
-
-    # Update first_name if provided
-    if user_update.first_name is not None:
-        update_doc["first_name"] = user_update.first_name
-
-    # Update last_name if provided
-    if user_update.last_name is not None:
-        update_doc["last_name"] = user_update.last_name
-
-
     # Update first_name if provided
     if user_update.first_name is not None:
         update_doc["first_name"] = user_update.first_name
@@ -1085,13 +1192,6 @@ async def delete_user(
     return {"message": "User deleted successfully"}
 
 
-# AI AGENT ROUTES
-@app.post("/ai/chat", response_model=AIResponse)
-async def ai_chat(message: AIMessage, current_user: dict = Depends(get_current_user)):
-    response_text = f"Thanks for your message: '{message.message}'. This is a placeholder response. AI integration coming soon!"
-    return AIResponse(response=response_text)
-
-
 # UTILITY ROUTES
 @app.get("/measuring-units")
 async def get_measuring_units():
@@ -1103,7 +1203,26 @@ async def get_genres():
     return {"genres": [genre.value for genre in Genre]}
 
 
-# Route to reset owner password
+# ADMIN UTILITY ROUTES
+@app.get("/admin/update-recipe-times", include_in_schema=False)
+async def update_recipe_times():
+    """Add prep_time and cook_time fields to all recipes that don't have them"""
+    try:
+        result = db.recipes.update_many(
+            {"prep_time": {"$exists": False}},  # Find recipes without prep_time
+            {"$set": {"prep_time": 0, "cook_time": 0}}  # Set default values
+        )
+
+        return {
+            "success": True,
+            "modified_count": result.modified_count,
+            "matched_count": result.matched_count,
+            "message": f"Updated {result.modified_count} recipes"
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @app.get("/admin/reset-owner-password", include_in_schema=False)
 async def reset_owner_password():
     owner = db.users.find_one({"username": "owner"})
@@ -1112,8 +1231,8 @@ async def reset_owner_password():
         # Create owner user
         hashed_password = hash_password("admin123")
         owner_user = {
-            "username": "ebooth",
-            "email": "ethan.booth1202@gmail.com",
+            "username": "owner",
+            "email": "owner@ondekrecipe.com",
             "password": hashed_password,
             "role": "owner",
             "created_at": datetime.now(),
