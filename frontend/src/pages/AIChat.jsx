@@ -138,8 +138,7 @@ const AIChat = () => {
     { label: "⚡ Quick meals under 30 minutes", query: "Show me recipes that take less than 30 minutes" },
     { label: "🥗 Healthy options", query: "What are some healthy recipe options?" },
     { label: "🍰 Dessert recipes", query: "Show me dessert recipes" },
-    { label: "🥘 Popular recipes", query: "What are the most popular recipes?" },
-    { label: "🌱 Vegetarian options", query: "Show me vegetarian recipes" }
+    { label: "🥘 Popular recipes", query: "What are the most popular recipes?" }
   ];
 
   const handleQuickAction = (query) => {
@@ -184,8 +183,8 @@ const AIChat = () => {
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
-    minHeight: '700px',
-    maxHeight: '90vh' // Reduced from 78vh to ensure input box is fully visible
+    minHeight: '600px',
+    maxHeight: '75vh' // Reduced from 78vh to ensure input box is fully visible
   };
 
   const messagesAreaStyle = {
