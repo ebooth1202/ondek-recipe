@@ -166,7 +166,7 @@ const Navbar = () => {
                     }
                   }}
                 >
-                  🤖 AI Rupert
+                  🤖 Rupert AI
                 </Link>
               </li>
 

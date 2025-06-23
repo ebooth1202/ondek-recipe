@@ -598,81 +598,17 @@ const RecipeDetail = () => {
 
         {/* Recipe Header */}
         <div style={headerContainerStyle}>
-          {/* Top Header Section with Photo, Title, and Favorite Button */}
+          {/* Top Header Section with Title and Favorite Button */}
           <div style={{
-            display: 'grid',
-            gridTemplateColumns: (recipe.photo_url && recipe.photo_url.trim()) ? '200px 1fr auto' : '1fr auto',
-            gap: '2rem',
-            alignItems: 'center',
+            position: 'relative',
             marginBottom: recipe.photo_url && recipe.photo_url.trim() ? '1rem' : '2rem'
           }}>
-            {/* Recipe Photo - Left Side (only show if photo exists) */}
-            {recipe.photo_url && recipe.photo_url.trim() && (
-              <div style={{
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center'
-              }}>
-                <img
-                  src={recipe.photo_url}
-                  alt={recipe.recipe_name}
-                  style={{
-                    width: '180px',
-                    height: '180px',
-                    objectFit: 'cover',
-                    borderRadius: '15px',
-                    border: '3px solid #003366',
-                    boxShadow: '0 4px 12px rgba(0, 51, 102, 0.2)'
-                  }}
-                  onError={(e) => {
-                    // Hide image container if it fails to load
-                    console.log('Failed to load recipe image:', recipe.photo_url);
-                    e.target.parentElement.style.display = 'none';
-                  }}
-                  onLoad={() => {
-                    console.log('Successfully loaded recipe image:', recipe.photo_url);
-                  }}
-                />
-              </div>
-            )}
-
-            {/* Recipe Title - Conditional Positioning */}
+            {/* Favorite Button - Absolutely positioned top right */}
             <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              alignItems: recipe.photo_url && recipe.photo_url.trim() ? 'center' : 'flex-start',
-              textAlign: recipe.photo_url && recipe.photo_url.trim() ? 'center' : 'left'
-            }}>
-              <h1 style={{
-                ...titleStyle,
-                fontSize: recipe.photo_url && recipe.photo_url.trim() ? '2.2rem' : '2.5rem',
-                margin: '0 0 1rem 0',
-                textAlign: recipe.photo_url && recipe.photo_url.trim() ? 'center' : 'left'
-              }}>
-                {recipe.recipe_name}
-              </h1>
-
-              {/* Genre Badge - Directly under title when photo present */}
-              {recipe.photo_url && recipe.photo_url.trim() && (
-                <div style={{
-                  backgroundColor: getGenreColor(recipe?.genre),
-                  color: 'white',
-                  padding: '8px 16px',
-                  borderRadius: '20px',
-                  fontSize: '1rem',
-                  fontWeight: '500'
-                }}>
-                  {getGenreEmoji(recipe.genre)} {formatGenreName(recipe.genre)}
-                </div>
-              )}
-            </div>
-
-            {/* Favorite Button - Right Side */}
-            <div style={{
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center'
+              position: 'absolute',
+              top: 0,
+              right: 0,
+              zIndex: 2
             }}>
               <FavoriteButton
                 recipeId={recipe.id}
@@ -680,68 +616,55 @@ const RecipeDetail = () => {
                 onToggle={handleFavoriteToggle}
               />
             </div>
-          </div>
 
-          {/* Badge Container - Only show if no photo (genre badge is above when photo exists) */}
-          {!(recipe.photo_url && recipe.photo_url.trim()) && (
-            <div style={badgeContainerStyle}>
-              <div style={genreBadgeStyle}>
-                {getGenreEmoji(recipe.genre)} {formatGenreName(recipe.genre)}
-              </div>
-
-              {/* Dietary Restrictions Badges - Side by side */}
-              {recipe.dietary_restrictions && recipe.dietary_restrictions.length > 0 && (
-                <div style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  justifyContent: 'center',
-                  gap: '6px',
-                  marginTop: '8px'
-                }}>
-                  {recipe.dietary_restrictions.map(restriction => (
-                    <div key={restriction} style={dietaryBadgeStyle}>
-                      {formatDietaryRestrictionName(restriction)}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div style={servingBadgeStyle}>
-                👥 Serves {Math.round(recipe.serving_size * servingMultiplier)}
-              </div>
-            </div>
-          )}
-
-          {/* Dietary Restrictions and Serving Size - Show when photo exists */}
-          {recipe.photo_url && recipe.photo_url.trim() && (
+            {/* Recipe Title - Fully centered */}
             <div style={{
               display: 'flex',
               flexDirection: 'column',
+              justifyContent: 'center',
               alignItems: 'center',
-              gap: '1rem',
-              marginBottom: '1.5rem'
+              textAlign: 'center',
+              width: '100%'
             }}>
-              {/* Dietary Restrictions Badges */}
-              {recipe.dietary_restrictions && recipe.dietary_restrictions.length > 0 && (
-                <div style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  justifyContent: 'center',
-                  gap: '6px'
-                }}>
-                  {recipe.dietary_restrictions.map(restriction => (
-                    <div key={restriction} style={dietaryBadgeStyle}>
-                      {formatDietaryRestrictionName(restriction)}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div style={servingBadgeStyle}>
-                👥 Serves {Math.round(recipe.serving_size * servingMultiplier)}
-              </div>
+              <h1 style={{
+                ...titleStyle,
+                fontSize: recipe.photo_url && recipe.photo_url.trim() ? '2.2rem' : '2.5rem',
+                margin: '0 0 1rem 0',
+                textAlign: 'center',
+                width: '100%'
+              }}>
+                {recipe.recipe_name}
+              </h1>
             </div>
-          )}
+          </div>
+
+          {/* Badge Container - Always use same layout */}
+          <div style={badgeContainerStyle}>
+            <div style={genreBadgeStyle}>
+              {getGenreEmoji(recipe.genre)} {formatGenreName(recipe.genre)}
+            </div>
+
+            {/* Dietary Restrictions Badges - Side by side */}
+            {recipe.dietary_restrictions && recipe.dietary_restrictions.length > 0 && (
+              <div style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                justifyContent: 'center',
+                gap: '6px',
+                marginTop: '8px'
+              }}>
+                {recipe.dietary_restrictions.map(restriction => (
+                  <div key={restriction} style={dietaryBadgeStyle}>
+                    {formatDietaryRestrictionName(restriction)}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={servingBadgeStyle}>
+              👥 Serves {Math.round(recipe.serving_size * servingMultiplier)}
+            </div>
+          </div>
 
           <div style={metaStyle}>
             <span>👨‍🍳 Created by {recipe.created_by}</span>
@@ -755,8 +678,37 @@ const RecipeDetail = () => {
             justifyContent: 'center',
             gap: '1.5rem',
             margin: '1rem 0',
-            flexWrap: 'wrap'
+            flexWrap: 'wrap',
+            position: 'relative' // Add relative positioning for absolutely positioned photo
           }}>
+            {/* Recipe Photo - Absolutely positioned in bottom left */}
+            {recipe.photo_url && recipe.photo_url.trim() && (
+              <img
+                src={recipe.photo_url}
+                alt={recipe.recipe_name}
+                style={{
+                  position: 'absolute',
+                  bottom: 0,
+                  left: 0,
+                  width: '220px',
+                  height: '220px',
+                  objectFit: 'cover',
+                  borderRadius: '15px',
+                  border: '3px solid #003366',
+                  boxShadow: '0 4px 12px rgba(0, 51, 102, 0.2)',
+                  zIndex: 1
+                }}
+                onError={(e) => {
+                  // Hide image if it fails to load
+                  console.log('Failed to load recipe image:', recipe.photo_url);
+                  e.target.style.display = 'none';
+                }}
+                onLoad={() => {
+                  console.log('Successfully loaded recipe image:', recipe.photo_url);
+                }}
+              />
+            )}
+
             <div style={{
               background: '#f0f8ff',
               padding: '0.5rem 1rem',
