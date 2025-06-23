@@ -1,8 +1,10 @@
-# backend/app/main.py - Fixed version with better error handling
+# backend/app/main.py - Fixed version with better error handling and photo support
 
 from fastapi import FastAPI, HTTPException, Depends, status, Query, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from bson import ObjectId
 from bson.errors import InvalidId
 import bcrypt
@@ -22,10 +24,13 @@ import tempfile
 import csv
 import io
 import json
+import shutil
+from pathlib import Path
 
 # Load environment variables first
 # load_dotenv()
 from pathlib import Path
+
 # env_path = Path(__file__).parent.parent.parent / '.env'
 # load_dotenv(dotenv_path=env_path)
 
@@ -49,7 +54,6 @@ if not env_loaded:
     print("Tried paths:")
     for path in possible_env_paths:
         print(f"  - {path} (exists: {path.exists()})")
-
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -114,8 +118,10 @@ class UserUpdate(BaseModel):
     last_name: Optional[str] = None
     password: Optional[str] = None
 
+
 class RoleUpdate(BaseModel):
     role: UserRole
+
 
 class Genre(str, Enum):
     BREAKFAST = "breakfast"
@@ -199,6 +205,7 @@ class Recipe(BaseModel):
     cook_time: Optional[int] = Field(0, ge=0, le=1440)
     notes: Optional[List[str]] = []
     dietary_restrictions: Optional[List[str]] = []
+    photo_url: Optional[str] = None
 
 
 class RecipeResponse(BaseModel):
@@ -215,6 +222,7 @@ class RecipeResponse(BaseModel):
     dietary_restrictions: Optional[List[str]] = []
     created_by: str
     created_at: datetime
+    photo_url: Optional[str] = None
 
 
 class Token(BaseModel):
@@ -281,6 +289,75 @@ def require_role(allowed_roles: List[UserRole]):
 def validate_email(email: str) -> bool:
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
+
+
+# Photo handling functions
+async def save_uploaded_photo(photo: UploadFile, recipe_id: str) -> Optional[str]:
+    """Save uploaded photo and return the photo URL"""
+    try:
+        # Create photos directory if it doesn't exist
+        photos_dir = Path("static/photos")
+        photos_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate unique filename
+        file_extension = os.path.splitext(photo.filename)[1].lower()
+        if file_extension not in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+            raise ValueError("Invalid file type")
+
+        filename = f"recipe_{recipe_id}_{uuid.uuid4().hex[:8]}{file_extension}"
+        file_path = photos_dir / filename
+
+        # Save the file
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(photo.file, buffer)
+
+        # Return the full URL using the photos endpoint
+        return f"http://127.0.0.1:8000/photos/{filename}"
+
+    except Exception as e:
+        logger.error(f"Error saving photo: {e}")
+        return None
+
+
+def fix_photo_url(photo_url: Optional[str]) -> Optional[str]:
+    """Convert old static URLs to new photo endpoint URLs"""
+    if not photo_url:
+        return None
+
+    # If it's already a full URL, return as-is
+    if photo_url.startswith('http'):
+        return photo_url
+
+    # If it's an old static path, convert it
+    if photo_url.startswith('/static/photos/'):
+        filename = photo_url.replace('/static/photos/', '')
+        return f"http://127.0.0.1:8000/photos/{filename}"
+
+    # If it's just a filename, add the full URL
+    if not photo_url.startswith('/'):
+        return f"http://127.0.0.1:8000/photos/{photo_url}"
+
+    return photo_url
+
+
+# Photo serving route - MUST BE BEFORE OTHER ROUTES
+@app.get("/photos/{filename}")
+async def get_photo(filename: str):
+    """Serve photos with proper CORS headers"""
+    photo_path = Path("static/photos") / filename
+    if not photo_path.exists():
+        raise HTTPException(status_code=404, detail="Photo not found")
+
+    return FileResponse(
+        photo_path,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET",
+            "Access-Control-Allow-Headers": "*"
+        }
+    )
 
 
 # Startup event
@@ -424,13 +501,13 @@ async def get_current_user_info(current_user: dict = Depends(get_current_user)):
         created_at=current_user["created_at"]
     )
 
-# Add this route to your main.py file, around line 400 (after your auth routes)
 
+# User management routes
 @app.get("/users", response_model=List[UserResponse])
 async def get_users(
-    skip: int = Query(0, ge=0, description="Number of users to skip"),
-    limit: int = Query(50, ge=1, le=100, description="Number of users to return"),
-    current_user: dict = Depends(require_role([UserRole.ADMIN, UserRole.OWNER]))
+        skip: int = Query(0, ge=0, description="Number of users to skip"),
+        limit: int = Query(50, ge=1, le=100, description="Number of users to return"),
+        current_user: dict = Depends(require_role([UserRole.ADMIN, UserRole.OWNER]))
 ):
     """Get all users - Admin/Owner only"""
     if not db_available:
@@ -452,10 +529,11 @@ async def get_users(
 
     return users
 
+
 @app.get("/users/{user_id}", response_model=UserResponse)
 async def get_user_by_id(
-    user_id: str,
-    current_user: dict = Depends(require_role([UserRole.ADMIN, UserRole.OWNER]))
+        user_id: str,
+        current_user: dict = Depends(require_role([UserRole.ADMIN, UserRole.OWNER]))
 ):
     """Get a specific user by ID - Admin/Owner only"""
     if not db_available:
@@ -478,11 +556,12 @@ async def get_user_by_id(
         created_at=user_doc["created_at"]
     )
 
+
 @app.put("/users/{user_id}", response_model=UserResponse)
 async def update_user(
-    user_id: str,
-    user_update: UserUpdate,
-    current_user: dict = Depends(require_role([UserRole.ADMIN, UserRole.OWNER]))
+        user_id: str,
+        user_update: UserUpdate,
+        current_user: dict = Depends(require_role([UserRole.ADMIN, UserRole.OWNER]))
 ):
     """Update a user - Admin/Owner only"""
     if not db_available:
@@ -532,10 +611,11 @@ async def update_user(
         created_at=updated_user["created_at"]
     )
 
+
 @app.delete("/users/{user_id}")
 async def delete_user(
-    user_id: str,
-    current_user: dict = Depends(require_role([UserRole.OWNER]))  # Only owners can delete users
+        user_id: str,
+        current_user: dict = Depends(require_role([UserRole.OWNER]))  # Only owners can delete users
 ):
     """Delete a user - Owner only"""
     if not db_available:
@@ -559,19 +639,14 @@ async def delete_user(
     # Delete the user
     db.users.delete_one({"_id": ObjectId(user_id)})
 
-    # Optional: Also delete user's recipes, ratings, and favorites
-    # db.recipes.delete_many({"created_by": user_doc["username"]})
-    # db.ratings.delete_many({"user_id": user_id})
-    # db.favorites.delete_many({"user_id": user_id})
-
     return {"message": "User deleted successfully"}
 
 
 @app.put("/users/{user_id}/role", response_model=UserResponse)
 async def change_user_role(
-    user_id: str,
-    role_update: RoleUpdate,
-    current_user: dict = Depends(require_role([UserRole.ADMIN, UserRole.OWNER]))
+        user_id: str,
+        role_update: RoleUpdate,
+        current_user: dict = Depends(require_role([UserRole.ADMIN, UserRole.OWNER]))
 ):
     """Change a user's role - Admin/Owner only"""
     if not db_available:
@@ -617,11 +692,25 @@ async def change_user_role(
         created_at=updated_user["created_at"]
     )
 
-# Recipe routes
+
+# Recipe routes - Updated with photo support
 @app.post("/recipes", response_model=RecipeResponse)
-async def create_recipe(recipe: Recipe, current_user: dict = Depends(get_current_user)):
+async def create_recipe(
+        recipe_data: str = Form(...),
+        photo: Optional[UploadFile] = File(None),
+        current_user: dict = Depends(get_current_user)
+):
     if not db_available:
         raise HTTPException(status_code=503, detail="Database not available")
+
+    try:
+        # Parse the JSON recipe data from form
+        recipe_dict = json.loads(recipe_data)
+        recipe = Recipe(**recipe_dict)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid recipe data format")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid recipe data: {str(e)}")
 
     recipe_doc = {
         "recipe_name": recipe.recipe_name,
@@ -635,15 +724,29 @@ async def create_recipe(recipe: Recipe, current_user: dict = Depends(get_current
         "notes": recipe.notes or [],
         "dietary_restrictions": recipe.dietary_restrictions or [],
         "created_by": current_user["username"],
-        "created_at": datetime.now()
+        "created_at": datetime.now(),
+        "photo_url": None  # Will be updated if photo is provided
     }
 
+    # Insert recipe first to get the ID
     result = db.recipes.insert_one(recipe_doc)
-    recipe_doc["_id"] = result.inserted_id
+    recipe_id = str(result.inserted_id)
+
+    # Handle photo upload if provided
+    photo_url = None
+    if photo and photo.filename:
+        photo_url = await save_uploaded_photo(photo, recipe_id)
+        if photo_url:
+            # Update the recipe with the photo URL
+            db.recipes.update_one(
+                {"_id": result.inserted_id},
+                {"$set": {"photo_url": photo_url}}
+            )
+            recipe_doc["photo_url"] = photo_url
 
     ingredients = [Ingredient(**ing) for ing in recipe_doc["ingredients"]]
     return RecipeResponse(
-        id=str(recipe_doc["_id"]),
+        id=recipe_id,
         recipe_name=recipe_doc["recipe_name"],
         description=recipe_doc.get("description"),
         ingredients=ingredients,
@@ -655,7 +758,8 @@ async def create_recipe(recipe: Recipe, current_user: dict = Depends(get_current
         notes=recipe_doc.get("notes", []),
         dietary_restrictions=recipe_doc.get("dietary_restrictions", []),
         created_by=recipe_doc["created_by"],
-        created_at=recipe_doc["created_at"]
+        created_at=recipe_doc["created_at"],
+        photo_url=photo_url
     )
 
 
@@ -686,6 +790,10 @@ async def get_recipes(
 
     for recipe_doc in cursor:
         ingredients = [Ingredient(**ing) for ing in recipe_doc["ingredients"]]
+
+        # Fix photo URL for backward compatibility
+        photo_url = fix_photo_url(recipe_doc.get("photo_url"))
+
         recipes.append(RecipeResponse(
             id=str(recipe_doc["_id"]),
             recipe_name=recipe_doc["recipe_name"],
@@ -699,7 +807,8 @@ async def get_recipes(
             notes=recipe_doc.get("notes", []),
             dietary_restrictions=recipe_doc.get("dietary_restrictions", []),
             created_by=recipe_doc["created_by"],
-            created_at=recipe_doc["created_at"]
+            created_at=recipe_doc["created_at"],
+            photo_url=photo_url
         ))
 
     return recipes
@@ -723,6 +832,7 @@ class EnhancedRecipeResponse(BaseModel):
     total_ratings: int = 0
     user_has_favorited: bool = False
     user_rating: Optional[int] = None
+    photo_url: Optional[str] = None
 
 
 @app.get("/recipes/{recipe_id}", response_model=EnhancedRecipeResponse)
@@ -760,6 +870,10 @@ async def get_recipe(recipe_id: str, current_user: dict = Depends(get_current_us
     user_has_favorited = favorite is not None
 
     ingredients = [Ingredient(**ing) for ing in recipe_doc["ingredients"]]
+
+    # Fix photo URL for backward compatibility
+    photo_url = fix_photo_url(recipe_doc.get("photo_url"))
+
     return EnhancedRecipeResponse(
         id=str(recipe_doc["_id"]),
         recipe_name=recipe_doc["recipe_name"],
@@ -777,7 +891,8 @@ async def get_recipe(recipe_id: str, current_user: dict = Depends(get_current_us
         average_rating=average_rating,
         total_ratings=total_ratings,
         user_has_favorited=user_has_favorited,
-        user_rating=user_rating
+        user_rating=user_rating,
+        photo_url=photo_url
     )
 
 
@@ -804,6 +919,7 @@ class RecipeRatingsSummary(BaseModel):
     average_rating: float
     total_ratings: int
     rating_breakdown: dict
+
 
 class RatingUpdate(BaseModel):
     rating: Optional[int] = Field(None, ge=1, le=5, description="Rating from 1 to 5 stars")
@@ -976,9 +1092,6 @@ async def update_rating(
     )
 
 
-
-
-
 @app.delete("/recipes/{recipe_id}/ratings/{rating_id}")
 async def delete_rating(
         recipe_id: str,
@@ -1083,6 +1196,10 @@ async def get_user_favorites(current_user: dict = Depends(get_current_user)):
             recipe_doc = db.recipes.find_one({"_id": ObjectId(recipe_id)})
             if recipe_doc:
                 ingredients = [Ingredient(**ing) for ing in recipe_doc["ingredients"]]
+
+                # Fix photo URL for backward compatibility
+                photo_url = fix_photo_url(recipe_doc.get("photo_url"))
+
                 recipes.append(RecipeResponse(
                     id=str(recipe_doc["_id"]),
                     recipe_name=recipe_doc["recipe_name"],
@@ -1096,7 +1213,8 @@ async def get_user_favorites(current_user: dict = Depends(get_current_user)):
                     notes=recipe_doc.get("notes", []),
                     dietary_restrictions=recipe_doc.get("dietary_restrictions", []),
                     created_by=recipe_doc["created_by"],
-                    created_at=recipe_doc["created_at"]
+                    created_at=recipe_doc["created_at"],
+                    photo_url=photo_url
                 ))
         except InvalidId:
             continue
@@ -1117,21 +1235,7 @@ async def check_favorite_status(recipe_id: str, current_user: dict = Depends(get
     return {"is_favorited": favorite is not None}
 
 
-# AI ROUTES AND MODELS
-class ChatMessage(BaseModel):
-    message: str
-    conversation_history: Optional[List[dict]] = []
-
-
-class ChatResponse(BaseModel):
-    response: str
-    timestamp: datetime
-
-
-class RecipeSearchRequest(BaseModel):
-    ingredients: List[str]
-
-
+# Recipe Update Model and Route
 class RecipeUpdate(BaseModel):
     recipe_name: Optional[str] = None
     description: Optional[str] = None
@@ -1143,21 +1247,14 @@ class RecipeUpdate(BaseModel):
     cook_time: Optional[int] = None
     notes: Optional[List[str]] = None
     dietary_restrictions: Optional[List[str]] = None
+    photo_url: Optional[str] = None
 
-
-class FileUploadResponse(BaseModel):
-    success: bool
-    message: str
-    temp_id: Optional[str] = None
-    file_type: Optional[str] = None
-    parsed_content: Optional[str] = None
-    recipe_data: Optional[dict] = None
-    error: Optional[str] = None
 
 @app.put("/recipes/{recipe_id}", response_model=RecipeResponse)
 async def update_recipe(
         recipe_id: str,
-        recipe_update: RecipeUpdate,
+        recipe_data: str = Form(...),
+        photo: Optional[UploadFile] = File(None),
         current_user: dict = Depends(get_current_user)
 ):
     """Update an existing recipe"""
@@ -1176,6 +1273,15 @@ async def update_recipe(
     if (existing_recipe["created_by"] != current_user["username"] and
             current_user["role"] not in ["admin", "owner"]):
         raise HTTPException(status_code=403, detail="Not authorized to edit this recipe")
+
+    try:
+        # Parse the JSON recipe data from form
+        recipe_dict = json.loads(recipe_data)
+        recipe_update = RecipeUpdate(**recipe_dict)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid recipe data format")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid recipe data: {str(e)}")
 
     # Build update document
     update_doc = {"updated_at": datetime.now()}
@@ -1201,13 +1307,19 @@ async def update_recipe(
     if recipe_update.dietary_restrictions is not None:
         update_doc["dietary_restrictions"] = recipe_update.dietary_restrictions
 
+    # Handle photo upload if provided
+    if photo and photo.filename:
+        photo_url = await save_uploaded_photo(photo, recipe_id)
+        if photo_url:
+            update_doc["photo_url"] = photo_url
+
     # Update the recipe
     result = db.recipes.update_one(
         {"_id": ObjectId(recipe_id)},
         {"$set": update_doc}
     )
 
-    if result.modified_count == 0:
+    if result.modified_count == 0 and not photo:
         raise HTTPException(status_code=400, detail="No changes were made")
 
     # Return the updated recipe
@@ -1227,8 +1339,65 @@ async def update_recipe(
         notes=updated_recipe.get("notes", []),
         dietary_restrictions=updated_recipe.get("dietary_restrictions", []),
         created_by=updated_recipe["created_by"],
-        created_at=updated_recipe["created_at"]
+        created_at=updated_recipe["created_at"],
+        photo_url=updated_recipe.get("photo_url")
     )
+
+
+@app.delete("/recipes/{recipe_id}")
+async def delete_recipe(
+        recipe_id: str,
+        current_user: dict = Depends(get_current_user)
+):
+    """Delete a recipe"""
+    if not db_available:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    if not ObjectId.is_valid(recipe_id):
+        raise HTTPException(status_code=400, detail="Invalid recipe ID")
+
+    recipe = db.recipes.find_one({"_id": ObjectId(recipe_id)})
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    # Check permissions
+    if (recipe["created_by"] != current_user["username"] and
+            current_user["role"] not in ["admin", "owner"]):
+        raise HTTPException(status_code=403, detail="Not authorized to delete this recipe")
+
+    # Delete associated data
+    db.ratings.delete_many({"recipe_id": recipe_id})
+    db.favorites.delete_many({"recipe_id": recipe_id})
+
+    # Delete the recipe
+    db.recipes.delete_one({"_id": ObjectId(recipe_id)})
+
+    return {"message": "Recipe deleted successfully"}
+
+
+# AI ROUTES AND MODELS
+class ChatMessage(BaseModel):
+    message: str
+    conversation_history: Optional[List[dict]] = []
+
+
+class ChatResponse(BaseModel):
+    response: str
+    timestamp: datetime
+
+
+class RecipeSearchRequest(BaseModel):
+    ingredients: List[str]
+
+
+class FileUploadResponse(BaseModel):
+    success: bool
+    message: str
+    temp_id: Optional[str] = None
+    file_type: Optional[str] = None
+    parsed_content: Optional[str] = None
+    recipe_data: Optional[dict] = None
+    error: Optional[str] = None
 
 
 @app.get("/ai/status")
@@ -1553,6 +1722,42 @@ async def cleanup_temp_recipes():
     except Exception as e:
         logger.error(f"Error during cleanup: {e}")
         raise HTTPException(status_code=500, detail="Error during cleanup")
+
+
+# Photo management utility routes
+@app.post("/admin/fix-photo-urls")
+async def fix_existing_photo_urls(current_user: dict = Depends(require_role([UserRole.ADMIN, UserRole.OWNER]))):
+    """Fix existing photo URLs in the database - Admin/Owner only"""
+    if not db_available:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    try:
+        # Find all recipes with old photo URLs
+        recipes_with_photos = list(db.recipes.find({"photo_url": {"$exists": True, "$ne": None}}))
+
+        fixed_count = 0
+        for recipe in recipes_with_photos:
+            old_url = recipe.get("photo_url")
+            if old_url and old_url.startswith("/static/photos/"):
+                # Extract filename and create new URL
+                filename = old_url.replace("/static/photos/", "")
+                new_url = f"http://127.0.0.1:8000/photos/{filename}"
+
+                # Update the recipe
+                db.recipes.update_one(
+                    {"_id": recipe["_id"]},
+                    {"$set": {"photo_url": new_url}}
+                )
+                fixed_count += 1
+
+        return {
+            "message": f"Fixed {fixed_count} photo URLs",
+            "total_recipes_checked": len(recipes_with_photos)
+        }
+
+    except Exception as e:
+        logger.error(f"Error fixing photo URLs: {e}")
+        raise HTTPException(status_code=500, detail="Error fixing photo URLs")
 
 
 # Utility routes

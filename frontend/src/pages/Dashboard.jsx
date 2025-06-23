@@ -70,20 +70,20 @@ const Dashboard = () => {
             color: '#666',
             marginBottom: '1rem'
           }}>
-            Hello <strong style={{ color: '#003366' }}>{user?.username}</strong>!
-            You're logged in as <span style={{
-              background: '#0066cc',
-              color: 'white',
-              padding: '4px 8px',
-              borderRadius: '6px',
-              fontSize: '0.9rem',
-              textTransform: 'uppercase',
-              fontWeight: 'bold'
-            }}>{user?.role}</span>
+            Hello, <strong style={{ color: '#003366' }}>{user?.username}</strong>!
+            {/*You're logged in as <span style={{*/}
+            {/*  background: '#0066cc',*/}
+            {/*  color: 'white',*/}
+            {/*  padding: '4px 8px',*/}
+            {/*  borderRadius: '6px',*/}
+            {/*  fontSize: '0.9rem',*/}
+            {/*  textTransform: 'uppercase',*/}
+            {/*  fontWeight: 'bold'*/}
+            {/*}}>{user?.role}</span>*/}
           </p>
-          <p style={{ color: '#666' }}>
-            Email: {user?.email}
-          </p>
+          {/*<p style={{ color: '#666' }}>*/}
+          {/*  Email: {user?.email}*/}
+          {/*</p>*/}
         </div>
 
         {/* Quick Actions */}

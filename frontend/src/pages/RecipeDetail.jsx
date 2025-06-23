@@ -1,4 +1,4 @@
-// RecipeDetail.jsx - Updated with Duplicate Recipe functionality
+// RecipeDetail.jsx - Updated with Duplicate Recipe functionality and photo display
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -6,7 +6,7 @@ import RatingsAndReviews from '../components/RatingsAndReviews';
 import FavoriteButton from '../components/FavoriteButton';
 import RecipeForm from '../components/recipe/RecipeForm';
 import axios from 'axios';
-import { Fraction } from 'fraction.js';
+// Remove Fraction.js import - we'll use a simpler approach
 
 // Format genre display name
 const formatGenreName = (genre) => {
@@ -53,6 +53,7 @@ const RecipeDetail = () => {
       console.log('Prep Time:', recipe.prep_time);
       console.log('Cook Time:', recipe.cook_time);
       console.log('Dietary Restrictions:', recipe.dietary_restrictions);
+      console.log('Photo URL:', recipe.photo_url);
       console.log('Full Recipe Object:', JSON.stringify(recipe, null, 2));
     }
   }, [recipe]);
@@ -91,37 +92,83 @@ const RecipeDetail = () => {
     fetchRecipeData();
   }, [id, isAuthenticated, navigate, apiBaseUrl]);
 
-  // Fraction utilities
+  // Fraction utilities - Simple approach without external library
   const formatQuantity = (value) => {
     if (value === undefined || value === null || value === '') return '';
 
     try {
+      const numValue = typeof value === 'number' ? value : parseFloat(value);
+
       // Handle integer values
-      if (Number.isInteger(Number(value))) {
-        return String(value);
+      if (Number.isInteger(numValue)) {
+        return String(numValue);
       }
 
-      // Convert to fraction
-      const frac = new Fraction(value);
-
-      // If it's a proper fraction (less than 1)
-      if (frac.compare(1) < 0) {
-        return `${frac.n}/${frac.d}`;
-      }
-
-      // If it's an improper fraction (greater than or equal to 1)
-      const wholePart = Math.floor(frac.valueOf());
-      const fractionalPart = frac.subtract(wholePart);
-
-      if (fractionalPart.valueOf() === 0) {
-        return String(wholePart);
-      }
-
-      return `${wholePart} ${fractionalPart.n}/${fractionalPart.d}`;
+      // Convert to simple fraction
+      return convertDecimalToMixedNumber(numValue);
     } catch (e) {
       console.error("Error formatting fraction:", e);
       return String(value);
     }
+  };
+
+  const convertDecimalToMixedNumber = (decimal) => {
+    try {
+      if (decimal === 0) return "0";
+      if (decimal < 0) return String(decimal);
+
+      const wholePart = Math.floor(decimal);
+      const fractionalPart = decimal - wholePart;
+
+      if (fractionalPart === 0) {
+        return String(wholePart);
+      }
+
+      const fraction = decimalToFraction(fractionalPart);
+
+      if (wholePart === 0) {
+        return fraction;
+      } else {
+        return `${wholePart} ${fraction}`;
+      }
+    } catch (e) {
+      console.error("Error converting to mixed number:", e);
+      return String(decimal);
+    }
+  };
+
+  const decimalToFraction = (decimal) => {
+    // Common fractions lookup
+    const commonFractions = {
+      0.125: "1/8",
+      0.25: "1/4",
+      0.375: "3/8",
+      0.5: "1/2",
+      0.625: "5/8",
+      0.75: "3/4",
+      0.875: "7/8",
+      0.333: "1/3",
+      0.667: "2/3"
+    };
+
+    // Check for common fractions first
+    for (const [dec, frac] of Object.entries(commonFractions)) {
+      if (Math.abs(decimal - parseFloat(dec)) < 0.01) {
+        return frac;
+      }
+    }
+
+    // Simple fraction conversion
+    const tolerance = 0.01;
+    for (let denominator = 2; denominator <= 16; denominator++) {
+      const numerator = Math.round(decimal * denominator);
+      if (Math.abs(decimal - numerator / denominator) < tolerance) {
+        return `${numerator}/${denominator}`;
+      }
+    }
+
+    // If no simple fraction found, return decimal rounded to 2 places
+    return decimal.toFixed(2);
   };
 
   // Helper functions
@@ -259,23 +306,8 @@ const RecipeDetail = () => {
         return String(scaledValue);
       }
 
-      // Convert to fraction
-      const frac = new Fraction(scaledValue);
-
-      // If it's a proper fraction (less than 1)
-      if (frac.compare(1) < 0) {
-        return `${frac.n}/${frac.d}`;
-      }
-
-      // If it's an improper fraction (greater than or equal to 1)
-      const wholePart = Math.floor(frac.valueOf());
-      const fractionalPart = frac.subtract(wholePart);
-
-      if (fractionalPart.valueOf() === 0) {
-        return String(wholePart);
-      }
-
-      return `${wholePart} ${fractionalPart.n}/${fractionalPart.d}`;
+      // Convert to mixed number using our simple function
+      return convertDecimalToMixedNumber(scaledValue);
     } catch (e) {
       console.error("Error formatting scaled quantity:", e);
       return String(originalQuantity * servingMultiplier);
@@ -450,15 +482,16 @@ const RecipeDetail = () => {
     borderRadius: '15px',
     padding: '2rem',
     marginBottom: '2rem',
-    boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)',
-    textAlign: 'center'
+    boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)'
   };
 
   const titleStyle = {
     color: '#003366',
     fontSize: '2.5rem',
     marginBottom: '1rem',
-    lineHeight: '1.2'
+    lineHeight: '1.2',
+    textAlign: 'center',
+    margin: 0
   };
 
   const badgeContainerStyle = {
@@ -565,46 +598,150 @@ const RecipeDetail = () => {
 
         {/* Recipe Header */}
         <div style={headerContainerStyle}>
+          {/* Top Header Section with Photo, Title, and Favorite Button */}
           <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            marginBottom: '1rem'
+            display: 'grid',
+            gridTemplateColumns: (recipe.photo_url && recipe.photo_url.trim()) ? '200px 1fr auto' : '1fr auto',
+            gap: '2rem',
+            alignItems: 'center',
+            marginBottom: recipe.photo_url && recipe.photo_url.trim() ? '1rem' : '2rem'
           }}>
-            <h1 style={titleStyle}>{recipe.recipe_name}</h1>
-            <FavoriteButton
-              recipeId={recipe.id}
-              isFavorited={favoriteStatus}
-              onToggle={handleFavoriteToggle}
-            />
-          </div>
-
-          <div style={badgeContainerStyle}>
-            <div style={genreBadgeStyle}>
-              {getGenreEmoji(recipe.genre)} {formatGenreName(recipe.genre)}
-            </div>
-
-            {/* Dietary Restrictions Badges - Side by side */}
-            {recipe.dietary_restrictions && recipe.dietary_restrictions.length > 0 && (
+            {/* Recipe Photo - Left Side (only show if photo exists) */}
+            {recipe.photo_url && recipe.photo_url.trim() && (
               <div style={{
                 display: 'flex',
-                flexWrap: 'wrap',
                 justifyContent: 'center',
-                gap: '6px',
-                marginTop: '8px'
+                alignItems: 'center'
               }}>
-                {recipe.dietary_restrictions.map(restriction => (
-                  <div key={restriction} style={dietaryBadgeStyle}>
-                    {formatDietaryRestrictionName(restriction)}
-                  </div>
-                ))}
+                <img
+                  src={recipe.photo_url}
+                  alt={recipe.recipe_name}
+                  style={{
+                    width: '180px',
+                    height: '180px',
+                    objectFit: 'cover',
+                    borderRadius: '15px',
+                    border: '3px solid #003366',
+                    boxShadow: '0 4px 12px rgba(0, 51, 102, 0.2)'
+                  }}
+                  onError={(e) => {
+                    // Hide image container if it fails to load
+                    console.log('Failed to load recipe image:', recipe.photo_url);
+                    e.target.parentElement.style.display = 'none';
+                  }}
+                  onLoad={() => {
+                    console.log('Successfully loaded recipe image:', recipe.photo_url);
+                  }}
+                />
               </div>
             )}
 
-            <div style={servingBadgeStyle}>
-              👥 Serves {Math.round(recipe.serving_size * servingMultiplier)}
+            {/* Recipe Title - Conditional Positioning */}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              alignItems: recipe.photo_url && recipe.photo_url.trim() ? 'center' : 'flex-start',
+              textAlign: recipe.photo_url && recipe.photo_url.trim() ? 'center' : 'left'
+            }}>
+              <h1 style={{
+                ...titleStyle,
+                fontSize: recipe.photo_url && recipe.photo_url.trim() ? '2.2rem' : '2.5rem',
+                margin: '0 0 1rem 0',
+                textAlign: recipe.photo_url && recipe.photo_url.trim() ? 'center' : 'left'
+              }}>
+                {recipe.recipe_name}
+              </h1>
+
+              {/* Genre Badge - Directly under title when photo present */}
+              {recipe.photo_url && recipe.photo_url.trim() && (
+                <div style={{
+                  backgroundColor: getGenreColor(recipe?.genre),
+                  color: 'white',
+                  padding: '8px 16px',
+                  borderRadius: '20px',
+                  fontSize: '1rem',
+                  fontWeight: '500'
+                }}>
+                  {getGenreEmoji(recipe.genre)} {formatGenreName(recipe.genre)}
+                </div>
+              )}
+            </div>
+
+            {/* Favorite Button - Right Side */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center'
+            }}>
+              <FavoriteButton
+                recipeId={recipe.id}
+                isFavorited={favoriteStatus}
+                onToggle={handleFavoriteToggle}
+              />
             </div>
           </div>
+
+          {/* Badge Container - Only show if no photo (genre badge is above when photo exists) */}
+          {!(recipe.photo_url && recipe.photo_url.trim()) && (
+            <div style={badgeContainerStyle}>
+              <div style={genreBadgeStyle}>
+                {getGenreEmoji(recipe.genre)} {formatGenreName(recipe.genre)}
+              </div>
+
+              {/* Dietary Restrictions Badges - Side by side */}
+              {recipe.dietary_restrictions && recipe.dietary_restrictions.length > 0 && (
+                <div style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  marginTop: '8px'
+                }}>
+                  {recipe.dietary_restrictions.map(restriction => (
+                    <div key={restriction} style={dietaryBadgeStyle}>
+                      {formatDietaryRestrictionName(restriction)}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={servingBadgeStyle}>
+                👥 Serves {Math.round(recipe.serving_size * servingMultiplier)}
+              </div>
+            </div>
+          )}
+
+          {/* Dietary Restrictions and Serving Size - Show when photo exists */}
+          {recipe.photo_url && recipe.photo_url.trim() && (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '1rem',
+              marginBottom: '1.5rem'
+            }}>
+              {/* Dietary Restrictions Badges */}
+              {recipe.dietary_restrictions && recipe.dietary_restrictions.length > 0 && (
+                <div style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  justifyContent: 'center',
+                  gap: '6px'
+                }}>
+                  {recipe.dietary_restrictions.map(restriction => (
+                    <div key={restriction} style={dietaryBadgeStyle}>
+                      {formatDietaryRestrictionName(restriction)}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={servingBadgeStyle}>
+                👥 Serves {Math.round(recipe.serving_size * servingMultiplier)}
+              </div>
+            </div>
+          )}
 
           <div style={metaStyle}>
             <span>👨‍🍳 Created by {recipe.created_by}</span>

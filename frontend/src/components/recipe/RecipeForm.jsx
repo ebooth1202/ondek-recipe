@@ -1,5 +1,5 @@
-// RecipeForm.jsx - Updated to handle AI recipe auto-population
-import React, { useState, useEffect } from 'react';
+// RecipeForm.jsx - Updated to handle AI recipe auto-population and photo upload
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import axios from 'axios';
@@ -29,6 +29,9 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
   const { isAuthenticated, apiBaseUrl } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const fileInputRef = useRef(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -49,6 +52,13 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
 
   // Add notes state
   const [notes, setNotes] = useState(['']);
+
+  // Photo state
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const [showCamera, setShowCamera] = useState(false);
+  const [cameraStream, setCameraStream] = useState(null);
+  const [cameraError, setCameraError] = useState('');
 
   // Options state
   const [availableUnits, setAvailableUnits] = useState([
@@ -79,6 +89,84 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
       navigate('/login');
     }
   }, [isAuthenticated, navigate]);
+
+  // Cleanup camera stream on unmount
+  useEffect(() => {
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [cameraStream]);
+
+  // Photo handling functions
+  const handleFileSelect = (event) => {
+    const file = event.target.files[0];
+    if (file && file.type.startsWith('image/')) {
+      setPhotoFile(file);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setPhotoPreview(e.target.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const startCamera = async () => {
+    try {
+      setCameraError('');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' } // Use rear camera if available
+      });
+      setCameraStream(stream);
+      setShowCamera(true);
+
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      }, 100);
+    } catch (err) {
+      console.error('Error accessing camera:', err);
+      setCameraError('Unable to access camera. Please check permissions or use file upload instead.');
+    }
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current && canvasRef.current) {
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0);
+
+      canvas.toBlob((blob) => {
+        const file = new File([blob], 'recipe-photo.jpg', { type: 'image/jpeg' });
+        setPhotoFile(file);
+        setPhotoPreview(canvas.toDataURL());
+        stopCamera();
+      }, 'image/jpeg', 0.8);
+    }
+  };
+
+  const stopCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+    setShowCamera(false);
+  };
+
+  const removePhoto = () => {
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
 
   // NEW: Handle AI recipe auto-population from temp_id
   useEffect(() => {
@@ -182,6 +270,11 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
         setNotes([...existingRecipe.notes]);
       } else {
         setNotes(['']);
+      }
+
+      // Load existing photo if available
+      if (existingRecipe.photo_url && existingRecipe.photo_url.trim()) {
+        setPhotoPreview(existingRecipe.photo_url);
       }
 
       console.log('Form data set for edit mode');
@@ -807,6 +900,27 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
         dietary_restrictions: formData.dietary_restrictions
       };
 
+      // Determine if we need to send as FormData (with photo) or JSON (without photo)
+      let requestData;
+      let requestHeaders = {};
+
+      if (photoFile) {
+        // Create FormData for file upload
+        const formDataToSend = new FormData();
+        formDataToSend.append('recipe_data', JSON.stringify(recipeData));
+        formDataToSend.append('photo', photoFile);
+        requestData = formDataToSend;
+        requestHeaders = {
+          'Content-Type': 'multipart/form-data'
+        };
+      } else {
+        // Send as regular JSON (original format)
+        requestData = recipeData;
+        requestHeaders = {
+          'Content-Type': 'application/json'
+        };
+      }
+
       // Check if this is a duplication attempt by checking URL parameters
       const urlParams = new URLSearchParams(location.search);
       const isDuplicating = urlParams.get('duplicate') === 'true';
@@ -869,32 +983,94 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
       if (editMode && existingRecipe) {
         // Update existing recipe
         console.log('Updating recipe:', recipeData);
-        response = await axios.put(`${apiBaseUrl}/recipes/${existingRecipe.id}`, recipeData);
-        setSuccess('Recipe updated successfully! 🎉');
+        try {
+          response = await axios.put(`${apiBaseUrl}/recipes/${existingRecipe.id}`, requestData, {
+            headers: requestHeaders
+          });
+          setSuccess('Recipe updated successfully! 🎉');
+        } catch (error) {
+          // If FormData fails and we have a photo, try without photo as fallback
+          if (photoFile && error.response?.status >= 400) {
+            console.warn('Photo upload failed, trying without photo...');
+            setError('Photo upload not supported yet. Saving recipe without photo...');
+            response = await axios.put(`${apiBaseUrl}/recipes/${existingRecipe.id}`, recipeData, {
+              headers: {
+                'Content-Type': 'application/json'
+              }
+            });
+            setSuccess('Recipe updated successfully! (Photo could not be saved - feature coming soon) 🎉');
+            // Clear the photo from state since it wasn't saved
+            setPhotoFile(null);
+            setPhotoPreview(null);
+          } else {
+            throw error; // Re-throw if it's not a photo-related error
+          }
+        }
       } else {
         // Create new recipe
         console.log('Creating recipe:', recipeData);
-        response = await axios.post(`${apiBaseUrl}/recipes`, recipeData);
+        try {
+          response = await axios.post(`${apiBaseUrl}/recipes`, requestData, {
+            headers: requestHeaders
+          });
 
-        if (tempId) {
-          setSuccess('✨ Recipe from Ralph saved successfully! 🎉');
-        } else {
-          setSuccess('Recipe created successfully! 🎉');
+          if (tempId) {
+            setSuccess('✨ Recipe from Ralph saved successfully! 🎉');
+          } else {
+            setSuccess('Recipe created successfully! 🎉');
+          }
+
+          // Reset form for new recipe
+          setFormData({
+            recipe_name: '',
+            description: '',
+            serving_size: 1,
+            genre: 'dinner',
+            prep_time: 0,
+            cook_time: 0,
+            dietary_restrictions: []
+          });
+          setIngredients([{ name: '', quantity: '', unit: 'cup' }]);
+          setInstructions(['']);
+          setNotes(['']);
+          setPhotoFile(null);
+          setPhotoPreview(null);
+        } catch (error) {
+          // If FormData fails and we have a photo, try without photo as fallback
+          if (photoFile && error.response?.status >= 400) {
+            console.warn('Photo upload failed, trying without photo...');
+            setError('Photo upload not supported yet. Saving recipe without photo...');
+            response = await axios.post(`${apiBaseUrl}/recipes`, recipeData, {
+              headers: {
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (tempId) {
+              setSuccess('✨ Recipe from Ralph saved successfully! (Photo could not be saved - feature coming soon) 🎉');
+            } else {
+              setSuccess('Recipe created successfully! (Photo could not be saved - feature coming soon) 🎉');
+            }
+
+            // Reset form for new recipe
+            setFormData({
+              recipe_name: '',
+              description: '',
+              serving_size: 1,
+              genre: 'dinner',
+              prep_time: 0,
+              cook_time: 0,
+              dietary_restrictions: []
+            });
+            setIngredients([{ name: '', quantity: '', unit: 'cup' }]);
+            setInstructions(['']);
+            setNotes(['']);
+            setPhotoFile(null);
+            setPhotoPreview(null);
+          } else {
+            throw error; // Re-throw if it's not a photo-related error
+          }
         }
-
-        // Reset form for new recipe
-        setFormData({
-          recipe_name: '',
-          description: '',
-          serving_size: 1,
-          genre: 'dinner',
-          prep_time: 0,
-          cook_time: 0,
-          dietary_restrictions: []
-        });
-        setIngredients([{ name: '', quantity: '', unit: 'cup' }]);
-        setInstructions(['']);
-        setNotes(['']);
       }
 
       // Call the callback if provided
@@ -1597,6 +1773,193 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
               }}>
                 {parseInt(formData.prep_time || 0) + parseInt(formData.cook_time || 0)}
               </div>
+            </div>
+          </div>
+
+          {/* Photo Upload Section */}
+          <div style={{ marginBottom: '2rem' }}>
+            <label style={labelStyle}>Recipe Photo (Optional)</label>
+
+            {/* Photo Preview */}
+            {photoPreview && (
+              <div style={{
+                marginBottom: '1rem',
+                padding: '1rem',
+                border: '2px solid #003366',
+                borderRadius: '10px',
+                backgroundColor: '#f8f9fa'
+              }}>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-start',
+                  marginBottom: '0.5rem'
+                }}>
+                  <span style={{ fontWeight: '500', color: '#003366' }}>📸 Recipe Photo Preview</span>
+                  <button
+                    type="button"
+                    onClick={removePhoto}
+                    style={{
+                      ...removeButtonStyle,
+                      padding: '4px 8px',
+                      fontSize: '12px'
+                    }}
+                  >
+                    ✕ Remove
+                  </button>
+                </div>
+                <img
+                  src={photoPreview}
+                  alt="Recipe preview"
+                  style={{
+                    width: '100%',
+                    maxWidth: '300px',
+                    height: 'auto',
+                    borderRadius: '8px',
+                    border: '1px solid #ddd'
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Camera Error */}
+            {cameraError && (
+              <div style={{
+                background: '#f8d7da',
+                color: '#721c24',
+                padding: '0.75rem',
+                borderRadius: '8px',
+                marginBottom: '1rem',
+                border: '1px solid #f5c6cb',
+                fontSize: '0.9rem'
+              }}>
+                {cameraError}
+              </div>
+            )}
+
+            {/* Camera Interface */}
+            {showCamera && (
+              <div style={{
+                marginBottom: '1rem',
+                padding: '1rem',
+                border: '2px solid #003366',
+                borderRadius: '10px',
+                backgroundColor: '#f8f9fa'
+              }}>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '1rem'
+                }}>
+                  <span style={{ fontWeight: '500', color: '#003366' }}>📷 Camera Active</span>
+                  <button
+                    type="button"
+                    onClick={stopCamera}
+                    style={{
+                      ...removeButtonStyle,
+                      padding: '4px 8px',
+                      fontSize: '12px'
+                    }}
+                  >
+                    ✕ Close
+                  </button>
+                </div>
+
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  style={{
+                    width: '100%',
+                    maxWidth: '400px',
+                    height: 'auto',
+                    borderRadius: '8px',
+                    border: '1px solid #ddd',
+                    marginBottom: '1rem'
+                  }}
+                />
+
+                <div style={{ textAlign: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={capturePhoto}
+                    style={{
+                      ...addButtonStyle,
+                      backgroundColor: '#007bff',
+                      fontSize: '16px',
+                      padding: '12px 24px'
+                    }}
+                  >
+                    📸 Take Photo
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Upload Options */}
+            {!showCamera && (
+              <div style={{
+                display: 'flex',
+                gap: '1rem',
+                flexWrap: 'wrap'
+              }}>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{
+                    ...addButtonStyle,
+                    backgroundColor: '#17a2b8',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem'
+                  }}
+                >
+                  📁 Choose from File
+                </button>
+
+                <button
+                  type="button"
+                  onClick={startCamera}
+                  style={{
+                    ...addButtonStyle,
+                    backgroundColor: '#007bff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem'
+                  }}
+                >
+                  📷 Take Photo
+                </button>
+              </div>
+            )}
+
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleFileSelect}
+              style={{ display: 'none' }}
+            />
+
+            {/* Hidden canvas for photo capture */}
+            <canvas
+              ref={canvasRef}
+              style={{ display: 'none' }}
+            />
+
+            <div style={{
+              fontSize: '0.8rem',
+              color: '#666',
+              marginTop: '0.5rem',
+              fontStyle: 'italic'
+            }}>
+              💡 Add a photo to make your recipe more appealing! Supports JPG, PNG, and other image formats.
+              <br />
+              <span style={{ fontSize: '0.75rem', color: '#888' }}>
+                Note: Photo upload is experimental. If it fails, your recipe will be saved without the photo.
+              </span>
             </div>
           </div>
 
