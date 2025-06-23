@@ -29,6 +29,9 @@ const Users = () => {
   const [showChangeRoleModal, setShowChangeRoleModal] = useState(false);
   const [newRole, setNewRole] = useState('');
 
+  // Check if user is admin/owner
+  const isAdminOrOwner = hasRole(['admin', 'owner']);
+
   // Check authentication and fetch users
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -36,15 +39,14 @@ const Users = () => {
       return;
     }
 
-    // Only admins and owners can view all users
-    if (!hasRole(['admin', 'owner'])) {
-      // For regular users, only show their own profile
+    if (isAdminOrOwner) {
+      // Admins and owners can view all users
+      fetchUsers();
+    } else {
+      // Regular users only see their own profile
       setUsers([user]);
       setLoading(false);
-      return;
     }
-
-    fetchUsers();
   }, [isAuthenticated, navigate, hasRole, user]);
 
   const fetchUsers = async () => {
@@ -141,7 +143,7 @@ const Users = () => {
         setUser(response.data);
       }
 
-      setSuccessMessage('User updated successfully!');
+      setSuccessMessage('Profile updated successfully!');
       setTimeout(() => setSuccessMessage(''), 3000);
 
       // Exit edit mode
@@ -149,7 +151,7 @@ const Users = () => {
 
     } catch (error) {
       console.error('Error updating user:', error);
-      setError(error.response?.data?.detail || 'Failed to update user');
+      setError(error.response?.data?.detail || 'Failed to update profile');
       setTimeout(() => setError(''), 5000);
     }
   };
@@ -247,7 +249,7 @@ const Users = () => {
   };
 
   const contentContainerStyle = {
-    maxWidth: '1200px',
+    maxWidth: isAdminOrOwner ? '1200px' : '800px',
     margin: '0 auto'
   };
 
@@ -269,7 +271,7 @@ const Users = () => {
 
   const buttonContainerStyle = {
     display: 'flex',
-    justifyContent: 'space-between',
+    justifyContent: isAdminOrOwner ? 'space-between' : 'flex-end',
     marginBottom: '2rem'
   };
 
@@ -287,6 +289,21 @@ const Users = () => {
     gap: '0.5rem'
   };
 
+  const editButtonStyle = {
+    backgroundColor: '#28a745',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '0.75rem 1.5rem',
+    cursor: 'pointer',
+    fontWeight: '500',
+    fontSize: '1rem',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+    marginRight: '1rem'
+  };
+
   const tableContainerStyle = {
     background: 'white',
     border: '2px solid #003366',
@@ -294,6 +311,15 @@ const Users = () => {
     padding: '2rem',
     boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)',
     overflowX: 'auto'
+  };
+
+  const profileCardStyle = {
+    background: 'white',
+    border: '2px solid #003366',
+    borderRadius: '15px',
+    padding: '2rem',
+    boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)',
+    marginBottom: '2rem'
   };
 
   const tableStyle = {
@@ -374,7 +400,8 @@ const Users = () => {
     padding: '0.75rem',
     borderRadius: '8px',
     border: '1px solid #ccc',
-    fontSize: '1rem'
+    fontSize: '1rem',
+    boxSizing: 'border-box'
   };
 
   const selectStyle = {
@@ -437,6 +464,34 @@ const Users = () => {
     marginBottom: '2rem'
   };
 
+  const profileInfoStyle = {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '2rem',
+    marginBottom: '1.5rem'
+  };
+
+  const infoItemStyle = {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.5rem'
+  };
+
+  const labelStyle = {
+    color: '#003366',
+    fontWeight: '600',
+    fontSize: '0.9rem'
+  };
+
+  const valueStyle = {
+    color: '#333',
+    fontSize: '1rem',
+    padding: '0.5rem',
+    backgroundColor: '#f8f9fa',
+    borderRadius: '4px',
+    border: '1px solid #dee2e6'
+  };
+
   if (loading) {
     return (
       <div style={containerStyle}>
@@ -474,8 +529,15 @@ const Users = () => {
       <div style={contentContainerStyle}>
         {/* Header */}
         <div style={headerStyle}>
-          <h1 style={h1Style}>👥 User Management</h1>
-          <p>Manage user accounts, roles, and permissions</p>
+          <h1 style={h1Style}>
+            {isAdminOrOwner ? '👥 User Management' : '👤 My Profile'}
+          </h1>
+          <p>
+            {isAdminOrOwner
+              ? 'Manage user accounts, roles, and permissions'
+              : 'View and edit your profile information'
+            }
+          </p>
         </div>
 
         {/* Messages */}
@@ -488,6 +550,63 @@ const Users = () => {
         {successMessage && (
           <div style={messageStyle(false)}>
             {successMessage}
+          </div>
+        )}
+
+        {/* Profile Card for Regular Users (when not editing) */}
+        {!isAdminOrOwner && !editMode && (
+          <div style={profileCardStyle}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+              <h2 style={{ color: '#003366', margin: 0 }}>Profile Information</h2>
+              <button
+                style={editButtonStyle}
+                onClick={() => startEditingUser(user)}
+              >
+                <span>✏️</span> Edit Profile
+              </button>
+            </div>
+
+            <div style={profileInfoStyle}>
+              <div style={infoItemStyle}>
+                <span style={labelStyle}>Username</span>
+                <span style={valueStyle}>{user.username}</span>
+              </div>
+
+              <div style={infoItemStyle}>
+                <span style={labelStyle}>Email</span>
+                <span style={valueStyle}>{user.email}</span>
+              </div>
+
+              <div style={infoItemStyle}>
+                <span style={labelStyle}>First Name</span>
+                <span style={valueStyle}>{user.first_name || 'Not set'}</span>
+              </div>
+
+              <div style={infoItemStyle}>
+                <span style={labelStyle}>Last Name</span>
+                <span style={valueStyle}>{user.last_name || 'Not set'}</span>
+              </div>
+
+              <div style={infoItemStyle}>
+                <span style={labelStyle}>Role</span>
+                <div>
+                  <span style={roleBadgeStyle(user.role)}>
+                    {user.role}
+                  </span>
+                </div>
+              </div>
+
+              <div style={infoItemStyle}>
+                <span style={labelStyle}>Member Since</span>
+                <span style={valueStyle}>
+                  {new Date(user.created_at).toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  })}
+                </span>
+              </div>
+            </div>
           </div>
         )}
 
@@ -586,7 +705,7 @@ const Users = () => {
 
         {/* Action Buttons */}
         <div style={buttonContainerStyle}>
-          {hasRole(['admin', 'owner']) && (
+          {isAdminOrOwner && (
             <button
               style={buttonStyle}
               onClick={() => {
@@ -605,92 +724,92 @@ const Users = () => {
           </button>
         </div>
 
-        {/* Users Table */}
-        <div style={tableContainerStyle}>
-          <h2 style={{ color: '#003366', marginBottom: '1.5rem' }}>
-            {hasRole(['admin', 'owner']) ? 'System Users' : 'Your Account'}
-          </h2>
+        {/* Users Table - Only for Admins/Owners */}
+        {isAdminOrOwner && (
+          <div style={tableContainerStyle}>
+            <h2 style={{ color: '#003366', marginBottom: '1.5rem' }}>System Users</h2>
 
-          <table style={tableStyle}>
-            <thead>
-              <tr>
-                <th style={thStyle}>Username</th>
-                <th style={thStyle}>Name</th>
-                <th style={thStyle}>Email</th>
-                <th style={thStyle}>Role</th>
-                <th style={thStyle}>Created At</th>
-                <th style={thStyle}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map(u => (
-                <tr key={u.id}>
-                  <td style={tdStyle}>{u.username}</td>
-                  <td style={tdStyle}>{getDisplayName(u)}</td>
-                  <td style={tdStyle}>{u.email}</td>
-                  <td style={tdStyle}>
-                    <span style={roleBadgeStyle(u.role)}>
-                      {u.role}
-                    </span>
-                  </td>
-                  <td style={tdStyle}>
-                    {new Date(u.created_at).toLocaleDateString()}
-                  </td>
-                  <td style={tdStyle}>
-                    <div style={{ display: 'flex' }}>
-                      {/* Edit User */}
-                      <button
-                        style={{
-                          ...actionButtonStyle,
-                          color: '#28a745'
-                        }}
-                        title="Edit User"
-                        onClick={() => startEditingUser(u)}
-                      >
-                        ✏️
-                      </button>
-
-                      {/* Change Role - Only available for admins/owners */}
-                      {hasRole(['admin', 'owner']) && (user.id !== u.id && u.role !== 'owner') && (
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>Username</th>
+                  <th style={thStyle}>Name</th>
+                  <th style={thStyle}>Email</th>
+                  <th style={thStyle}>Role</th>
+                  <th style={thStyle}>Created At</th>
+                  <th style={thStyle}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map(u => (
+                  <tr key={u.id}>
+                    <td style={tdStyle}>{u.username}</td>
+                    <td style={tdStyle}>{getDisplayName(u)}</td>
+                    <td style={tdStyle}>{u.email}</td>
+                    <td style={tdStyle}>
+                      <span style={roleBadgeStyle(u.role)}>
+                        {u.role}
+                      </span>
+                    </td>
+                    <td style={tdStyle}>
+                      {new Date(u.created_at).toLocaleDateString()}
+                    </td>
+                    <td style={tdStyle}>
+                      <div style={{ display: 'flex' }}>
+                        {/* Edit User */}
                         <button
                           style={{
                             ...actionButtonStyle,
                             color: '#28a745'
                           }}
-                          title="Change Role"
-                          onClick={() => {
-                            setActionUser(u);
-                            setNewRole(u.role);
-                            setShowChangeRoleModal(true);
-                          }}
+                          title="Edit User"
+                          onClick={() => startEditingUser(u)}
                         >
-                          👑
+                          ✏️
                         </button>
-                      )}
 
-                      {/* Delete - Only available for admins/owners */}
-                      {hasRole(['admin', 'owner']) && (user.id !== u.id && u.role !== 'owner') && (
-                        <button
-                          style={{
-                            ...actionButtonStyle,
-                            color: '#dc3545'
-                          }}
-                          title="Delete User"
-                          onClick={() => {
-                            setActionUser(u);
-                            setShowConfirmDeleteModal(true);
-                          }}
-                        >
-                          🗑️
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                        {/* Change Role - Only available for admins/owners */}
+                        {(user.id !== u.id && u.role !== 'owner') && (
+                          <button
+                            style={{
+                              ...actionButtonStyle,
+                              color: '#28a745'
+                            }}
+                            title="Change Role"
+                            onClick={() => {
+                              setActionUser(u);
+                              setNewRole(u.role);
+                              setShowChangeRoleModal(true);
+                            }}
+                          >
+                            👑
+                          </button>
+                        )}
+
+                        {/* Delete - Only available for admins/owners */}
+                        {(user.id !== u.id && u.role !== 'owner') && (
+                          <button
+                            style={{
+                              ...actionButtonStyle,
+                              color: '#dc3545'
+                            }}
+                            title="Delete User"
+                            onClick={() => {
+                              setActionUser(u);
+                              setShowConfirmDeleteModal(true);
+                            }}
+                          >
+                            🗑️
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Add User Modal */}

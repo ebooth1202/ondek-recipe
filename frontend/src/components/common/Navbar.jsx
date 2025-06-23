@@ -16,6 +16,14 @@ const Navbar = () => {
     return location.pathname === path;
   };
 
+  // Helper function to get profile link text based on user role
+  const getProfileLinkText = () => {
+    if (hasRole(['admin', 'owner'])) {
+      return '👥 Users';
+    }
+    return '👤 My Profile';
+  };
+
   return (
     <nav style={{
       backgroundColor: '#003366',
@@ -162,34 +170,33 @@ const Navbar = () => {
                 </Link>
               </li>
 
-              {hasRole(['admin', 'owner']) && (
-                <li>
-                  <Link
-                    to="/users"
-                    style={{
-                      color: 'white',
-                      textDecoration: 'none',
-                      padding: '0.5rem 0.75rem',
-                      borderRadius: '8px',
-                      transition: 'background-color 0.3s ease',
-                      backgroundColor: isActive('/users') ? '#0066cc' : 'transparent',
-                      fontSize: '0.9rem'
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isActive('/users')) {
-                        e.target.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isActive('/users')) {
-                        e.target.style.backgroundColor = 'transparent';
-                      }
-                    }}
-                  >
-                    👥 Profile
-                  </Link>
-                </li>
-              )}
+              {/* Profile Link - Now available for ALL authenticated users */}
+              <li>
+                <Link
+                  to="/users"
+                  style={{
+                    color: 'white',
+                    textDecoration: 'none',
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: '8px',
+                    transition: 'background-color 0.3s ease',
+                    backgroundColor: isActive('/users') ? '#0066cc' : 'transparent',
+                    fontSize: '0.9rem'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive('/users')) {
+                      e.target.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive('/users')) {
+                      e.target.style.backgroundColor = 'transparent';
+                    }
+                  }}
+                >
+                  {getProfileLinkText()}
+                </Link>
+              </li>
 
               <li>
                 <button
