@@ -1,4 +1,4 @@
-// frontend/src/pages/AIChat.jsx - Updated with small upload button
+// frontend/src/pages/AIChat.jsx - Updated with recipe list pagination
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -279,8 +279,85 @@ Please try:
     return text.replace(/\[ACTION_BUTTON:({.*?})\]/g, '').trim();
   };
 
+  // NEW: Function to handle "Show All" action specifically
+  const handleShowAllRecipes = async (button) => {
+    if (!button.metadata || !button.metadata.temp_id) {
+      console.error('Missing temp_id in show all button metadata');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+
+      // Determine action type based on button action
+      const actionType = button.action === 'show_all_external_recipes' ? 'show_all_external_recipes' : 'show_all_recipes';
+      const isExternal = button.action === 'show_all_external_recipes';
+
+      // Add a user message indicating the action
+      const actionMessage = {
+        id: Date.now(),
+        type: 'user',
+        content: `📋 Show all ${button.metadata.total_count} ${isExternal ? 'external ' : ''}recipes`,
+        timestamp: new Date(),
+        actionButtons: [],
+        isAction: true
+      };
+      setMessages(prev => [...prev, actionMessage]);
+
+      // Send request to backend with action type and metadata
+      const conversationHistory = messages.slice(-10).map(msg => ({
+        role: msg.type === 'user' ? 'user' : 'assistant',
+        content: msg.content
+      }));
+
+      const response = await axios.post(`${apiBaseUrl}/ai/chat`, {
+        message: '',  // Empty message since this is an action
+        conversation_history: conversationHistory,
+        action_type: actionType,
+        action_metadata: {
+          temp_id: button.metadata.temp_id
+        }
+      });
+
+      // Parse the response and add to messages
+      const rawResponse = response.data.response;
+      const actionButtons = parseActionButtons(rawResponse);
+      const cleanedResponse = cleanResponseText(rawResponse);
+
+      const aiMessage = {
+        id: Date.now() + 1,
+        type: 'ai',
+        content: cleanedResponse,
+        timestamp: new Date(response.data.timestamp),
+        actionButtons: actionButtons
+      };
+
+      setMessages(prev => [...prev, aiMessage]);
+
+    } catch (error) {
+      console.error('Error handling show all recipes:', error);
+      const errorMessage = {
+        id: Date.now() + 1,
+        type: 'error',
+        content: 'Sorry, I encountered an error while retrieving all recipes. Please try again.',
+        timestamp: new Date(),
+        actionButtons: []
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Function to handle action button clicks
   const handleActionButtonClick = (button) => {
+    // NEW: Handle both "show all recipes" actions specially
+    if (button.action === 'show_all_recipes' || button.action === 'show_all_external_recipes') {
+      handleShowAllRecipes(button);
+      return;
+    }
+
+    // Handle other action types (existing logic)
     if (button.url) {
       if (button.url.startsWith('http')) {
         // External URL
@@ -303,38 +380,43 @@ Please try:
         gap: '0.5rem',
         marginTop: '1rem'
       }}>
-        {buttons.map((button, index) => (
-          <button
-            key={index}
-            onClick={() => handleActionButtonClick(button)}
-            style={{
-              padding: '10px 16px',
-              backgroundColor: '#003366',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: '500',
-              transition: 'all 0.3s ease',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '0.5rem'
-            }}
-            onMouseEnter={(e) => {
-              e.target.style.backgroundColor = '#0066cc';
-              e.target.style.transform = 'translateY(-1px)';
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.backgroundColor = '#003366';
-              e.target.style.transform = 'translateY(0)';
-            }}
-          >
-            <span>🍳</span>
-            {button.text || 'Action'}
-          </button>
-        ))}
+        {buttons.map((button, index) => {
+          // Different styling for "Show All" buttons
+          const isShowAllButton = button.action === 'show_all_recipes' || button.action === 'show_all_external_recipes';
+
+          return (
+            <button
+              key={index}
+              onClick={() => handleActionButtonClick(button)}
+              style={{
+                padding: '10px 16px',
+                backgroundColor: isShowAllButton ? '#28a745' : '#003366',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '500',
+                transition: 'all 0.3s ease',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = isShowAllButton ? '#218838' : '#0066cc';
+                e.target.style.transform = 'translateY(-1px)';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = isShowAllButton ? '#28a745' : '#003366';
+                e.target.style.transform = 'translateY(0)';
+              }}
+            >
+              <span>{isShowAllButton ? '📋' : '🍳'}</span>
+              {button.text || 'Action'}
+            </button>
+          );
+        })}
       </div>
     );
   };

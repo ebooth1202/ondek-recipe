@@ -1,4 +1,4 @@
-# backend/app/utils/ai_helper.py - Complete version with file parsing capabilities
+# backend/app/utils/ai_helper.py - Updated with recipe list pagination
 
 import os
 from openai import OpenAI
@@ -30,8 +30,9 @@ except Exception as e:
     db = None
     db_available_local = False
 
-# Temporary storage for recipe data (in production, consider using Redis)
+# Temporary storage for recipe data and recipe lists (in production, consider using Redis)
 temp_recipe_storage = {}
+temp_recipe_lists = {}  # New storage for paginated recipe lists
 
 
 class FileParsingResult:
@@ -75,7 +76,20 @@ class AIHelper:
 
         # Clean up expired entries
         self._cleanup_expired_temp_recipes()
+        return temp_id
 
+    def store_temp_recipe_list(self, recipe_list: List[Dict[str, Any]], search_criteria: Dict[str, Any] = None) -> str:
+        """Store temporary recipe list and return a unique ID"""
+        temp_id = str(uuid.uuid4())
+        temp_recipe_lists[temp_id] = {
+            "recipes": recipe_list,
+            "search_criteria": search_criteria or {},
+            "timestamp": datetime.now(),
+            "expires_at": datetime.now() + timedelta(hours=1)  # Expires in 1 hour
+        }
+
+        # Clean up expired entries
+        self._cleanup_expired_temp_recipe_lists()
         return temp_id
 
     def get_temp_recipe(self, temp_id: str) -> Optional[Dict[str, Any]]:
@@ -89,6 +103,17 @@ class AIHelper:
                 del temp_recipe_storage[temp_id]
         return None
 
+    def get_temp_recipe_list(self, temp_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve temporary recipe list by ID"""
+        if temp_id in temp_recipe_lists:
+            stored = temp_recipe_lists[temp_id]
+            if datetime.now() < stored["expires_at"]:
+                return stored
+            else:
+                # Remove expired entry
+                del temp_recipe_lists[temp_id]
+        return None
+
     def _cleanup_expired_temp_recipes(self):
         """Remove expired temporary recipe entries"""
         current_time = datetime.now()
@@ -99,8 +124,36 @@ class AIHelper:
         for key in expired_keys:
             del temp_recipe_storage[key]
 
+    def _cleanup_expired_temp_recipe_lists(self):
+        """Remove expired temporary recipe list entries"""
+        current_time = datetime.now()
+        expired_keys = [
+            key for key, value in temp_recipe_lists.items()
+            if current_time >= value["expires_at"]
+        ]
+        for key in expired_keys:
+            del temp_recipe_lists[key]
+
+    def _is_capability_question(self, user_message: str) -> bool:
+        """Detect if the user is asking about Rupert's capabilities rather than requesting a search"""
+        user_lower = user_message.lower()
+
+        capability_indicators = [
+            "are you able to", "can you", "do you have the ability to", "are you capable of",
+            "do you support", "can you search", "do you search", "are you able", "can rupert",
+            "what can you do", "what are you capable of", "do you look up", "do you find",
+            "are you connected to", "do you have access to", "can you access",
+            "what sites", "what websites", "which sites", "which websites"
+        ]
+
+        return any(indicator in user_lower for indicator in capability_indicators)
+
     def _is_recipe_related_query(self, user_message: str, search_criteria: Dict[str, Any]) -> bool:
         """Determine if the user's message is actually recipe-related"""
+        # First check if this is a capability question - if so, it's NOT a recipe search
+        if self._is_capability_question(user_message):
+            return False
+
         # If we found search criteria, it's definitely recipe-related
         if search_criteria:
             return True
@@ -109,7 +162,8 @@ class AIHelper:
         recipe_keywords = [
             "recipe", "cook", "cooking", "bake", "baking", "ingredient", "ingredients",
             "meal", "food", "dish", "kitchen", "eat", "eating", "dinner", "lunch",
-            "breakfast", "snack", "dessert", "appetizer", "cuisine", "culinary"
+            "breakfast", "snack", "dessert", "appetizer", "cuisine", "culinary", "gluten-free",
+            "dairy-free", "egg-free"
         ]
 
         user_lower = user_message.lower()
@@ -131,58 +185,6 @@ class AIHelper:
                 return True
 
         return False
-
-
-    # NEW FILE PARSING METHODS
-    async def parse_recipe_file(self, file_content: bytes, filename: str, file_type: str, file_extension: str) -> \
-            Optional[FileParsingResult]:
-        """
-        Parse recipe information from various file types
-        """
-        try:
-            logger.info(f"Parsing file: {filename}, type: {file_type}")
-
-            # Extract text based on file type
-            extracted_text = ""
-
-            if file_type == "application/pdf" or file_extension == ".pdf":
-                extracted_text = self._extract_text_from_pdf(file_content)
-            elif file_type.startswith("image/") or file_extension.lower() in [".jpg", ".jpeg", ".png", ".bmp", ".tiff"]:
-                extracted_text = self._extract_text_from_image(file_content)
-            elif file_type == "text/csv" or file_extension == ".csv":
-                extracted_text = self._extract_text_from_csv(file_content)
-            elif file_type.startswith("text/") or file_extension in [".txt", ".md"]:
-                extracted_text = file_content.decode('utf-8', errors='ignore')
-            else:
-                # Try to decode as text anyway
-                try:
-                    extracted_text = file_content.decode('utf-8', errors='ignore')
-                except:
-                    raise ValueError(f"Unsupported file type: {file_type}")
-
-            if not extracted_text.strip():
-                logger.warning(f"No text could be extracted from {filename}")
-                return None
-
-            logger.info(f"Extracted {len(extracted_text)} characters from {filename}")
-
-            # Use AI to parse the extracted text into recipe data
-            recipe_data = await self.parse_recipe_from_text_advanced(
-                extracted_text,
-                source_info=f"Uploaded file: {filename}"
-            )
-
-            return FileParsingResult(
-                file_name=filename,
-                file_type=file_type,
-                parsed_text=extracted_text,
-                recipe_data=recipe_data,
-                confidence=0.8 if recipe_data else 0.3
-            )
-
-        except Exception as e:
-            logger.error(f"Error parsing file {filename}: {e}")
-            return None
 
     def _extract_text_from_pdf(self, file_content: bytes) -> str:
         """Extract text from PDF file"""
@@ -469,342 +471,225 @@ The recipe data has been prepared and is ready to be added to your collection! C
             logger.error(f"Error generating file parsing response: {e}")
             return f"I processed your file but encountered an error generating the response. The recipe data may still be available."
 
-    # EXISTING METHODS (updated and enhanced)
-    def format_recipe_for_form(self, raw_recipe_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Format raw recipe data for the add recipe form"""
+    async def parse_recipe_file(self, file_content: bytes, filename: str, file_type: str, file_extension: str) -> \
+            Optional[FileParsingResult]:
+        """
+        Parse recipe information from various file types
+        """
         try:
-            formatted_recipe = {
-                "recipe_name": "",
-                "description": "",
-                "ingredients": [],
-                "instructions": [],
-                "serving_size": 4,
-                "genre": "dinner",
-                "prep_time": 0,
-                "cook_time": 0,
-                "notes": [],
-                "dietary_restrictions": []
-            }
+            logger.info(f"Parsing file: {filename}, type: {file_type}")
 
-            # Extract recipe name
-            if "name" in raw_recipe_data:
-                formatted_recipe["recipe_name"] = raw_recipe_data["name"]
-            elif "recipe_name" in raw_recipe_data:
-                formatted_recipe["recipe_name"] = raw_recipe_data["recipe_name"]
-            elif "title" in raw_recipe_data:
-                formatted_recipe["recipe_name"] = raw_recipe_data["title"]
+            # Extract text based on file type
+            extracted_text = ""
 
-            # Extract description
-            if "description" in raw_recipe_data:
-                description = raw_recipe_data["description"]
-                if len(description) <= 500:  # Respect the field limit
-                    formatted_recipe["description"] = description
-                else:
-                    formatted_recipe["description"] = description[:497] + "..."
-
-            # Extract and format ingredients
-            if "ingredients" in raw_recipe_data:
-                for ingredient in raw_recipe_data["ingredients"]:
-                    if isinstance(ingredient, str):
-                        # Parse string ingredient
-                        parsed = self._parse_ingredient_string(ingredient)
-                        if parsed:
-                            formatted_recipe["ingredients"].append(parsed)
-                    elif isinstance(ingredient, dict):
-                        # Already structured ingredient
-                        formatted_ingredient = self._format_structured_ingredient(ingredient)
-                        if formatted_ingredient:
-                            formatted_recipe["ingredients"].append(formatted_ingredient)
-
-            # Extract instructions
-            if "instructions" in raw_recipe_data:
-                instructions = raw_recipe_data["instructions"]
-                if isinstance(instructions, list):
-                    for instruction in instructions:
-                        if isinstance(instruction, str):
-                            cleaned = self._clean_instruction_text(instruction)
-                            if cleaned:
-                                formatted_recipe["instructions"].append(cleaned)
-                        elif isinstance(instruction, dict) and "text" in instruction:
-                            cleaned = self._clean_instruction_text(instruction["text"])
-                            if cleaned:
-                                formatted_recipe["instructions"].append(cleaned)
-                elif isinstance(instructions, str):
-                    # Split by common delimiters
-                    instruction_list = self._split_instructions(instructions)
-                    formatted_recipe["instructions"].extend(instruction_list)
-
-            # Extract serving size
-            if "serving_size" in raw_recipe_data:
-                try:
-                    serving_size = int(raw_recipe_data["serving_size"])
-                    if 1 <= serving_size <= 100:
-                        formatted_recipe["serving_size"] = serving_size
-                except (ValueError, TypeError):
-                    pass
-            elif "servings" in raw_recipe_data:
-                try:
-                    serving_size = int(raw_recipe_data["servings"])
-                    if 1 <= serving_size <= 100:
-                        formatted_recipe["serving_size"] = serving_size
-                except (ValueError, TypeError):
-                    pass
-
-            # Extract genre/category
-            if "genre" in raw_recipe_data:
-                genre = self._map_genre(raw_recipe_data["genre"])
-                if genre:
-                    formatted_recipe["genre"] = genre
-            elif "category" in raw_recipe_data:
-                genre = self._map_genre(raw_recipe_data["category"])
-                if genre:
-                    formatted_recipe["genre"] = genre
-
-            # Extract timing
-            if "prep_time" in raw_recipe_data:
-                prep_time = self._parse_time(raw_recipe_data["prep_time"])
-                if prep_time is not None:
-                    formatted_recipe["prep_time"] = prep_time
-
-            if "cook_time" in raw_recipe_data:
-                cook_time = self._parse_time(raw_recipe_data["cook_time"])
-                if cook_time is not None:
-                    formatted_recipe["cook_time"] = cook_time
-
-            # Extract notes (exclude nutrition info)
-            notes = []
-
-            # Add any additional notes or tips
-            if "notes" in raw_recipe_data:
-                if isinstance(raw_recipe_data["notes"], list):
-                    notes.extend(raw_recipe_data["notes"])
-                elif isinstance(raw_recipe_data["notes"], str):
-                    notes.append(raw_recipe_data["notes"])
-
-            if "tips" in raw_recipe_data:
-                if isinstance(raw_recipe_data["tips"], list):
-                    notes.extend(raw_recipe_data["tips"])
-                elif isinstance(raw_recipe_data["tips"], str):
-                    notes.append(raw_recipe_data["tips"])
-
-            if "additional_info" in raw_recipe_data:
-                notes.append(raw_recipe_data["additional_info"])
-
-            formatted_recipe["notes"] = notes
-
-            # Extract dietary restrictions
-            dietary_restrictions = []
-            if "dietary_restrictions" in raw_recipe_data:
-                dietary_restrictions = raw_recipe_data["dietary_restrictions"]
-            elif "dietary_info" in raw_recipe_data:
-                dietary_restrictions = raw_recipe_data["dietary_info"]
-            elif "diet_tags" in raw_recipe_data:
-                dietary_restrictions = raw_recipe_data["diet_tags"]
-
-            # Filter and validate dietary restrictions
-            valid_restrictions = ["gluten_free", "dairy_free", "egg_free", "vegetarian", "vegan", "keto", "paleo"]
-            filtered_restrictions = []
-            for restriction in dietary_restrictions:
-                if isinstance(restriction, str):
-                    normalized = restriction.lower().replace(" ", "_").replace("-", "_")
-                    if normalized in valid_restrictions:
-                        filtered_restrictions.append(normalized)
-
-            formatted_recipe["dietary_restrictions"] = filtered_restrictions
-
-            return formatted_recipe
-
-        except Exception as e:
-            logger.error(f"Error formatting recipe for form: {e}")
-            return None
-
-    def _parse_ingredient_string(self, ingredient_str: str) -> Optional[Dict[str, Any]]:
-        """Parse a string ingredient into structured format"""
-        try:
-            # Clean the string
-            ingredient_str = ingredient_str.strip().lstrip("-*•").strip()
-
-            # Common patterns for ingredients
-            patterns = [
-                r"(\d+(?:\.\d+)?)\s*(\w+)\s+(.+)",  # "2 cups flour"
-                r"(\d+(?:\.\d+)?)\s+(.+)",  # "2 eggs"
-                r"(\d+)\s*/\s*(\d+)\s*(\w+)\s+(.+)",  # "1/2 cup milk"
-            ]
-
-            for pattern in patterns:
-                match = re.match(pattern, ingredient_str)
-                if match:
-                    groups = match.groups()
-                    if len(groups) == 3:  # quantity, unit, name
-                        quantity, unit, name = groups
-                        return {
-                            "name": name.strip(),
-                            "quantity": float(quantity),
-                            "unit": self._normalize_unit(unit)
-                        }
-                    elif len(groups) == 2:  # quantity, name (no unit)
-                        quantity, name = groups
-                        return {
-                            "name": name.strip(),
-                            "quantity": float(quantity),
-                            "unit": "piece"
-                        }
-                    elif len(groups) == 4:  # fraction
-                        num, denom, unit, name = groups
-                        quantity = float(num) / float(denom)
-                        return {
-                            "name": name.strip(),
-                            "quantity": quantity,
-                            "unit": self._normalize_unit(unit)
-                        }
-
-            # If no pattern matches, assume it's just a name with quantity 1
-            return {
-                "name": ingredient_str,
-                "quantity": 1.0,
-                "unit": "piece"
-            }
-
-        except Exception as e:
-            logger.warning(f"Could not parse ingredient: {ingredient_str}, error: {e}")
-            return None
-
-    def _format_structured_ingredient(self, ingredient_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Format a structured ingredient dictionary"""
-        try:
-            formatted = {
-                "name": "",
-                "quantity": 1.0,
-                "unit": "piece"
-            }
-
-            # Extract name
-            if "name" in ingredient_dict:
-                formatted["name"] = ingredient_dict["name"]
-            elif "ingredient" in ingredient_dict:
-                formatted["name"] = ingredient_dict["ingredient"]
+            if file_type == "application/pdf" or file_extension == ".pdf":
+                extracted_text = self._extract_text_from_pdf(file_content)
+            elif file_type.startswith("image/") or file_extension.lower() in [".jpg", ".jpeg", ".png", ".bmp", ".tiff"]:
+                extracted_text = self._extract_text_from_image(file_content)
+            elif file_type == "text/csv" or file_extension == ".csv":
+                extracted_text = self._extract_text_from_csv(file_content)
+            elif file_type.startswith("text/") or file_extension in [".txt", ".md"]:
+                extracted_text = file_content.decode('utf-8', errors='ignore')
             else:
+                # Try to decode as text anyway
+                try:
+                    extracted_text = file_content.decode('utf-8', errors='ignore')
+                except:
+                    raise ValueError(f"Unsupported file type: {file_type}")
+
+            if not extracted_text.strip():
+                logger.warning(f"No text could be extracted from {filename}")
                 return None
 
-            # Extract quantity
-            if "quantity" in ingredient_dict:
-                try:
-                    formatted["quantity"] = float(ingredient_dict["quantity"])
-                except (ValueError, TypeError):
-                    formatted["quantity"] = 1.0
-            elif "amount" in ingredient_dict:
-                try:
-                    formatted["quantity"] = float(ingredient_dict["amount"])
-                except (ValueError, TypeError):
-                    formatted["quantity"] = 1.0
+            logger.info(f"Extracted {len(extracted_text)} characters from {filename}")
 
-            # Extract unit
-            if "unit" in ingredient_dict:
-                formatted["unit"] = self._normalize_unit(ingredient_dict["unit"])
-            elif "measurement" in ingredient_dict:
-                formatted["unit"] = self._normalize_unit(ingredient_dict["measurement"])
+            # Use AI to parse the extracted text into recipe data
+            recipe_data = await self.parse_recipe_from_text_advanced(
+                extracted_text,
+                source_info=f"Uploaded file: {filename}"
+            )
 
-            return formatted
+            return FileParsingResult(
+                file_name=filename,
+                file_type=file_type,
+                parsed_text=extracted_text,
+                recipe_data=recipe_data,
+                confidence=0.8 if recipe_data else 0.3
+            )
 
         except Exception as e:
-            logger.warning(f"Could not format structured ingredient: {ingredient_dict}, error: {e}")
+            logger.error(f"Error parsing file {filename}: {e}")
             return None
 
-    def _normalize_unit(self, unit: str) -> str:
-        """Normalize unit names to match the MeasuringUnit enum"""
-        unit = unit.lower().strip()
+    def _detect_recipe_creation_intent(self, user_message: str) -> Optional[str]:
+        """Detect if user wants help creating a recipe"""
+        creation_keywords = [
+            "help me create", "help me add", "how to create", "how to add",
+            "want to create", "want to add", "need to create", "need to add",
+            "help creating", "help adding", "create a recipe", "add a recipe",
+            "like to add"
+        ]
 
-        unit_mapping = {
-            "c": "cup", "cup": "cup", "cups": "cups",
-            "tbsp": "tablespoon", "tablespoon": "tablespoon", "tablespoons": "tablespoons",
-            "tsp": "teaspoon", "teaspoon": "teaspoon", "teaspoons": "teaspoons",
-            "oz": "ounce", "ounce": "ounce", "ounces": "ounces",
-            "lb": "pound", "pound": "pound", "pounds": "pounds",
-            "g": "gram", "gram": "gram", "grams": "grams",
-            "kg": "kilogram", "kilogram": "kilogram", "kilograms": "kilograms",
-            "l": "liter", "liter": "liter", "liters": "liters",
-            "ml": "milliliter", "milliliter": "milliliter", "milliliters": "milliliters",
-            "piece": "piece", "pieces": "pieces",
-            "whole": "whole", "stick": "stick", "sticks": "sticks",
-            "pinch": "pinch", "dash": "dash"
-        }
-
-        return unit_mapping.get(unit, "piece")
-
-    def _clean_instruction_text(self, instruction: str) -> str:
-        """Clean instruction text"""
-        # Remove step numbers and bullets
-        instruction = re.sub(r"^\d+\.\s*", "", instruction)
-        instruction = re.sub(r"^[-*•]\s*", "", instruction)
-        instruction = instruction.strip()
-
-        # Remove nutrition information
-        nutrition_keywords = ["calories", "protein", "carbs", "fat", "sodium", "sugar", "fiber"]
-        if any(keyword in instruction.lower() for keyword in nutrition_keywords):
-            return ""
-
-        return instruction
-
-    def _split_instructions(self, instructions_text: str) -> List[str]:
-        """Split instruction text into individual steps"""
-        # Split by common delimiters
-        steps = re.split(r"\d+\.|(?:\n|^)[-*•]|\n\n", instructions_text)
-
-        cleaned_steps = []
-        for step in steps:
-            cleaned = self._clean_instruction_text(step)
-            if cleaned and len(cleaned) > 10:  # Ignore very short steps
-                cleaned_steps.append(cleaned)
-
-        return cleaned_steps
-
-    def _map_genre(self, category: str) -> Optional[str]:
-        """Map category to valid genre"""
-        category = category.lower()
-
-        genre_mapping = {
-            "breakfast": "breakfast",
-            "lunch": "lunch",
-            "dinner": "dinner",
-            "snack": "snack", "snacks": "snack",
-            "dessert": "dessert", "desserts": "dessert",
-            "appetizer": "appetizer", "appetizers": "appetizer", "starter": "appetizer",
-            "main": "dinner", "main course": "dinner", "entree": "dinner",
-            "side": "snack", "side dish": "snack"
-        }
-
-        return genre_mapping.get(category)
-
-    def _parse_time(self, time_str: str) -> Optional[int]:
-        """Parse time string to minutes"""
-        if isinstance(time_str, int):
-            return time_str
-
-        if isinstance(time_str, str):
-            time_str = time_str.lower()
-
-            # Extract numbers
-            minutes = 0
-
-            # Look for hours
-            hour_match = re.search(r"(\d+)\s*(?:hour|hr|h)", time_str)
-            if hour_match:
-                minutes += int(hour_match.group(1)) * 60
-
-            # Look for minutes
-            min_match = re.search(r"(\d+)\s*(?:minute|min|m)", time_str)
-            if min_match:
-                minutes += int(min_match.group(1))
-
-            # If no specific unit, assume it's minutes
-            if minutes == 0:
-                number_match = re.search(r"(\d+)", time_str)
-                if number_match:
-                    minutes = int(number_match.group(1))
-
-            return minutes if 0 <= minutes <= 1440 else None
+        user_lower = user_message.lower()
+        if any(keyword in user_lower for keyword in creation_keywords):
+            return "help_create"
 
         return None
+
+    async def _generate_general_conversation_response(self, user_message: str,
+                                                      conversation_history: Optional[List[Dict]]) -> str:
+        """Generate response for general, non-recipe conversation"""
+        try:
+            # Check if this is a capability question about external search
+            if self._is_capability_question(user_message):
+                return self._generate_capability_response(user_message)
+
+            system_message = """You are Rupert, a friendly cooking assistant for the Ondek Recipe app. 
+
+    The user has sent you a message that doesn't seem to be specifically about recipes or cooking. 
+    Respond naturally and conversationally like a helpful cooking assistant would. 
+
+    You can:
+    - Greet them warmly if they're saying hello
+    - Chat casually about cooking or food in general
+    - Ask if they need help with anything cooking-related
+    - Be friendly and personable
+
+    Keep responses conversational and warm. Don't automatically offer recipes unless they specifically ask for cooking help."""
+
+            messages = [{"role": "system", "content": system_message}]
+
+            if conversation_history:
+                messages.extend(conversation_history[-4:])
+
+            messages.append({"role": "user", "content": user_message})
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=400,
+                temperature=0.7
+            )
+
+            ai_response = response.choices[0].message.content.strip()
+
+            # Only add action button if the response actually mentions recipes/cooking
+            if self.should_show_add_recipe_button(user_message, ai_response):
+                button = self.create_recipe_action_button()
+                ai_response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+
+            return ai_response
+
+        except Exception as e:
+            logger.error(f"Error generating general conversation response: {e}")
+            return "Hey there! I'm Rupert, your cooking assistant. How can I help you with your culinary adventures today?"
+
+    def _generate_capability_response(self, user_message: str) -> str:
+        """Generate response for capability questions about external search"""
+        user_lower = user_message.lower()
+
+        # Check for specific external sites mentioned
+        external_sites = {
+            "pinterest": "Pinterest",
+            "allrecipes": "AllRecipes",
+            "food.com": "Food.com",
+            "food network": "Food Network",
+            "epicurious": "Epicurious",
+            "tasty": "Tasty",
+            "youtube": "YouTube",
+            "instagram": "Instagram",
+            "google": "Google"
+        }
+
+        mentioned_site = None
+        for site_key, site_name in external_sites.items():
+            if site_key in user_lower:
+                mentioned_site = site_name
+                break
+
+        if mentioned_site:
+            if mentioned_site == "Pinterest":
+                response = f"""Yes, I can search for recipes on the internet, including {mentioned_site}! While I don't have direct access to {mentioned_site}'s API, I can search the web for recipes and help you find what you're looking for.
+
+Here's what I can do:
+• Search the internet for recipes from various websites
+• Help you find recipes with specific ingredients or themes
+• Look for recipes from particular cuisine types
+• Find easy or advanced recipes based on your skill level
+
+Would you like me to search for something specific on {mentioned_site} or other recipe websites? Just let me know what kind of recipe you're looking for!"""
+            else:
+                response = f"""Yes, I can search for recipes on the internet, including {mentioned_site} and other popular cooking websites!
+
+Here's what I can do:
+• Search various recipe websites including {mentioned_site}, AllRecipes, Food Network, and more
+• Find recipes with specific ingredients or dietary restrictions
+• Look for recipes by cuisine type or difficulty level
+• Help you discover new cooking ideas from across the web
+
+Would you like me to search for something specific? Just tell me what kind of recipe you're interested in and I'll help you find it!"""
+        else:
+            # General capability question
+            response = """Yes, I can search for recipes on the internet! I have the ability to look up recipes from various popular cooking websites including:
+
+• Pinterest
+• AllRecipes 
+• Food Network
+• Food.com
+• Epicurious
+• And many other recipe sites
+
+Here's what I can help you with:
+• Search for recipes with specific ingredients
+• Find recipes by cuisine type (Italian, Mexican, Asian, etc.)
+• Look for recipes based on dietary restrictions
+• Find easy recipes for beginners or advanced recipes for experienced cooks
+• Discover trending or popular recipes
+
+Would you like me to search for something specific? Just let me know what kind of recipe you're interested in and I'll help you find it from the best cooking websites!"""
+
+        return response
+
+    async def _generate_creation_help_response(self, user_message: str,
+                                               conversation_history: Optional[List[Dict]]) -> str:
+        """Generate response for recipe creation help"""
+        try:
+            system_message = """You are Rupert, a helpful cooking assistant for the Ondek Recipe app. The user is asking for help creating or adding a new recipe. 
+
+Provide helpful guidance about recipe creation, including:
+- Tips for organizing ingredients and measurements
+- Advice on writing clear instructions
+- Suggestions for categorizing recipes
+- General cooking tips for recipe development
+
+Be encouraging and offer to help them get started with the recipe creation process."""
+
+            messages = [{"role": "system", "content": system_message}]
+
+            if conversation_history:
+                messages.extend(conversation_history[-4:])
+
+            messages.append({"role": "user", "content": user_message})
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=600,
+                temperature=0.7
+            )
+
+            ai_response = response.choices[0].message.content.strip()
+
+            # Add action button
+            button = self.create_recipe_action_button()
+            ai_response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+
+            return ai_response
+
+        except Exception as e:
+            logger.error(f"Error generating creation help response: {e}")
+            button = self.create_recipe_action_button()
+            return f"I'd be happy to help you create a new recipe! Click the button below to get started with the recipe creation form.\n\n[ACTION_BUTTON:{json.dumps(button)}]"
 
     def should_show_add_recipe_button(self, user_message: str, ai_response: str) -> bool:
         """Determine if we should show an 'Add Recipe' button"""
@@ -862,559 +747,6 @@ The recipe data has been prepared and is ready to be added to your collection! C
             button_data["url"] = "/add-recipe"
 
         return button_data
-
-    async def chat_about_recipes(self, user_message: str,
-                                 conversation_history: Optional[List[Dict]] = None) -> str:
-        """Enhanced main chat function with recipe creation support"""
-        if not self.is_configured():
-            return "AI features are currently unavailable. Please contact the administrator to configure the OpenAI API key."
-
-        try:
-            # Step 1: Check for recipe creation intent
-            creation_intent = self._detect_recipe_creation_intent(user_message)
-
-            # Step 2: Extract search criteria and log for debugging
-            search_criteria = self.extract_search_intent(user_message)
-            logger.info(f"Extracted search criteria: {search_criteria}")
-
-            # Step 3: Check if this is a recipe-related query at all
-            is_recipe_related = self._is_recipe_related_query(user_message, search_criteria)
-
-            # Search internal database ONLY if we have criteria OR it's clearly recipe-related
-            internal_recipes = []
-            recipe_count = 0
-
-            if search_criteria and is_recipe_related:
-                internal_recipes = self.search_recipes_by_criteria(search_criteria)
-                recipe_count = self.count_recipes_by_criteria(search_criteria)
-                logger.info(
-                    f"Found {len(internal_recipes)} recipes, count: {recipe_count}, matching criteria: {search_criteria}")
-
-            # Step 4: Handle different scenarios
-            if creation_intent == "help_create":
-                # User wants help creating a recipe
-                return await self._generate_creation_help_response(user_message, conversation_history)
-
-            elif self.detect_external_search_request(user_message):
-                # User specifically requested external/online search - prioritize this
-                search_params = self.extract_search_parameters(user_message)
-                external_recipes = await self.search_external_recipes(search_criteria, search_params)
-
-                return await self._generate_external_response(user_message, external_recipes,
-                                                              search_criteria, search_params,
-                                                              conversation_history)
-
-            elif internal_recipes and len(internal_recipes) > 0:
-                # We found recipes in the database (and user didn't specifically ask for external)
-                response = await self._generate_internal_response(user_message, internal_recipes,
-                                                                  conversation_history, search_criteria)
-
-                # Check if we should add an "Add Recipe" button
-                if self.should_show_add_recipe_button(user_message, response):
-                    button = self.create_recipe_action_button()
-                    response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
-
-                return response
-
-            elif search_criteria and is_recipe_related:
-                # Step 5: Ask for permission to search externally (only if recipe-related)
-                response = self._generate_permission_request(search_criteria, user_message)
-
-                # Add "Add Recipe" button for creation help
-                if creation_intent or self.should_show_add_recipe_button(user_message, response):
-                    button = self.create_recipe_action_button()
-                    response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
-
-                return response
-
-            else:
-                # Step 6: Handle general conversation (NOT recipe-related)
-                return await self._generate_general_conversation_response(user_message, conversation_history)
-
-        except Exception as e:
-            logger.error(f"Error in chat_about_recipes: {e}")
-            return "I'm sorry, I encountered an error while processing your request. Please try again."
-
-    def _detect_recipe_creation_intent(self, user_message: str) -> Optional[str]:
-        """Detect if user wants help creating a recipe"""
-        creation_keywords = [
-            "help me create", "help me add", "how to create", "how to add",
-            "want to create", "want to add", "need to create", "need to add",
-            "help creating", "help adding", "create a recipe", "add a recipe"
-        ]
-
-        user_lower = user_message.lower()
-        if any(keyword in user_lower for keyword in creation_keywords):
-            return "help_create"
-
-        return None
-
-    async def _generate_general_conversation_response(self, user_message: str,
-                                                      conversation_history: Optional[List[Dict]]) -> str:
-        """Generate response for general, non-recipe conversation"""
-        try:
-            system_message = """You are Rupert, a friendly cooking assistant for the Ondek Recipe app. 
-
-    The user has sent you a message that doesn't seem to be specifically about recipes or cooking. 
-    Respond naturally and conversationally like a helpful cooking assistant would. 
-
-    You can:
-    - Greet them warmly if they're saying hello
-    - Chat casually about cooking or food in general
-    - Ask if they need help with anything cooking-related
-    - Be friendly and personable
-
-    Keep responses conversational and warm. Don't automatically offer recipes unless they specifically ask for cooking help."""
-
-            messages = [{"role": "system", "content": system_message}]
-
-            if conversation_history:
-                messages.extend(conversation_history[-4:])
-
-            messages.append({"role": "user", "content": user_message})
-
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=400,
-                temperature=0.7
-            )
-
-            ai_response = response.choices[0].message.content.strip()
-
-            # Only add action button if the response actually mentions recipes/cooking
-            if self.should_show_add_recipe_button(user_message, ai_response):
-                button = self.create_recipe_action_button()
-                ai_response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
-
-            return ai_response
-
-        except Exception as e:
-            logger.error(f"Error generating general conversation response: {e}")
-            return "Hey there! I'm Rupert, your cooking assistant. How can I help you with your culinary adventures today?"
-
-
-    async def _generate_creation_help_response(self, user_message: str,
-                                               conversation_history: Optional[List[Dict]]) -> str:
-        """Generate response for recipe creation help"""
-        try:
-            system_message = """You are Rupert, a helpful cooking assistant for the Ondek Recipe app. The user is asking for help creating or adding a new recipe. 
-
-Provide helpful guidance about recipe creation, including:
-- Tips for organizing ingredients and measurements
-- Advice on writing clear instructions
-- Suggestions for categorizing recipes
-- General cooking tips for recipe development
-
-Be encouraging and offer to help them get started with the recipe creation process."""
-
-            messages = [{"role": "system", "content": system_message}]
-
-            if conversation_history:
-                messages.extend(conversation_history[-4:])
-
-            messages.append({"role": "user", "content": user_message})
-
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=600,
-                temperature=0.7
-            )
-
-            ai_response = response.choices[0].message.content.strip()
-
-            # Add action button
-            button = self.create_recipe_action_button()
-            ai_response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
-
-            return ai_response
-
-        except Exception as e:
-            logger.error(f"Error generating creation help response: {e}")
-            button = self.create_recipe_action_button()
-            return f"I'd be happy to help you create a new recipe! Click the button below to get started with the recipe creation form.\n\n[ACTION_BUTTON:{json.dumps(button)}]"
-
-    async def _generate_external_response(self, user_message: str, external_recipes: List[Dict],
-                                          search_criteria: Dict[str, Any], search_params: Dict[str, Any],
-                                          conversation_history: Optional[List[Dict]]) -> str:
-        """Enhanced external response with recipe action buttons"""
-        try:
-            if not external_recipes:
-                response = "I searched the internet as requested, but couldn't find recipes matching your criteria. Would you like to try different search terms or check different websites?"
-                button = self.create_recipe_action_button()
-                response += f"\n\nOr you can create your own recipe:\n[ACTION_BUTTON:{json.dumps(button)}]"
-                return response
-
-            # Build context for external results
-            external_context = f"\n\nI searched the internet and found these recipes:\n"
-            for i, recipe in enumerate(external_recipes[:5], 1):
-                external_context += f"\n{i}. **{recipe['name']}** (from {recipe['source']})\n"
-                external_context += f"   - {recipe['description']}\n"
-                if recipe.get('url'):
-                    external_context += f"   - URL: {recipe['url']}\n"
-
-            search_info = ""
-            if search_params:
-                if search_params.get('specific_websites'):
-                    search_info += f"Searched on: {', '.join(search_params['specific_websites'])}\n"
-                if search_params.get('cuisine_type'):
-                    search_info += f"Cuisine focus: {search_params['cuisine_type']}\n"
-
-            system_message = f"""You are Rupert, a helpful cooking assistant. The user asked you to search the internet for recipes since nothing was found in their personal database.
-
-External search results: Found {len(external_recipes)} recipes from the internet.
-{search_info}
-
-{external_context}
-
-Guidelines:
-- Present the external recipes you found
-- Mention that these are from the internet, not their personal database
-- Ask if they'd like full details for any recipe
-- Offer to help them save promising recipes to their database
-- Be helpful in explaining the differences between their saved recipes and internet finds"""
-
-            messages = [{"role": "system", "content": system_message}]
-
-            if conversation_history:
-                messages.extend(conversation_history[-4:])
-
-            messages.append({"role": "user", "content": user_message})
-
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=800,
-                temperature=0.7
-            )
-
-            ai_response = response.choices[0].message.content.strip()
-
-            # Add action buttons for external recipes
-            if external_recipes:
-                # Create buttons for top recipes
-                for i, recipe in enumerate(external_recipes[:2]):  # Limit to top 2 recipes
-                    formatted_recipe = self.format_recipe_for_form(recipe)
-                    if formatted_recipe:
-                        button = self.create_recipe_action_button(formatted_recipe)
-                        ai_response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
-
-            return ai_response
-
-        except Exception as e:
-            logger.error(f"Error generating external response: {e}")
-            return "I found some recipes online, but encountered an error presenting them. Please try again."
-
-    def get_recipes_data(self, limit: int = 50) -> List[Dict]:
-        """Retrieve recipes from database for AI context"""
-        try:
-            if db is None:
-                logger.warning("Database not available")
-                return []
-
-            recipes = list(db.recipes.find().limit(limit))
-            processed_recipes = []
-
-            for recipe in recipes:
-                processed_recipe = {
-                    "id": str(recipe["_id"]),
-                    "name": recipe["recipe_name"],
-                    "description": recipe.get("description", ""),
-                    "genre": recipe["genre"],
-                    "serving_size": recipe["serving_size"],
-                    "prep_time": recipe.get("prep_time", 0),
-                    "cook_time": recipe.get("cook_time", 0),
-                    "total_time": (recipe.get("prep_time", 0) + recipe.get("cook_time", 0)),
-                    "ingredients": [
-                        f"{ing['quantity']} {ing['unit']} {ing['name']}"
-                        for ing in recipe["ingredients"]
-                    ],
-                    "instructions": recipe["instructions"],
-                    "notes": recipe.get("notes", []),
-                    "dietary_restrictions": recipe.get("dietary_restrictions", []),
-                    "created_by": recipe["created_by"],
-                    "created_at": recipe["created_at"].strftime("%Y-%m-%d") if recipe.get("created_at") else ""
-                }
-                processed_recipes.append(processed_recipe)
-
-            return processed_recipes
-        except Exception as e:
-            logger.error(f"Error retrieving recipes: {e}")
-            return []
-
-    def debug_database_contents(self, ingredient_term: str = None, genre_term: str = None) -> Dict[str, Any]:
-        """Debug method to see what's actually in the database"""
-        try:
-            if db is None:
-                return {"error": "Database not available"}
-
-            # Get a sample of recipes to see their structure
-            sample_recipes = list(db.recipes.find().limit(5))
-
-            debug_info = {
-                "total_recipes": db.recipes.count_documents({}),
-                "sample_structures": []
-            }
-
-            for recipe in sample_recipes:
-                debug_info["sample_structures"].append({
-                    "name": recipe.get("recipe_name", ""),
-                    "genre": recipe.get("genre", ""),
-                    "ingredients": [ing.get("name", "") for ing in recipe.get("ingredients", [])],
-                    "first_ingredient_example": recipe.get("ingredients", [{}])[0] if recipe.get("ingredients") else {}
-                })
-
-            # If specific terms provided, search for them
-            if ingredient_term:
-                ingredient_matches = list(db.recipes.find({
-                    "ingredients.name": {"$regex": ingredient_term, "$options": "i"}
-                }).limit(3))
-                debug_info["ingredient_matches"] = len(ingredient_matches)
-                debug_info["ingredient_examples"] = [
-                    {
-                        "name": r.get("recipe_name", ""),
-                        "ingredients": [ing.get("name", "") for ing in r.get("ingredients", [])]
-                    } for r in ingredient_matches
-                ]
-
-            if genre_term:
-                genre_matches = list(db.recipes.find({
-                    "genre": {"$regex": genre_term, "$options": "i"}
-                }).limit(3))
-                debug_info["genre_matches"] = len(genre_matches)
-                debug_info["genre_examples"] = [
-                    {
-                        "name": r.get("recipe_name", ""),
-                        "genre": r.get("genre", "")
-                    } for r in genre_matches
-                ]
-
-            logger.info(f"Database debug info: {debug_info}")
-            return debug_info
-
-        except Exception as e:
-            logger.error(f"Error debugging database: {e}")
-            return {"error": str(e)}
-
-    def search_recipes_by_criteria(self, criteria: Dict[str, Any]) -> List[Dict]:
-        """Search recipes based on specific criteria with exact phrase matching for ingredients"""
-        try:
-            if db is None:
-                logger.warning("Database not available")
-                return []
-
-            # DEBUG: Print to confirm we're using the new version
-            logger.info("DEBUG: Using NEW search_recipes_by_criteria method - FIXED VERSION")
-
-            # First, debug what's in the database
-            if criteria.get('ingredient'):
-                self.debug_database_contents(ingredient_term=criteria['ingredient'])
-            if criteria.get('genre'):
-                self.debug_database_contents(genre_term=criteria['genre'])
-
-            query = {}
-
-            # Handle different search criteria - build proper AND query
-            if "genre" in criteria:
-                # More flexible genre matching - handle plural/singular
-                genre_term = criteria["genre"].lower()
-                genre_patterns = [genre_term]
-                if genre_term.endswith('s'):
-                    genre_patterns.append(genre_term[:-1])  # Remove 's'
-                else:
-                    genre_patterns.append(genre_term + 's')  # Add 's'
-
-                query["genre"] = {"$regex": "|".join(genre_patterns), "$options": "i"}
-
-            if "ingredient" in criteria:
-                # DEBUG: Show what we're processing
-                logger.info(f"DEBUG: Processing ingredient '{criteria['ingredient']}'")
-
-                # EXACT phrase matching for ingredients - NO word splitting
-                ingredient_term = criteria["ingredient"]
-
-                # Use word boundaries for exact phrase matching
-                # This will match "peanut butter" as a complete phrase, not just "butter"
-                escaped_ingredient = re.escape(ingredient_term)
-                logger.info(f"DEBUG: Escaped ingredient: '{escaped_ingredient}'")
-
-                regex_pattern = f"\\b{escaped_ingredient}\\b"
-                logger.info(f"DEBUG: Final regex pattern: '{regex_pattern}'")
-
-                query["ingredients.name"] = {"$regex": regex_pattern, "$options": "i"}
-
-            if "name" in criteria:
-                query["recipe_name"] = {"$regex": criteria["name"], "$options": "i"}
-
-            if "max_time" in criteria:
-                # Search by total time
-                query["$expr"] = {
-                    "$lte": [
-                        {"$add": [{"$ifNull": ["$prep_time", 0]}, {"$ifNull": ["$cook_time", 0]}]},
-                        criteria["max_time"]
-                    ]
-                }
-
-            if "dietary_restrictions" in criteria:
-                query["dietary_restrictions"] = {"$in": criteria["dietary_restrictions"]}
-
-            logger.info(f"MongoDB query: {query}")
-            recipes = list(db.recipes.find(query).limit(20))
-            logger.info(f"Found {len(recipes)} recipes from database")
-
-            # If no exact matches found and ingredient contains spaces (compound ingredient),
-            # try a fallback search with individual words only as last resort
-            if len(recipes) == 0 and "ingredient" in criteria and " " in criteria["ingredient"]:
-                logger.info("No exact phrase matches found, trying fallback with individual words")
-                words = criteria["ingredient"].split()
-                word_patterns = [f"\\b{re.escape(word)}\\b" for word in words]
-                fallback_query = query.copy()
-                fallback_query["ingredients.name"] = {"$regex": "|".join(word_patterns), "$options": "i"}
-
-                recipes = list(db.recipes.find(fallback_query).limit(20))
-                logger.info(f"Fallback word search found {len(recipes)} recipes")
-
-            return [self._format_recipe_for_ai(recipe) for recipe in recipes]
-
-        except Exception as e:
-            logger.error(f"Error searching recipes: {e}")
-            return []
-
-    def count_recipes_by_criteria(self, criteria: Dict[str, Any]) -> int:
-        """Count recipes matching criteria using the same logic as search"""
-        try:
-            if db is None:
-                return 0
-
-            query = {}
-
-            if "genre" in criteria:
-                genre_term = criteria["genre"].lower()
-                genre_patterns = [genre_term]
-                if genre_term.endswith('s'):
-                    genre_patterns.append(genre_term[:-1])
-                else:
-                    genre_patterns.append(genre_term + 's')
-                query["genre"] = {"$regex": "|".join(genre_patterns), "$options": "i"}
-
-            if "ingredient" in criteria:
-                # EXACT phrase matching for ingredients - NO word splitting
-                ingredient_term = criteria["ingredient"]
-
-                # Use word boundaries for exact phrase matching
-                # This will match "peanut butter" as a complete phrase, not just "butter"
-                escaped_ingredient = re.escape(ingredient_term)
-                query["ingredients.name"] = {"$regex": f"\\b{escaped_ingredient}\\b", "$options": "i"}
-
-            if "name" in criteria:
-                query["recipe_name"] = {"$regex": criteria["name"], "$options": "i"}
-
-            if "max_time" in criteria:
-                query["$expr"] = {
-                    "$lte": [
-                        {"$add": [{"$ifNull": ["$prep_time", 0]}, {"$ifNull": ["$cook_time", 0]}]},
-                        criteria["max_time"]
-                    ]
-                }
-            if "dietary_restrictions" in criteria:
-                query["dietary_restrictions"] = {"$in": criteria["dietary_restrictions"]}
-
-            logger.info(f"Count query: {query}")
-            count = db.recipes.count_documents(query)
-            logger.info(f"Count result: {count}")
-            return count
-        except Exception as e:
-            logger.error(f"Error counting recipes: {e}")
-            return 0
-
-    def get_recipe_by_id(self, recipe_id: str) -> Optional[Dict]:
-        """Get specific recipe by ID"""
-        try:
-            if db is None or not ObjectId.is_valid(recipe_id):
-                return None
-
-            recipe = db.recipes.find_one({"_id": ObjectId(recipe_id)})
-            if recipe:
-                return self._format_recipe_for_ai(recipe)
-            return None
-        except Exception as e:
-            logger.error(f"Error getting recipe by ID: {e}")
-            return None
-
-    def _format_recipe_for_ai(self, recipe: Dict) -> Dict:
-        """Format recipe for AI consumption"""
-        return {
-            "id": str(recipe["_id"]),
-            "name": recipe["recipe_name"],
-            "description": recipe.get("description", ""),
-            "genre": recipe["genre"],
-            "serving_size": recipe["serving_size"],
-            "prep_time": recipe.get("prep_time", 0),
-            "cook_time": recipe.get("cook_time", 0),
-            "total_time": (recipe.get("prep_time", 0) + recipe.get("cook_time", 0)),
-            "ingredients": [
-                f"{ing['quantity']} {ing['unit']} {ing['name']}"
-                for ing in recipe["ingredients"]
-            ],
-            "instructions": recipe["instructions"],
-            "notes": recipe.get("notes", []),
-            "dietary_restrictions": recipe.get("dietary_restrictions", []),
-            "created_by": recipe["created_by"],
-            "created_at": recipe["created_at"].strftime("%Y-%m-%d") if recipe.get("created_at") else ""
-        }
-
-    def extract_search_intent(self, user_message: str) -> Dict[str, Any]:
-        """Extract search criteria from user message using AI"""
-        if not self.is_configured():
-            return {}
-
-        try:
-            prompt = f"""
-            Analyze this user message about recipes and extract search criteria as JSON:
-            User message: "{user_message}"
-
-            Extract any of these criteria if mentioned:
-            - genre: breakfast, lunch, dinner, snack, dessert, appetizer
-            - ingredient: any ingredient name mentioned (be very specific - if they say "peanut butter", extract exactly "peanut butter")
-            - name: recipe name if specifically mentioned
-            - max_time: maximum cooking time in minutes if mentioned
-            - dietary_restrictions: gluten_free, dairy_free, egg_free
-
-            IMPORTANT: 
-            - When both genre AND ingredient are mentioned (like "desserts with peanut butter"), include BOTH in the result
-            - Be precise with ingredient names - extract them exactly as mentioned
-            - If someone says "show me desserts with chocolate", extract both "genre": "dessert" AND "ingredient": "chocolate"
-
-            Return only valid JSON like:
-            {{"genre": "dessert", "ingredient": "peanut butter"}}
-            {{"ingredient": "chicken"}}
-            {{"genre": "breakfast"}}
-
-            If no criteria found, return: {{}}
-            """
-
-            response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=200,
-                temperature=0.1
-            )
-
-            result = response.choices[0].message.content.strip()
-            logger.info(f"AI search extraction result: {result}")
-
-            try:
-                criteria = json.loads(result)
-                logger.info(f"Parsed search criteria: {criteria}")
-                return criteria
-            except json.JSONDecodeError:
-                logger.warning(f"Could not parse AI search criteria: {result}")
-                return {}
-
-        except Exception as e:
-            logger.error(f"Error extracting search intent: {e}")
-            return {}
 
     def detect_external_search_request(self, user_message: str) -> bool:
         """Detect if user is requesting external search or giving permission"""
@@ -1590,46 +922,6 @@ Guidelines:
 
         return " ".join(query_parts) if query_parts else "cookie recipe"
 
-    async def _generate_internal_response(self, user_message: str, recipes: List[Dict],
-                                          conversation_history: Optional[List[Dict]],
-                                          search_criteria: Dict[str, Any]) -> str:
-        """Generate response based on internal database recipes with individual recipe buttons"""
-        try:
-            # Build a short, focused response
-            criteria_description = ""
-            if search_criteria:
-                if search_criteria.get('ingredient') and search_criteria.get('genre'):
-                    criteria_description = f"{search_criteria['genre']} recipes with {search_criteria['ingredient']}"
-                elif search_criteria.get('ingredient'):
-                    criteria_description = f"recipes with {search_criteria['ingredient']}"
-                elif search_criteria.get('genre'):
-                    criteria_description = f"{search_criteria['genre']} recipes"
-
-            if criteria_description:
-                response = f"I found {len(recipes)} {criteria_description} in your database."
-            else:
-                response = f"I found {len(recipes)} recipes in your database."
-
-            # Add individual recipe buttons
-            for recipe in recipes[:10]:  # Limit to 10 recipes to avoid too many buttons
-                button = self.create_recipe_view_button(recipe)
-                response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
-
-            return response
-
-        except Exception as e:
-            logger.error(f"Error generating internal response: {e}")
-            criteria_text = ""
-            if search_criteria:
-                if search_criteria.get('ingredient') and search_criteria.get('genre'):
-                    criteria_text = f"{search_criteria['genre']} recipes with {search_criteria['ingredient']}"
-                elif search_criteria.get('ingredient'):
-                    criteria_text = f"recipes with {search_criteria['ingredient']}"
-                elif search_criteria.get('genre'):
-                    criteria_text = f"{search_criteria['genre']} recipes"
-
-            return f"I found {len(recipes)} {criteria_text} in your database, but encountered an error formatting the response."
-
     def _generate_permission_request(self, search_criteria: Dict[str, Any], user_message: str) -> str:
         """Generate a helpful response when no exact matches are found"""
         criteria_text = ""
@@ -1680,9 +972,302 @@ Guidelines:
 
         return response
 
-    # Keep existing legacy methods for backward compatibility
+    async def _generate_internal_response(self, user_message: str, recipes: List[Dict],
+                                          conversation_history: Optional[List[Dict]],
+                                          search_criteria: Dict[str, Any]) -> str:
+        """Generate response based on internal database recipes with pagination (max 5 initially)"""
+        try:
+            # Build a short, focused response
+            criteria_description = ""
+            if search_criteria:
+                if search_criteria.get('ingredient') and search_criteria.get('genre'):
+                    criteria_description = f"{search_criteria['genre']} recipes with {search_criteria['ingredient']}"
+                elif search_criteria.get('ingredient'):
+                    criteria_description = f"recipes with {search_criteria['ingredient']}"
+                elif search_criteria.get('genre'):
+                    criteria_description = f"{search_criteria['genre']} recipes"
+
+            total_recipes = len(recipes)
+            show_initial = min(5, total_recipes)  # Show max 5 initially
+
+            if criteria_description:
+                response = f"I found {total_recipes} {criteria_description} in your database."
+            else:
+                response = f"I found {total_recipes} recipes in your database."
+
+            # Show first 5 recipes as buttons
+            recipes_to_show = recipes[:show_initial]
+            for recipe in recipes_to_show:
+                button = self.create_recipe_view_button(recipe)
+                response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+
+            # If there are more than 5 recipes, add "Show All" button
+            if total_recipes > 5:
+                # Store the full recipe list temporarily
+                temp_id = self.store_temp_recipe_list(recipes, search_criteria)
+
+                show_all_button = {
+                    "type": "action_button",
+                    "text": f"Show All {total_recipes} Recipes",
+                    "action": "show_all_recipes",
+                    "metadata": {
+                        "temp_id": temp_id,
+                        "total_count": total_recipes,
+                        "criteria_description": criteria_description
+                    }
+                }
+                response += f"\n\n[ACTION_BUTTON:{json.dumps(show_all_button)}]"
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error generating internal response: {e}")
+            criteria_text = ""
+            if search_criteria:
+                if search_criteria.get('ingredient') and search_criteria.get('genre'):
+                    criteria_text = f"{search_criteria['genre']} recipes with {search_criteria['ingredient']}"
+                elif search_criteria.get('ingredient'):
+                    criteria_text = f"recipes with {search_criteria['ingredient']}"
+                elif search_criteria.get('genre'):
+                    criteria_text = f"{search_criteria['genre']} recipes"
+
+            return f"I found {len(recipes)} {criteria_text} in your database, but encountered an error formatting the response."
+
+    def handle_show_all_recipes_action(self, temp_id: str) -> str:
+        """Handle the 'show all recipes' action"""
+        try:
+            stored_data = self.get_temp_recipe_list(temp_id)
+            if not stored_data:
+                return "Sorry, the recipe list has expired. Please search again."
+
+            recipes = stored_data["recipes"]
+            search_criteria = stored_data.get("search_criteria", {})
+
+            criteria_description = ""
+            if search_criteria:
+                if search_criteria.get('ingredient') and search_criteria.get('genre'):
+                    criteria_description = f"{search_criteria['genre']} recipes with {search_criteria['ingredient']}"
+                elif search_criteria.get('ingredient'):
+                    criteria_description = f"recipes with {search_criteria['ingredient']}"
+                elif search_criteria.get('genre'):
+                    criteria_description = f"{search_criteria['genre']} recipes"
+
+            response = f"Here are all {len(recipes)} {criteria_description}:"
+
+            # Add buttons for all recipes
+            for recipe in recipes:
+                button = self.create_recipe_view_button(recipe)
+                response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error handling show all recipes action: {e}")
+            return "Sorry, I encountered an error retrieving the full recipe list. Please try searching again."
+
+    async def chat_about_recipes(self, user_message: str,
+                                 conversation_history: Optional[List[Dict]] = None,
+                                 action_type: Optional[str] = None,
+                                 action_metadata: Optional[Dict] = None) -> str:
+        """Enhanced main chat function with recipe creation support and action handling"""
+        if not self.is_configured():
+            return "AI features are currently unavailable. Please contact the administrator to configure the OpenAI API key."
+
+        try:
+            # Handle special actions first
+            if action_type == "show_all_recipes" and action_metadata and action_metadata.get("temp_id"):
+                return self.handle_show_all_recipes_action(action_metadata["temp_id"])
+
+            # Handle show all external recipes action
+            if action_type == "show_all_external_recipes" and action_metadata and action_metadata.get("temp_id"):
+                return self.handle_show_all_external_recipes_action(action_metadata["temp_id"])
+
+            # Step 0: Check if this is a capability question first (before any recipe logic)
+            if self._is_capability_question(user_message):
+                return await self._generate_general_conversation_response(user_message, conversation_history)
+
+            # Step 1: Check for recipe creation intent
+            creation_intent = self._detect_recipe_creation_intent(user_message)
+
+            # Step 2: Extract search criteria and log for debugging
+            search_criteria = self.extract_search_intent(user_message)
+            logger.info(f"Extracted search criteria: {search_criteria}")
+
+            # Step 3: Check if this is a recipe-related query at all
+            is_recipe_related = self._is_recipe_related_query(user_message, search_criteria)
+
+            # Search internal database ONLY if we have criteria OR it's clearly recipe-related
+            internal_recipes = []
+            recipe_count = 0
+
+            if search_criteria and is_recipe_related:
+                internal_recipes = self.search_recipes_by_criteria(search_criteria)
+                recipe_count = self.count_recipes_by_criteria(search_criteria)
+                logger.info(
+                    f"Found {len(internal_recipes)} recipes, count: {recipe_count}, matching criteria: {search_criteria}")
+
+            # Step 4: Handle different scenarios
+            if creation_intent == "help_create":
+                # User wants help creating a recipe
+                return await self._generate_creation_help_response(user_message, conversation_history)
+
+            elif self.detect_external_search_request(user_message):
+                # User specifically requested external/online search - prioritize this
+                search_params = self.extract_search_parameters(user_message)
+                external_recipes = await self.search_external_recipes(search_criteria, search_params)
+
+                return await self._generate_external_response(user_message, external_recipes,
+                                                              search_criteria, search_params,
+                                                              conversation_history)
+
+            elif internal_recipes and len(internal_recipes) > 0:
+                # We found recipes in the database (and user didn't specifically ask for external)
+                response = await self._generate_internal_response(user_message, internal_recipes,
+                                                                  conversation_history, search_criteria)
+
+                # Check if we should add an "Add Recipe" button
+                if self.should_show_add_recipe_button(user_message, response):
+                    button = self.create_recipe_action_button()
+                    response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+
+                return response
+
+            elif search_criteria and is_recipe_related:
+                # Step 5: Ask for permission to search externally (only if recipe-related)
+                response = self._generate_permission_request(search_criteria, user_message)
+
+                # Add "Add Recipe" button for creation help
+                if creation_intent or self.should_show_add_recipe_button(user_message, response):
+                    button = self.create_recipe_action_button()
+                    response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+
+                return response
+
+            else:
+                # Step 6: Handle general conversation (NOT recipe-related)
+                return await self._generate_general_conversation_response(user_message, conversation_history)
+
+        except Exception as e:
+            logger.error(f"Error in chat_about_recipes: {e}")
+            return "I'm sorry, I encountered an error while processing your request. Please try again."
+
+    def handle_show_all_external_recipes_action(self, temp_id: str) -> str:
+        """Handle the 'show all external recipes' action"""
+        try:
+            stored_data = self.get_temp_recipe_list(temp_id)
+            if not stored_data:
+                return "Sorry, the external recipe list has expired. Please search again."
+
+            recipes = stored_data["recipes"]
+            search_criteria = stored_data.get("search_criteria", {})
+
+            response = f"Here are all {len(recipes)} external recipes I found:"
+
+            # Add buttons for all external recipes
+            for recipe in recipes:
+                formatted_recipe = self.format_recipe_for_form(recipe)
+                if formatted_recipe:
+                    button = self.create_recipe_action_button(formatted_recipe)
+                    response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error handling show all external recipes action: {e}")
+            return "Sorry, I encountered an error retrieving the full external recipe list. Please try searching again."
+
+    async def _generate_external_response(self, user_message: str, external_recipes: List[Dict],
+                                          search_criteria: Dict[str, Any], search_params: Dict[str, Any],
+                                          conversation_history: Optional[List[Dict]]) -> str:
+        """Enhanced external response with recipe action buttons and pagination"""
+        try:
+            if not external_recipes:
+                response = "I searched the internet as requested, but couldn't find recipes matching your criteria. Would you like to try different search terms or check different websites?"
+                button = self.create_recipe_action_button()
+                response += f"\n\nOr you can create your own recipe:\n[ACTION_BUTTON:{json.dumps(button)}]"
+                return response
+
+            # Build context for external results with pagination
+            total_recipes = len(external_recipes)
+            show_initial = min(5, total_recipes)  # Show max 5 initially
+            recipes_to_show = external_recipes[:show_initial]
+
+            external_context = f"\n\nI searched the internet and found {total_recipes} recipes. Here are the first {show_initial}:\n"
+            for i, recipe in enumerate(recipes_to_show, 1):
+                external_context += f"\n{i}. **{recipe['name']}** (from {recipe['source']})\n"
+                external_context += f"   - {recipe['description']}\n"
+                if recipe.get('url'):
+                    external_context += f"   - URL: {recipe['url']}\n"
+
+            search_info = ""
+            if search_params:
+                if search_params.get('specific_websites'):
+                    search_info += f"Searched on: {', '.join(search_params['specific_websites'])}\n"
+                if search_params.get('cuisine_type'):
+                    search_info += f"Cuisine focus: {search_params['cuisine_type']}\n"
+
+            system_message = f"""You are Rupert, a helpful cooking assistant. The user asked you to search the internet for recipes since nothing was found in their personal database.
+
+External search results: Found {total_recipes} recipes from the internet.
+{search_info}
+
+{external_context}
+
+Guidelines:
+- Present the external recipes you found
+- Mention that these are from the internet, not their personal database
+- Ask if they'd like full details for any recipe
+- Offer to help them save promising recipes to their database
+- Be helpful in explaining the differences between their saved recipes and internet finds"""
+
+            messages = [{"role": "system", "content": system_message}]
+
+            if conversation_history:
+                messages.extend(conversation_history[-4:])
+
+            messages.append({"role": "user", "content": user_message})
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=800,
+                temperature=0.7
+            )
+
+            ai_response = response.choices[0].message.content.strip()
+
+            # Add action buttons for external recipes (first 5 only initially)
+            for i, recipe in enumerate(recipes_to_show):
+                formatted_recipe = self.format_recipe_for_form(recipe)
+                if formatted_recipe:
+                    button = self.create_recipe_action_button(formatted_recipe)
+                    ai_response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+
+            # If there are more than 5 external recipes, add "Show All" button
+            if total_recipes > 5:
+                # Store the full external recipe list temporarily
+                temp_id = self.store_temp_recipe_list(external_recipes, search_criteria)
+
+                show_all_button = {
+                    "type": "action_button",
+                    "text": f"Show All {total_recipes} External Recipes",
+                    "action": "show_all_external_recipes",
+                    "metadata": {
+                        "temp_id": temp_id,
+                        "total_count": total_recipes,
+                        "source": "external"
+                    }
+                }
+                ai_response += f"\n\n[ACTION_BUTTON:{json.dumps(show_all_button)}]"
+
+            return ai_response
+
+        except Exception as e:
+            logger.error(f"Error generating external response: {e}")
+            return "I found some recipes online, but encountered an error presenting them. Please try again."
+
     def get_recipe_suggestions_by_ingredients(self, ingredients: List[str]) -> str:
-        """Get recipe suggestions based on available ingredients"""
+        """Get recipe suggestions based on available ingredients with pagination"""
         if not self.is_configured():
             return "AI features require OpenAI API key configuration."
 
@@ -1694,7 +1279,7 @@ Guidelines:
                 recipes_with_ingredients.extend(matching_recipes)
 
             # Remove duplicates
-            unique_recipes = {recipe['id']: recipe for recipe in recipes_with_ingredients}.values()
+            unique_recipes = list({recipe['id']: recipe for recipe in recipes_with_ingredients}.values())
 
             if not unique_recipes:
                 response = f"""I couldn't find any recipes in your database that use {', '.join(ingredients)}.
@@ -1711,16 +1296,45 @@ Just let me know if you'd like me to search online and any preferences you have!
                 response += f"\n\nOr create your own recipe:\n[ACTION_BUTTON:{json.dumps(button)}]"
                 return response
 
+            # Apply pagination
+            total_recipes = len(unique_recipes)
+            show_initial = min(5, total_recipes)
+            recipes_to_show = unique_recipes[:show_initial]
+
             # Format response
             recipe_list = ""
-            for recipe in list(unique_recipes)[:5]:  # Limit to 5 suggestions
+            for recipe in recipes_to_show:
                 recipe_list += f"\n• **{recipe['name']}** - {recipe['genre']} recipe for {recipe['serving_size']} people"
                 recipe_list += f"\n  Total time: {recipe['total_time']} minutes"
 
-            response = f"Great! I found some recipes in your database that use {', '.join(ingredients)}:\n{recipe_list}"
+            response = f"Great! I found {total_recipes} recipes in your database that use {', '.join(ingredients)}. Here are the first {show_initial}:\n{recipe_list}"
+
+            # Add action buttons for shown recipes
+            for recipe in recipes_to_show:
+                button = self.create_recipe_view_button(recipe)
+                response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+
+            # If there are more than 5 recipes, add "Show All" button
+            if total_recipes > 5:
+                # Store the full recipe list temporarily
+                search_criteria = {"ingredients_used": ingredients}
+                temp_id = self.store_temp_recipe_list(unique_recipes, search_criteria)
+
+                show_all_button = {
+                    "type": "action_button",
+                    "text": f"Show All {total_recipes} Recipes with These Ingredients",
+                    "action": "show_all_recipes",
+                    "metadata": {
+                        "temp_id": temp_id,
+                        "total_count": total_recipes,
+                        "criteria_description": f"recipes using {', '.join(ingredients)}"
+                    }
+                }
+                response += f"\n\n[ACTION_BUTTON:{json.dumps(show_all_button)}]"
+
             response += f"\n\nWould you like me to provide the full recipe details for any of these, or would you like me to search the internet for additional options?"
 
-            # Add action button
+            # Add action button for creating new recipe
             button = self.create_recipe_action_button()
             response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
 
@@ -1729,6 +1343,473 @@ Just let me know if you'd like me to search online and any preferences you have!
         except Exception as e:
             logger.error(f"Error getting recipe suggestions: {e}")
             return "Sorry, I couldn't retrieve recipe suggestions at the moment."
+
+    # ... (keeping all other existing methods unchanged) ...
+
+    def format_recipe_for_form(self, raw_recipe_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Format raw recipe data for the add recipe form"""
+        try:
+            formatted_recipe = {
+                "recipe_name": "",
+                "description": "",
+                "ingredients": [],
+                "instructions": [],
+                "serving_size": 4,
+                "genre": "dinner",
+                "prep_time": 0,
+                "cook_time": 0,
+                "notes": [],
+                "dietary_restrictions": []
+            }
+
+            # Extract recipe name
+            if "name" in raw_recipe_data:
+                formatted_recipe["recipe_name"] = raw_recipe_data["name"]
+            elif "recipe_name" in raw_recipe_data:
+                formatted_recipe["recipe_name"] = raw_recipe_data["recipe_name"]
+            elif "title" in raw_recipe_data:
+                formatted_recipe["recipe_name"] = raw_recipe_data["title"]
+
+            # Extract description
+            if "description" in raw_recipe_data:
+                description = raw_recipe_data["description"]
+                if len(description) <= 500:  # Respect the field limit
+                    formatted_recipe["description"] = description
+                else:
+                    formatted_recipe["description"] = description[:497] + "..."
+
+            # Extract and format ingredients
+            if "ingredients" in raw_recipe_data:
+                for ingredient in raw_recipe_data["ingredients"]:
+                    if isinstance(ingredient, str):
+                        # Parse string ingredient
+                        parsed = self._parse_ingredient_string(ingredient)
+                        if parsed:
+                            formatted_recipe["ingredients"].append(parsed)
+                    elif isinstance(ingredient, dict):
+                        # Already structured ingredient
+                        formatted_ingredient = self._format_structured_ingredient(ingredient)
+                        if formatted_ingredient:
+                            formatted_recipe["ingredients"].append(formatted_ingredient)
+
+            # Extract instructions
+            if "instructions" in raw_recipe_data:
+                instructions = raw_recipe_data["instructions"]
+                if isinstance(instructions, list):
+                    for instruction in instructions:
+                        if isinstance(instruction, str):
+                            cleaned = self._clean_instruction_text(instruction)
+                            if cleaned:
+                                formatted_recipe["instructions"].append(cleaned)
+                        elif isinstance(instruction, dict) and "text" in instruction:
+                            cleaned = self._clean_instruction_text(instruction["text"])
+                            if cleaned:
+                                formatted_recipe["instructions"].append(cleaned)
+                elif isinstance(instructions, str):
+                    # Split by common delimiters
+                    instruction_list = self._split_instructions(instructions)
+                    formatted_recipe["instructions"].extend(instruction_list)
+
+            # Extract serving size
+            if "serving_size" in raw_recipe_data:
+                try:
+                    serving_size = int(raw_recipe_data["serving_size"])
+                    if 1 <= serving_size <= 100:
+                        formatted_recipe["serving_size"] = serving_size
+                except (ValueError, TypeError):
+                    pass
+            elif "servings" in raw_recipe_data:
+                try:
+                    serving_size = int(raw_recipe_data["servings"])
+                    if 1 <= serving_size <= 100:
+                        formatted_recipe["serving_size"] = serving_size
+                except (ValueError, TypeError):
+                    pass
+
+            # Extract genre/category
+            if "genre" in raw_recipe_data:
+                genre = self._map_genre(raw_recipe_data["genre"])
+                if genre:
+                    formatted_recipe["genre"] = genre
+            elif "category" in raw_recipe_data:
+                genre = self._map_genre(raw_recipe_data["category"])
+                if genre:
+                    formatted_recipe["genre"] = genre
+
+            # Extract timing
+            if "prep_time" in raw_recipe_data:
+                prep_time = self._parse_time(raw_recipe_data["prep_time"])
+                if prep_time is not None:
+                    formatted_recipe["prep_time"] = prep_time
+
+            if "cook_time" in raw_recipe_data:
+                cook_time = self._parse_time(raw_recipe_data["cook_time"])
+                if cook_time is not None:
+                    formatted_recipe["cook_time"] = cook_time
+
+            # Extract notes (exclude nutrition info)
+            notes = []
+
+            # Add any additional notes or tips
+            if "notes" in raw_recipe_data:
+                if isinstance(raw_recipe_data["notes"], list):
+                    notes.extend(raw_recipe_data["notes"])
+                elif isinstance(raw_recipe_data["notes"], str):
+                    notes.append(raw_recipe_data["notes"])
+
+            if "tips" in raw_recipe_data:
+                if isinstance(raw_recipe_data["tips"], list):
+                    notes.extend(raw_recipe_data["tips"])
+                elif isinstance(raw_recipe_data["tips"], str):
+                    notes.append(raw_recipe_data["tips"])
+
+            if "additional_info" in raw_recipe_data:
+                notes.append(raw_recipe_data["additional_info"])
+
+            formatted_recipe["notes"] = notes
+
+            # Extract dietary restrictions
+            dietary_restrictions = []
+            if "dietary_restrictions" in raw_recipe_data:
+                dietary_restrictions = raw_recipe_data["dietary_restrictions"]
+            elif "dietary_info" in raw_recipe_data:
+                dietary_restrictions = raw_recipe_data["dietary_info"]
+            elif "diet_tags" in raw_recipe_data:
+                dietary_restrictions = raw_recipe_data["diet_tags"]
+
+            # Filter and validate dietary restrictions
+            valid_restrictions = ["gluten_free", "dairy_free", "egg_free", "vegetarian", "vegan", "keto", "paleo"]
+            filtered_restrictions = []
+            for restriction in dietary_restrictions:
+                if isinstance(restriction, str):
+                    normalized = restriction.lower().replace(" ", "_").replace("-", "_")
+                    if normalized in valid_restrictions:
+                        filtered_restrictions.append(normalized)
+
+            formatted_recipe["dietary_restrictions"] = filtered_restrictions
+
+            return formatted_recipe
+
+        except Exception as e:
+            logger.error(f"Error formatting recipe for form: {e}")
+            return None
+
+    def get_recipes_data(self, limit: int = 50) -> List[Dict]:
+        """Retrieve recipes from database for AI context"""
+        try:
+            if db is None:
+                logger.warning("Database not available")
+                return []
+
+            recipes = list(db.recipes.find().limit(limit))
+            processed_recipes = []
+
+            for recipe in recipes:
+                processed_recipe = {
+                    "id": str(recipe["_id"]),
+                    "name": recipe["recipe_name"],
+                    "description": recipe.get("description", ""),
+                    "genre": recipe["genre"],
+                    "serving_size": recipe["serving_size"],
+                    "prep_time": recipe.get("prep_time", 0),
+                    "cook_time": recipe.get("cook_time", 0),
+                    "total_time": (recipe.get("prep_time", 0) + recipe.get("cook_time", 0)),
+                    "ingredients": [
+                        f"{ing['quantity']} {ing['unit']} {ing['name']}"
+                        for ing in recipe["ingredients"]
+                    ],
+                    "instructions": recipe["instructions"],
+                    "notes": recipe.get("notes", []),
+                    "dietary_restrictions": recipe.get("dietary_restrictions", []),
+                    "created_by": recipe["created_by"],
+                    "created_at": recipe["created_at"].strftime("%Y-%m-%d") if recipe.get("created_at") else ""
+                }
+                processed_recipes.append(processed_recipe)
+
+            return processed_recipes
+        except Exception as e:
+            logger.error(f"Error retrieving recipes: {e}")
+            return []
+
+    def debug_database_contents(self, ingredient_term: str = None, genre_term: str = None) -> Dict[str, Any]:
+        """Debug method to see what's actually in the database"""
+        try:
+            if db is None:
+                return {"error": "Database not available"}
+
+            # Get a sample of recipes to see their structure
+            sample_recipes = list(db.recipes.find().limit(5))
+
+            debug_info = {
+                "total_recipes": db.recipes.count_documents({}),
+                "sample_structures": []
+            }
+
+            for recipe in sample_recipes:
+                debug_info["sample_structures"].append({
+                    "name": recipe.get("recipe_name", ""),
+                    "genre": recipe.get("genre", ""),
+                    "ingredients": [ing.get("name", "") for ing in recipe.get("ingredients", [])],
+                    "first_ingredient_example": recipe.get("ingredients", [{}])[0] if recipe.get("ingredients") else {}
+                })
+
+            # If specific terms provided, search for them
+            if ingredient_term:
+                ingredient_matches = list(db.recipes.find({
+                    "ingredients.name": {"$regex": ingredient_term, "$options": "i"}
+                }).limit(3))
+                debug_info["ingredient_matches"] = len(ingredient_matches)
+                debug_info["ingredient_examples"] = [
+                    {
+                        "name": r.get("recipe_name", ""),
+                        "ingredients": [ing.get("name", "") for ing in r.get("ingredients", [])]
+                    } for r in ingredient_matches
+                ]
+
+            if genre_term:
+                genre_matches = list(db.recipes.find({
+                    "genre": {"$regex": genre_term, "$options": "i"}
+                }).limit(3))
+                debug_info["genre_matches"] = len(genre_matches)
+                debug_info["genre_examples"] = [
+                    {
+                        "name": r.get("recipe_name", ""),
+                        "genre": r.get("genre", "")
+                    } for r in genre_matches
+                ]
+
+            logger.info(f"Database debug info: {debug_info}")
+            return debug_info
+
+        except Exception as e:
+            logger.error(f"Error debugging database: {e}")
+            return {"error": str(e)}
+
+    def search_recipes_by_criteria(self, criteria: Dict[str, Any]) -> List[Dict]:
+        """Search recipes based on specific criteria with exact phrase matching for ingredients"""
+        try:
+            if db is None:
+                logger.warning("Database not available")
+                return []
+
+            # DEBUG: Print to confirm we're using the new version
+            logger.info("DEBUG: Using NEW search_recipes_by_criteria method - FIXED VERSION")
+
+            # First, debug what's in the database
+            if criteria.get('ingredient'):
+                self.debug_database_contents(ingredient_term=criteria['ingredient'])
+            if criteria.get('genre'):
+                self.debug_database_contents(genre_term=criteria['genre'])
+
+            query = {}
+
+            # Handle different search criteria - build proper AND query
+            if "genre" in criteria:
+                # More flexible genre matching - handle plural/singular
+                genre_term = criteria["genre"].lower()
+                genre_patterns = [genre_term]
+                if genre_term.endswith('s'):
+                    genre_patterns.append(genre_term[:-1])  # Remove 's'
+                else:
+                    genre_patterns.append(genre_term + 's')  # Add 's'
+
+                query["genre"] = {"$regex": "|".join(genre_patterns), "$options": "i"}
+
+            if "ingredient" in criteria:
+                # DEBUG: Show what we're processing
+                logger.info(f"DEBUG: Processing ingredient '{criteria['ingredient']}'")
+
+                # EXACT phrase matching for ingredients - NO word splitting
+                ingredient_term = criteria["ingredient"]
+
+                # Use word boundaries for exact phrase matching
+                # This will match "peanut butter" as a complete phrase, not just "butter"
+                escaped_ingredient = re.escape(ingredient_term)
+                logger.info(f"DEBUG: Escaped ingredient: '{escaped_ingredient}'")
+
+                regex_pattern = f"\\b{escaped_ingredient}\\b"
+                logger.info(f"DEBUG: Final regex pattern: '{regex_pattern}'")
+
+                query["ingredients.name"] = {"$regex": regex_pattern, "$options": "i"}
+
+            if "name" in criteria:
+                query["recipe_name"] = {"$regex": criteria["name"], "$options": "i"}
+
+            if "max_time" in criteria:
+                # Search by total time
+                query["$expr"] = {
+                    "$lte": [
+                        {"$add": [{"$ifNull": ["$prep_time", 0]}, {"$ifNull": ["$cook_time", 0]}]},
+                        criteria["max_time"]
+                    ]
+                }
+
+            if "dietary_restrictions" in criteria:
+                query["dietary_restrictions"] = {"$in": criteria["dietary_restrictions"]}
+
+            logger.info(f"MongoDB query: {query}")
+            recipes = list(db.recipes.find(query).limit(50))  # Increased limit since we'll paginate in response
+            logger.info(f"Found {len(recipes)} recipes from database")
+
+            # If no exact matches found and ingredient contains spaces (compound ingredient),
+            # try a fallback search with individual words only as last resort
+            if len(recipes) == 0 and "ingredient" in criteria and " " in criteria["ingredient"]:
+                logger.info("No exact phrase matches found, trying fallback with individual words")
+                words = criteria["ingredient"].split()
+                word_patterns = [f"\\b{re.escape(word)}\\b" for word in words]
+                fallback_query = query.copy()
+                fallback_query["ingredients.name"] = {"$regex": "|".join(word_patterns), "$options": "i"}
+
+                recipes = list(db.recipes.find(fallback_query).limit(50))
+                logger.info(f"Fallback word search found {len(recipes)} recipes")
+
+            return [self._format_recipe_for_ai(recipe) for recipe in recipes]
+
+        except Exception as e:
+            logger.error(f"Error searching recipes: {e}")
+            return []
+
+    def count_recipes_by_criteria(self, criteria: Dict[str, Any]) -> int:
+        """Count recipes matching criteria using the same logic as search"""
+        try:
+            if db is None:
+                return 0
+
+            query = {}
+
+            if "genre" in criteria:
+                genre_term = criteria["genre"].lower()
+                genre_patterns = [genre_term]
+                if genre_term.endswith('s'):
+                    genre_patterns.append(genre_term[:-1])
+                else:
+                    genre_patterns.append(genre_term + 's')
+                query["genre"] = {"$regex": "|".join(genre_patterns), "$options": "i"}
+
+            if "ingredient" in criteria:
+                # EXACT phrase matching for ingredients - NO word splitting
+                ingredient_term = criteria["ingredient"]
+
+                # Use word boundaries for exact phrase matching
+                # This will match "peanut butter" as a complete phrase, not just "butter"
+                escaped_ingredient = re.escape(ingredient_term)
+                query["ingredients.name"] = {"$regex": f"\\b{escaped_ingredient}\\b", "$options": "i"}
+
+            if "name" in criteria:
+                query["recipe_name"] = {"$regex": criteria["name"], "$options": "i"}
+
+            if "max_time" in criteria:
+                query["$expr"] = {
+                    "$lte": [
+                        {"$add": [{"$ifNull": ["$prep_time", 0]}, {"$ifNull": ["$cook_time", 0]}]},
+                        criteria["max_time"]
+                    ]
+                }
+            if "dietary_restrictions" in criteria:
+                query["dietary_restrictions"] = {"$in": criteria["dietary_restrictions"]}
+
+            logger.info(f"Count query: {query}")
+            count = db.recipes.count_documents(query)
+            logger.info(f"Count result: {count}")
+            return count
+        except Exception as e:
+            logger.error(f"Error counting recipes: {e}")
+            return 0
+
+    def get_recipe_by_id(self, recipe_id: str) -> Optional[Dict]:
+        """Get specific recipe by ID"""
+        try:
+            if db is None or not ObjectId.is_valid(recipe_id):
+                return None
+
+            recipe = db.recipes.find_one({"_id": ObjectId(recipe_id)})
+            if recipe:
+                return self._format_recipe_for_ai(recipe)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting recipe by ID: {e}")
+            return None
+
+    def _format_recipe_for_ai(self, recipe: Dict) -> Dict:
+        """Format recipe for AI consumption"""
+        return {
+            "id": str(recipe["_id"]),
+            "name": recipe["recipe_name"],
+            "description": recipe.get("description", ""),
+            "genre": recipe["genre"],
+            "serving_size": recipe["serving_size"],
+            "prep_time": recipe.get("prep_time", 0),
+            "cook_time": recipe.get("cook_time", 0),
+            "total_time": (recipe.get("prep_time", 0) + recipe.get("cook_time", 0)),
+            "ingredients": [
+                f"{ing['quantity']} {ing['unit']} {ing['name']}"
+                for ing in recipe["ingredients"]
+            ],
+            "instructions": recipe["instructions"],
+            "notes": recipe.get("notes", []),
+            "dietary_restrictions": recipe.get("dietary_restrictions", []),
+            "created_by": recipe["created_by"],
+            "created_at": recipe["created_at"].strftime("%Y-%m-%d") if recipe.get("created_at") else ""
+        }
+
+    def extract_search_intent(self, user_message: str) -> Dict[str, Any]:
+        """Extract search criteria from user message using AI"""
+        if not self.is_configured():
+            return {}
+
+        # Don't extract search criteria from capability questions
+        if self._is_capability_question(user_message):
+            return {}
+
+        try:
+            prompt = f"""
+            Analyze this user message about recipes and extract search criteria as JSON:
+            User message: "{user_message}"
+
+            IMPORTANT: Only extract criteria if the user is actually asking to FIND or SEARCH for recipes, not if they're asking about capabilities or what you can do.
+
+            Extract any of these criteria if mentioned:
+            - genre: breakfast, lunch, dinner, snack, dessert, appetizer
+            - ingredient: any ingredient name mentioned (be very specific - if they say "peanut butter", extract exactly "peanut butter")
+            - name: recipe name if specifically mentioned
+            - max_time: maximum cooking time in minutes if mentioned
+            - dietary_restrictions: gluten_free, dairy_free, egg_free
+
+            IMPORTANT: 
+            - When both genre AND ingredient are mentioned (like "desserts with peanut butter"), include BOTH in the result
+            - Be precise with ingredient names - extract them exactly as mentioned
+            - If someone says "show me desserts with chocolate", extract both "genre": "dessert" AND "ingredient": "chocolate"
+            - If someone asks "Can you find recipes on Pinterest?" or "Are you able to look up recipes?" - return {{}} because they're asking about capabilities, not searching
+
+            Return only valid JSON like:
+            {{"genre": "dessert", "ingredient": "peanut butter"}}
+            {{"ingredient": "chicken"}}
+            {{"genre": "breakfast"}}
+
+            If no criteria found or if asking about capabilities, return: {{}}
+            """
+
+            response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=200,
+                temperature=0.1
+            )
+
+            result = response.choices[0].message.content.strip()
+            logger.info(f"AI search extraction result: {result}")
+
+            try:
+                criteria = json.loads(result)
+                logger.info(f"Parsed search criteria: {criteria}")
+                return criteria
+            except json.JSONDecodeError:
+                logger.warning(f"Could not parse AI search criteria: {result}")
+                return {}
+
+        except Exception as e:
+            logger.error(f"Error extracting search intent: {e}")
+            return {}
 
 
 # Global AI helper instance
