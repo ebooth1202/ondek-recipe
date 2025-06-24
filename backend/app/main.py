@@ -422,9 +422,9 @@ async def health_check():
 
 
 # Basic routes
-@app.get("/")
-async def root():
-    return {"message": "Welcome to the Ondek Recipe API! 🍳"}
+# @app.get("/")
+# async def root():
+#     return {"message": "Welcome to the Ondek Recipe API! 🍳"}
 
 
 # Authentication routes
