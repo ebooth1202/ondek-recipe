@@ -1,10 +1,12 @@
-# backend/app/database.py - Enhanced version with new indexes and default user setup
+# backend/app/database.py - Enhanced version with better production handling
 
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
+from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 from .config import settings
 import logging
 from datetime import datetime
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -12,29 +14,53 @@ logger = logging.getLogger(__name__)
 class Database:
     client = None
     database = None
+    connection_retries = 0
+    max_retries = 3
 
     @classmethod
     def initialize(cls):
-        try:
-            cls.client = MongoClient(
-                settings.mongo_uri,
-                server_api=ServerApi('1')
-            )
-            cls.database = cls.client.ondek_recipe
+        """Initialize database connection with retry logic"""
+        for attempt in range(cls.max_retries):
+            try:
+                cls._connect()
+                break
+            except Exception as e:
+                cls.connection_retries += 1
+                logger.warning(f"Database connection attempt {attempt + 1} failed: {e}")
+                if attempt < cls.max_retries - 1:
+                    time.sleep(2 ** attempt)  # Exponential backoff
+                else:
+                    logger.error("Max database connection retries exceeded")
+                    raise
 
-            # Test connection
-            cls.client.admin.command('ping')
-            logger.info("Successfully connected to MongoDB Atlas!")
+    @classmethod
+    def _connect(cls):
+        """Establish database connection"""
+        if not settings.mongo_uri:
+            raise Exception("MONGO_URI or MONGODB_URL environment variable not set")
 
-            # Create indexes
-            cls._create_indexes()
+        cls.client = MongoClient(
+            settings.mongo_uri,
+            server_api=ServerApi('1'),
+            serverSelectionTimeoutMS=5000,  # 5 second timeout
+            connectTimeoutMS=10000,  # 10 second connection timeout
+            maxPoolSize=50,  # Maximum connection pool size
+            retryWrites=True,
+            retryReads=True
+        )
 
-            # Create default admin user if it doesn't exist
-            cls._ensure_default_user()
+        # Test connection
+        cls.client.admin.command('ping')
+        logger.info("Successfully connected to MongoDB Atlas!")
 
-        except Exception as e:
-            logger.error(f"Failed to connect to MongoDB: {e}")
-            raise
+        # Get database
+        cls.database = cls.client[settings.database_name]
+
+        # Create indexes
+        cls._create_indexes()
+
+        # Create default admin user if it doesn't exist
+        cls._ensure_default_user()
 
     @classmethod
     def _create_indexes(cls):
@@ -53,16 +79,14 @@ class Database:
             # Rating indexes
             cls.database.ratings.create_index("recipe_id")
             cls.database.ratings.create_index("user_id")
-            cls.database.ratings.create_index([("recipe_id", 1), ("user_id", 1)],
-                                              unique=True)  # Prevent duplicate ratings
+            cls.database.ratings.create_index([("recipe_id", 1), ("user_id", 1)], unique=True)
             cls.database.ratings.create_index("rating")
             cls.database.ratings.create_index("created_at")
 
             # Favorite indexes
             cls.database.favorites.create_index("recipe_id")
             cls.database.favorites.create_index("user_id")
-            cls.database.favorites.create_index([("recipe_id", 1), ("user_id", 1)],
-                                                unique=True)  # Prevent duplicate favorites
+            cls.database.favorites.create_index([("recipe_id", 1), ("user_id", 1)], unique=True)
             cls.database.favorites.create_index("created_at")
 
             logger.info("Database indexes created successfully")
@@ -95,6 +119,7 @@ class Database:
 
                 cls.database.users.insert_one(owner_user)
                 logger.info("Default owner user created successfully")
+                logger.info("Default login: username='owner', password='admin123'")
             else:
                 logger.info("Default owner user already exists")
         except Exception as e:
@@ -102,7 +127,22 @@ class Database:
 
     @classmethod
     def get_database(cls):
+        """Get database instance"""
+        if cls.database is None:
+            logger.warning("Database not initialized")
+            return None
         return cls.database
+
+    @classmethod
+    def is_connected(cls):
+        """Check if database is connected"""
+        if not cls.client or not cls.database:
+            return False
+        try:
+            cls.client.admin.command('ping')
+            return True
+        except:
+            return False
 
     @classmethod
     def get_current_datetime(cls):
@@ -111,5 +151,10 @@ class Database:
 
 
 # Initialize database connection
-Database.initialize()
-db = Database.get_database()
+try:
+    Database.initialize()
+    db = Database.get_database()
+    logger.info("Database initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize database: {e}")
+    db = None

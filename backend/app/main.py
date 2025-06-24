@@ -26,6 +26,7 @@ import io
 import json
 import shutil
 from pathlib import Path
+from .config import settings  # Make sure you import your settings
 
 # Load environment variables first
 # load_dotenv()
@@ -91,10 +92,21 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        # Add your production URLs here when you have them
+        settings.base_url,
+        "https://*.herokuapp.com"  # Allow any Heroku subdomain
+    ] if not settings.is_production() else [
+        settings.base_url,
+        "https://your-frontend-domain.com"  # Replace with your actual frontend domain
+    ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],  # Allow all headers
+    allow_headers=["*"],
     expose_headers=["Content-Type"],
     max_age=600,
 )
@@ -311,8 +323,8 @@ async def save_uploaded_photo(photo: UploadFile, recipe_id: str) -> Optional[str
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(photo.file, buffer)
 
-        # Return the full URL using the photos endpoint
-        return f"http://127.0.0.1:8000/photos/{filename}"
+        # Return the full URL using settings
+        return f"{settings.base_url}/photos/{filename}"
 
     except Exception as e:
         logger.error(f"Error saving photo: {e}")
@@ -324,6 +336,9 @@ def fix_photo_url(photo_url: Optional[str]) -> Optional[str]:
     if not photo_url:
         return None
 
+    # Use base URL from settings
+    base_url = settings.base_url
+
     # If it's already a full URL, return as-is
     if photo_url.startswith('http'):
         return photo_url
@@ -331,11 +346,11 @@ def fix_photo_url(photo_url: Optional[str]) -> Optional[str]:
     # If it's an old static path, convert it
     if photo_url.startswith('/static/photos/'):
         filename = photo_url.replace('/static/photos/', '')
-        return f"http://127.0.0.1:8000/photos/{filename}"
+        return f"{base_url}/photos/{filename}"
 
     # If it's just a filename, add the full URL
     if not photo_url.startswith('/'):
-        return f"http://127.0.0.1:8000/photos/{photo_url}"
+        return f"{base_url}/photos/{filename}"
 
     return photo_url
 
@@ -365,6 +380,8 @@ async def get_photo(filename: str):
 async def startup_event():
     """Initialize services on startup"""
     logger.info("Starting Ondek Recipe API...")
+    logger.info(f"Environment: {'Production' if settings.is_production() else 'Development'}")
+    logger.info(f"Base URL: {settings.base_url}")
 
     if not db_available:
         logger.warning("Database connection not available")
@@ -377,6 +394,17 @@ async def startup_event():
         logger.info("AI helper configured and ready")
     else:
         logger.warning("AI helper available but not configured (missing OpenAI API key)")
+
+# 5. UPDATE the main section at the bottom
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=port,
+        log_level="info" if settings.is_production() else "debug"
+    )
 
 
 # Health check route
