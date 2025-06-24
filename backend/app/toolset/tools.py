@@ -1,4 +1,4 @@
-# backend/app/toolset/tools.py - Rupert's Tool Collection
+# backend/app/toolset/tools.py - Updated with Preview Button functionality
 
 import os
 import logging
@@ -57,7 +57,7 @@ class RecipeSearchTool:
                 {
                     "name": f"Classic {ingredient.title()} Recipe",
                     "source": source,
-                    "description": f"A delicious and easy-to-make {ingredient} recipe perfect for any occasion",
+                    "description": f"A delicious and easy-to-make {ingredient} recipe perfect for any occasion. This classic recipe has been passed down through generations and creates the perfect texture every time.",
                     "url": f"https://{source}/recipe/classic-{ingredient.lower().replace(' ', '-')}",
                     "ingredients": [
                         "2 cups all-purpose flour",
@@ -84,12 +84,13 @@ class RecipeSearchTool:
                     "cook_time": 10,
                     "genre": criteria.get('genre', 'dessert'),
                     "notes": ["Store in airtight container for up to 1 week"],
+                    "dietary_restrictions": [],
                     "cuisine_type": search_params.get('cuisine_type', 'american') if search_params else "american"
                 },
                 {
                     "name": f"Gourmet {ingredient.title()} Delight",
                     "source": source,
-                    "description": f"An elevated version of the classic {ingredient} with premium ingredients",
+                    "description": f"An elevated version of the classic {ingredient} with premium ingredients and professional techniques for exceptional results.",
                     "url": f"https://{source}/recipe/gourmet-{ingredient.lower().replace(' ', '-')}",
                     "ingredients": [
                         "2 1/4 cups cake flour",
@@ -104,20 +105,21 @@ class RecipeSearchTool:
                     ],
                     "instructions": [
                         "Preheat oven to 350°F (175°C)",
-                        "Cream butter and sugars in stand mixer until very light",
-                        "Add eggs and vanilla, mixing until well combined",
-                        "Sift together flour, baking soda, and salt",
-                        "Fold dry ingredients into wet mixture",
-                        "Fold in chocolate chips",
-                        "Scoop dough onto parchment-lined baking sheets",
-                        "Bake 12-14 minutes until edges are set",
-                        "Cool completely before serving"
+                        "Cream butter and sugars in stand mixer until very light and fluffy (about 5 minutes)",
+                        "Add eggs one at a time, beating well after each addition, then add vanilla",
+                        "Sift together flour, baking soda, and salt in a separate bowl",
+                        "Fold dry ingredients into wet mixture using a wooden spoon",
+                        "Fold in chocolate chips gently to avoid overmixing",
+                        "Using a cookie scoop, portion dough onto parchment-lined baking sheets",
+                        "Bake 12-14 minutes until edges are set but centers are still soft",
+                        "Cool completely on baking sheet before transferring"
                     ],
                     "serving_size": 18,
                     "prep_time": 20,
                     "cook_time": 14,
                     "genre": criteria.get('genre', 'dessert'),
                     "notes": ["Use high-quality chocolate for best results", "Can be frozen for up to 3 months"],
+                    "dietary_restrictions": ["vegetarian"],
                     "cuisine_type": search_params.get('cuisine_type', 'american') if search_params else "american"
                 }
             ]
@@ -273,7 +275,8 @@ class DatabaseSearchTool:
             "notes": recipe.get("notes", []),
             "dietary_restrictions": recipe.get("dietary_restrictions", []),
             "created_by": recipe["created_by"],
-            "created_at": recipe["created_at"].strftime("%Y-%m-%d") if recipe.get("created_at") else ""
+            "created_at": recipe["created_at"].strftime("%Y-%m-%d") if recipe.get("created_at") else "",
+            "source": "Your Recipe Database"
         }
 
 
@@ -407,11 +410,11 @@ class FileParsingTool:
 
 
 class RecipeFormatterTool:
-    """Tool for formatting recipe data for forms"""
+    """Tool for formatting recipe data for forms and previews"""
 
     def __init__(self):
         self.name = "format_recipe_data"
-        self.description = "Format raw recipe data for the add recipe form"
+        self.description = "Format raw recipe data for forms and previews"
 
     def execute(self, raw_recipe_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Format raw recipe data for the add recipe form"""
@@ -494,6 +497,73 @@ class RecipeFormatterTool:
             logger.error(f"Error formatting recipe for form: {e}")
             return None
 
+    def format_for_preview(self, recipe_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Format recipe data specifically for preview modal"""
+        try:
+            # Get basic info
+            recipe_name = recipe_data.get('name', recipe_data.get('recipe_name', 'Unknown Recipe'))
+            description = recipe_data.get('description', '')
+
+            # Format ingredients for display
+            ingredients = []
+            if 'ingredients' in recipe_data:
+                for ing in recipe_data['ingredients']:
+                    if isinstance(ing, str):
+                        ingredients.append(ing)
+                    elif isinstance(ing, dict):
+                        name = ing.get('name', '')
+                        quantity = ing.get('quantity', '')
+                        unit = ing.get('unit', '')
+                        if quantity and unit and name:
+                            ingredients.append(f"{quantity} {unit} {name}")
+                        elif name:
+                            ingredients.append(name)
+
+            # Format instructions for display
+            instructions = recipe_data.get('instructions', [])
+            if isinstance(instructions, str):
+                instructions = self._split_instructions(instructions)
+
+            # Calculate total time
+            prep_time = recipe_data.get('prep_time', 0)
+            cook_time = recipe_data.get('cook_time', 0)
+            total_time = prep_time + cook_time
+
+            # Format for preview display
+            preview_data = {
+                "recipe_name": recipe_name,
+                "description": description,
+                "ingredients": ingredients,
+                "instructions": instructions,
+                "serving_size": recipe_data.get('serving_size', 4),
+                "genre": recipe_data.get('genre', '').title(),
+                "prep_time": prep_time,
+                "cook_time": cook_time,
+                "total_time": total_time,
+                "source": recipe_data.get('source', 'Unknown'),
+                "dietary_restrictions": recipe_data.get('dietary_restrictions', []),
+                "notes": recipe_data.get('notes', [])
+            }
+
+            return preview_data
+
+        except Exception as e:
+            logger.error(f"Error formatting recipe for preview: {e}")
+            return {
+                "recipe_name": "Error loading recipe",
+                "description": "Unable to load recipe preview",
+                "ingredients": [],
+                "instructions": [],
+                "serving_size": 0,
+                "genre": "",
+                "prep_time": 0,
+                "cook_time": 0,
+                "total_time": 0,
+                "source": "Error",
+                "dietary_restrictions": [],
+                "notes": []
+            }
+
     def _parse_ingredient_string(self, ingredient_str: str) -> Optional[Dict]:
         """Parse ingredient string into structured format"""
         # Simple parsing logic - can be enhanced
@@ -531,13 +601,133 @@ class RecipeFormatterTool:
         return [step.strip() for step in steps if step.strip()]
 
 
+class ButtonCreatorTool:
+    """Tool for creating action buttons with preview functionality"""
+
+    def __init__(self):
+        self.name = "create_action_buttons"
+        self.description = "Create action buttons with preview functionality"
+
+    def create_recipe_buttons(self, recipe: Dict[str, Any], recipe_type: str = "internal") -> List[Dict[str, Any]]:
+        """Create both action and preview buttons for a recipe"""
+        formatter = RecipeFormatterTool()
+        preview_data = formatter.format_for_preview(recipe)
+
+        buttons = []
+
+        if recipe_type == "internal":
+            # View button for internal recipes
+            buttons.append({
+                "type": "action_button",
+                "text": f"View {recipe['name']}",
+                "action": "view_recipe",
+                "url": f"/recipes/{recipe['id']}",
+                "style": "primary",
+                "metadata": {
+                    "recipe_id": recipe['id'],
+                    "recipe_name": recipe['name'],
+                    "type": "view_recipe",
+                    "source": "internal"
+                }
+            })
+        else:
+            # Add button for external recipes
+            buttons.append({
+                "type": "action_button",
+                "text": f"Add {recipe.get('name', 'Recipe')}",
+                "action": "create_recipe",
+                "style": "primary",
+                "metadata": {
+                    "recipe_name": recipe.get('name', 'Unknown Recipe'),
+                    "type": "add_recipe",
+                    "source": "external"
+                }
+            })
+
+        # Preview button for all recipes
+        buttons.append({
+            "type": "preview_button",
+            "text": "📋 Preview",
+            "action": "preview_recipe",
+            "style": "secondary",
+            "preview_data": preview_data,
+            "metadata": {
+                "recipe_name": recipe.get('name', 'Unknown Recipe'),
+                "type": "preview_recipe",
+                "source": recipe_type
+            }
+        })
+
+        return buttons
+
+    def create_simple_add_button(self) -> Dict[str, Any]:
+        """Create a simple add recipe button without preview functionality"""
+        return {
+            "type": "action_button",
+            "text": "Add Recipe",
+            "action": "create_recipe",
+            "url": "/add-recipe",
+            "style": "primary",
+            "metadata": {
+                "type": "add_recipe_simple",
+                "source": "manual"
+            }
+        }
+
+    def create_search_permission_buttons(self, search_criteria: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Create fun Yes/No buttons for search permission"""
+        return [
+            {
+                "type": "permission_button",
+                "text": "🌟 Yes, search the web!",
+                "action": "search_web_yes",
+                "style": "success",
+                "metadata": {
+                    "search_criteria": search_criteria,
+                    "permission": "yes",
+                    "type": "search_permission"
+                }
+            },
+            {
+                "type": "permission_button",
+                "text": "😅 No thanks",
+                "action": "search_web_no",
+                "style": "secondary",
+                "metadata": {
+                    "permission": "no",
+                    "type": "search_permission"
+                }
+            }
+        ]
+
+    def create_show_all_button(self, temp_id: str, total_count: int,
+                               criteria_description: str, source: str = "internal") -> Dict[str, Any]:
+        """Create a 'show all' button for paginated results"""
+        action_type = "show_all_external_recipes" if source == "external" else "show_all_recipes"
+        button_text = f"Show All {total_count} {'External ' if source == 'external' else ''}Recipes"
+
+        return {
+            "type": "action_button",
+            "text": button_text,
+            "action": action_type,
+            "style": "secondary",
+            "metadata": {
+                "temp_id": temp_id,
+                "total_count": total_count,
+                "criteria_description": criteria_description,
+                "source": source
+            }
+        }
+
+
 # Tool registry for easy access
 TOOLS = {
     'search_external_recipes': RecipeSearchTool(),
     'search_internal_recipes': DatabaseSearchTool(),
     'get_ingredient_suggestions': IngredientSuggestionTool(),
     'parse_recipe_file': FileParsingTool(),
-    'format_recipe_data': RecipeFormatterTool()
+    'format_recipe_data': RecipeFormatterTool(),
+    'create_action_buttons': ButtonCreatorTool()
 }
 
 

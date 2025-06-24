@@ -1,4 +1,4 @@
-# backend/app/utils/ai_helper.py - Refactored Rupert AI Helper
+# backend/app/utils/ai_helper.py - Updated with Preview Button Support
 
 import os
 from openai import OpenAI
@@ -9,10 +9,28 @@ from datetime import datetime, timedelta
 import logging
 import uuid
 
-# Import the tools
-from app.toolset.tools import get_tool, list_available_tools
+# Import the tools with error handling
+try:
+    from app.toolset.tools import get_tool, list_available_tools
 
-logger = logging.getLogger(__name__)
+    logger = logging.getLogger(__name__)
+    logger.info("Tools imported successfully")
+    tools_available = True
+except ImportError as e:
+    logger = logging.getLogger(__name__)
+    logger.error(f"Failed to import tools: {e}")
+    logger.error("Make sure the toolset directory exists and has __init__.py file")
+    tools_available = False
+
+
+    # Fallback functions
+    def get_tool(tool_name: str):
+        logger.warning(f"Tools not available, cannot get tool: {tool_name}")
+        return None
+
+
+    def list_available_tools():
+        return []
 
 # Temporary storage for recipe data and recipe lists
 temp_recipe_storage = {}
@@ -37,6 +55,10 @@ class RupertAIHelper:
     def is_configured(self) -> bool:
         """Check if OpenAI API key is configured"""
         return bool(self.api_key and self.client)
+
+    def are_tools_available(self) -> bool:
+        """Check if tools are available"""
+        return tools_available
 
     # === TEMPORARY STORAGE MANAGEMENT ===
 
@@ -246,38 +268,74 @@ class RupertAIHelper:
             logger.error(f"Error extracting search parameters: {e}")
             return {}
 
-    # === ACTION BUTTON CREATION ===
+    # === BUTTON CREATION ===
 
-    def create_recipe_action_button(self, recipe_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Create action button data for recipe creation"""
-        button_data = {
-            "type": "action_button",
-            "text": "Add Recipe",
-            "action": "create_recipe"
-        }
+    def create_recipe_buttons(self, recipe: Dict[str, Any], recipe_type: str = "internal") -> List[Dict[str, Any]]:
+        """Create buttons for a recipe (action + preview)"""
+        button_creator = get_tool('create_action_buttons')
 
-        if recipe_data:
-            temp_id = self.store_temp_recipe(recipe_data)
-            button_data["url"] = f"/add-recipe?temp_id={temp_id}"
-            button_data["text"] = "Add This Recipe"
-        else:
-            button_data["url"] = "/add-recipe"
+        if not button_creator:
+            # Fallback to simple buttons
+            buttons = []
 
-        return button_data
+            if recipe_type == "internal":
+                buttons.append({
+                    "type": "action_button",
+                    "text": f"View {recipe['name']}",
+                    "action": "view_recipe",
+                    "url": f"/recipes/{recipe['id']}",
+                    "style": "primary"
+                })
+            else:
+                buttons.append({
+                    "type": "action_button",
+                    "text": f"Add {recipe.get('name', 'Recipe')}",
+                    "action": "create_recipe",
+                    "style": "primary"
+                })
 
-    def create_recipe_view_button(self, recipe: Dict[str, Any]) -> Dict[str, Any]:
-        """Create action button to view a specific recipe"""
+            return buttons
+
+        # If external recipe, store it temporarily first
+        if recipe_type == "external":
+            formatter_tool = get_tool('format_recipe_data')
+            if formatter_tool:
+                formatted_recipe = formatter_tool.execute(recipe)
+                if formatted_recipe:
+                    temp_id = self.store_temp_recipe(formatted_recipe)
+                    # Add temp_id to recipe for button creation
+                    recipe['temp_id'] = temp_id
+                    # Add URL to the action button
+                    recipe['url'] = f"/add-recipe?temp_id={temp_id}"
+
+        return button_creator.create_recipe_buttons(recipe, recipe_type)
+
+    def create_simple_add_button(self) -> Dict[str, Any]:
+        """Create a simple add recipe button"""
+        button_creator = get_tool('create_action_buttons')
+        if button_creator:
+            return button_creator.create_simple_add_button()
+
         return {
             "type": "action_button",
-            "text": f"View {recipe['name']}",
-            "action": "view_recipe",
-            "url": f"/recipes/{recipe['id']}",
-            "metadata": {
-                "recipe_id": recipe['id'],
-                "recipe_name": recipe['name'],
-                "type": "view_recipe"
-            }
+            "text": "Add Recipe",
+            "action": "create_recipe",
+            "url": "/add-recipe",
+            "style": "primary"
         }
+
+    def _should_show_add_recipe_button(self, user_message: str, ai_response: str) -> bool:
+        """Determine if we should show an 'Add Recipe' button"""
+        add_recipe_keywords = [
+            "add recipe", "create recipe", "new recipe", "save recipe",
+            "how to add", "help me create", "want to add", "need to create"
+        ]
+
+        user_lower = user_message.lower()
+        response_lower = ai_response.lower()
+
+        return any(keyword in user_lower for keyword in add_recipe_keywords) or \
+            ("recipe" in response_lower and ("ingredients:" in response_lower or "instructions:" in response_lower))
 
     # === RESPONSE GENERATION ===
 
@@ -303,25 +361,36 @@ class RupertAIHelper:
             else:
                 response = f"I found {total_recipes} recipes in your database."
 
-            # Show first 5 recipes as buttons
+            # Show first 5 recipes with action + preview buttons
             recipes_to_show = recipes[:show_initial]
             for recipe in recipes_to_show:
-                button = self.create_recipe_view_button(recipe)
-                response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+                buttons = self.create_recipe_buttons(recipe, "internal")
+                for button in buttons:
+                    response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
 
             # If there are more than 5 recipes, add "Show All" button
             if total_recipes > 5:
                 temp_id = self.store_temp_recipe_list(recipes, search_criteria)
-                show_all_button = {
-                    "type": "action_button",
-                    "text": f"Show All {total_recipes} Recipes",
-                    "action": "show_all_recipes",
-                    "metadata": {
-                        "temp_id": temp_id,
-                        "total_count": total_recipes,
-                        "criteria_description": criteria_description
+                button_creator = get_tool('create_action_buttons')
+
+                if button_creator:
+                    show_all_button = button_creator.create_show_all_button(
+                        temp_id, total_recipes, criteria_description, "internal"
+                    )
+                else:
+                    # Fallback button
+                    show_all_button = {
+                        "type": "action_button",
+                        "text": f"Show All {total_recipes} Recipes",
+                        "action": "show_all_recipes",
+                        "style": "secondary",
+                        "metadata": {
+                            "temp_id": temp_id,
+                            "total_count": total_recipes,
+                            "criteria_description": criteria_description
+                        }
                     }
-                }
+
                 response += f"\n\n[ACTION_BUTTON:{json.dumps(show_all_button)}]"
 
             return response
@@ -337,7 +406,7 @@ class RupertAIHelper:
         try:
             if not external_recipes:
                 response = "I searched the internet but couldn't find recipes matching your criteria."
-                button = self.create_recipe_action_button()
+                button = self.create_simple_add_button()
                 response += f"\n\nOr you can create your own recipe:\n[ACTION_BUTTON:{json.dumps(button)}]"
                 return response
 
@@ -347,28 +416,35 @@ class RupertAIHelper:
 
             response = f"I searched the internet and found {total_recipes} recipes! Here are the first {show_initial}:"
 
-            # Add action buttons for external recipes
+            # Add action + preview buttons for external recipes
             for recipe in recipes_to_show:
-                formatter_tool = get_tool('format_recipe_data')
-                if formatter_tool:
-                    formatted_recipe = formatter_tool.execute(recipe)
-                    if formatted_recipe:
-                        button = self.create_recipe_action_button(formatted_recipe)
-                        response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+                buttons = self.create_recipe_buttons(recipe, "external")
+                for button in buttons:
+                    response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
 
             # If there are more than 5 external recipes, add "Show All" button
             if total_recipes > 5:
                 temp_id = self.store_temp_recipe_list(external_recipes, search_criteria)
-                show_all_button = {
-                    "type": "action_button",
-                    "text": f"Show All {total_recipes} External Recipes",
-                    "action": "show_all_external_recipes",
-                    "metadata": {
-                        "temp_id": temp_id,
-                        "total_count": total_recipes,
-                        "source": "external"
+                button_creator = get_tool('create_action_buttons')
+
+                if button_creator:
+                    show_all_button = button_creator.create_show_all_button(
+                        temp_id, total_recipes, "External Recipes", "external"
+                    )
+                else:
+                    # Fallback button
+                    show_all_button = {
+                        "type": "action_button",
+                        "text": f"Show All {total_recipes} External Recipes",
+                        "action": "show_all_external_recipes",
+                        "style": "secondary",
+                        "metadata": {
+                            "temp_id": temp_id,
+                            "total_count": total_recipes,
+                            "source": "external"
+                        }
                     }
-                }
+
                 response += f"\n\n[ACTION_BUTTON:{json.dumps(show_all_button)}]"
 
             return response
@@ -409,7 +485,7 @@ class RupertAIHelper:
 
             # Add recipe button if appropriate
             if self._should_show_add_recipe_button(user_message, ai_response):
-                button = self.create_recipe_action_button()
+                button = self.create_simple_add_button()
                 ai_response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
 
             return ai_response
@@ -467,19 +543,6 @@ Would you like me to search for something specific?"""
 
         return response
 
-    def _should_show_add_recipe_button(self, user_message: str, ai_response: str) -> bool:
-        """Determine if we should show an 'Add Recipe' button"""
-        add_recipe_keywords = [
-            "add recipe", "create recipe", "new recipe", "save recipe",
-            "how to add", "help me create", "want to add", "need to create"
-        ]
-
-        user_lower = user_message.lower()
-        response_lower = ai_response.lower()
-
-        return any(keyword in user_lower for keyword in add_recipe_keywords) or \
-            ("recipe" in response_lower and ("ingredients:" in response_lower or "instructions:" in response_lower))
-
     # === ACTION HANDLERS ===
 
     def handle_show_all_recipes_action(self, temp_id: str) -> str:
@@ -504,14 +567,120 @@ Would you like me to search for something specific?"""
             response = f"Here are all {len(recipes)} {criteria_description}:"
 
             for recipe in recipes:
-                button = self.create_recipe_view_button(recipe)
-                response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+                buttons = self.create_recipe_buttons(recipe, "internal")
+                for button in buttons:
+                    response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
 
             return response
 
         except Exception as e:
             logger.error(f"Error handling show all recipes action: {e}")
             return "Sorry, I encountered an error retrieving the full recipe list."
+
+    def handle_show_all_external_recipes_action(self, temp_id: str) -> str:
+        """Handle the 'show all external recipes' action"""
+        try:
+            stored_data = self.get_temp_recipe_list(temp_id)
+            if not stored_data:
+                return "Sorry, the external recipe list has expired. Please search again."
+
+            recipes = stored_data["recipes"]
+            response = f"Here are all {len(recipes)} external recipes I found:"
+
+            # Add buttons for all external recipes
+            for recipe in recipes:
+                buttons = self.create_recipe_buttons(recipe, "external")
+                for button in buttons:
+                    response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error handling show all external recipes action: {e}")
+            return "Sorry, I encountered an error retrieving the full external recipe list."
+
+    async def handle_search_web_yes_action(self, search_criteria: Dict[str, Any]) -> str:
+        """Handle when user says YES to web search"""
+        try:
+            logger.info(f"User approved web search with criteria: {search_criteria}")
+
+            # Perform the external search
+            external_search_tool = get_tool('search_external_recipes')
+            if not external_search_tool:
+                return "Sorry, the external search tool is not available right now."
+
+            external_recipes = external_search_tool.execute(search_criteria, {})
+
+            if not external_recipes:
+                response = "🔍 I searched the web but couldn't find any recipes matching your criteria. Maybe try different ingredients or a broader search?"
+                button = self.create_simple_add_button()
+                response += f"\n\nOr create your own recipe:\n[ACTION_BUTTON:{json.dumps(button)}]"
+                return response
+
+            total_recipes = len(external_recipes)
+            show_initial = min(5, total_recipes)
+            recipes_to_show = external_recipes[:show_initial]
+
+            # Create an enthusiastic response
+            criteria_text = ""
+            if search_criteria.get('ingredient') and search_criteria.get('genre'):
+                criteria_text = f"{search_criteria['genre']} recipes with {search_criteria['ingredient']}"
+            elif search_criteria.get('ingredient'):
+                criteria_text = f"recipes with {search_criteria['ingredient']}"
+            elif search_criteria.get('genre'):
+                criteria_text = f"{search_criteria['genre']} recipes"
+            else:
+                criteria_text = "recipes"
+
+            response = f"🎉 Awesome! I found {total_recipes} amazing {criteria_text} from the web! Here are the first {show_initial}:"
+
+            # Add action + preview buttons for external recipes
+            for recipe in recipes_to_show:
+                buttons = self.create_recipe_buttons(recipe, "external")
+                for button in buttons:
+                    response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+
+            # If there are more than 5 external recipes, add "Show All" button
+            if total_recipes > 5:
+                temp_id = self.store_temp_recipe_list(external_recipes, search_criteria)
+                button_creator = get_tool('create_action_buttons')
+
+                if button_creator:
+                    show_all_button = button_creator.create_show_all_button(
+                        temp_id, total_recipes, "External Recipes", "external"
+                    )
+                    response += f"\n\n[ACTION_BUTTON:{json.dumps(show_all_button)}]"
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error handling web search yes action: {e}")
+            return "Oops! I encountered an error while searching the web. Please try again."
+
+    def handle_search_web_no_action(self) -> str:
+        """Handle when user says NO to web search"""
+        lighthearted_responses = [
+            "😄 Ah, I see! You're probably already thinking about that secret family recipe you've been meaning to try, aren't you? Sometimes the best recipes are the ones we create ourselves!",
+
+            "😊 No worries at all! Maybe you're in more of a 'cooking with whatever's in the fridge' mood today. Those surprise meals often turn out to be the best ones!",
+
+            "🤔 Fair enough! Perhaps you're like me and prefer to stick with the tried-and-true recipes you already know and love. There's something comforting about cooking familiar favorites!",
+
+            "😌 I totally get it! Sometimes we ask about recipes but we're really just procrastinating on doing the dishes first, right? I won't judge! 😉",
+
+            "🍳 No problem! You know what? Some of the most delicious meals come from just experimenting with what you have on hand. Trust your cooking instincts!",
+
+            "😂 Haha, caught you! You were probably just seeing what I'd suggest but already had your heart set on ordering takeout, didn't you? Hey, sometimes that's exactly what we need!"
+        ]
+
+        import random
+        response = random.choice(lighthearted_responses)
+
+        # Add a helpful button
+        button = self.create_simple_add_button()
+        response += f"\n\nBut if you change your mind and want to create a recipe later, I'm here to help!\n[ACTION_BUTTON:{json.dumps(button)}]"
+
+        return response
 
     # === MAIN CHAT FUNCTION ===
 
@@ -523,10 +692,16 @@ Would you like me to search for something specific?"""
         if not self.is_configured():
             return "AI features are currently unavailable. Please contact the administrator to configure the OpenAI API key."
 
+        if not self.are_tools_available():
+            return "Tools are currently unavailable. Please check the toolset configuration."
+
         try:
             # Handle special actions first
             if action_type == "show_all_recipes" and action_metadata and action_metadata.get("temp_id"):
                 return self.handle_show_all_recipes_action(action_metadata["temp_id"])
+
+            if action_type == "show_all_external_recipes" and action_metadata and action_metadata.get("temp_id"):
+                return self.handle_show_all_external_recipes_action(action_metadata["temp_id"])
 
             # Check if this is a capability question first
             if self._is_capability_question(user_message):
@@ -535,7 +710,7 @@ Would you like me to search for something specific?"""
             # Check for recipe creation intent
             creation_intent = self._detect_recipe_creation_intent(user_message)
             if creation_intent == "help_create":
-                button = self.create_recipe_action_button()
+                button = self.create_simple_add_button()
                 return f"I'd be happy to help you create a new recipe! Click the button below to get started.\n\n[ACTION_BUTTON:{json.dumps(button)}]"
 
             # Extract search criteria
@@ -576,7 +751,7 @@ Would you like me to search for something specific?"""
                     response += "."
                     response += "\n\nWould you like me to search the internet for recipes?"
 
-                button = self.create_recipe_action_button()
+                button = self.create_simple_add_button()
                 response += f"\n\nOr create your own recipe:\n[ACTION_BUTTON:{json.dumps(button)}]"
                 return response
 
@@ -595,6 +770,9 @@ Would you like me to search for something specific?"""
         if not self.is_configured():
             return "AI features require OpenAI API key configuration."
 
+        if not self.are_tools_available():
+            return "Tools are currently unavailable. Please check the toolset configuration."
+
         try:
             suggestion_tool = get_tool('get_ingredient_suggestions')
             if not suggestion_tool:
@@ -606,7 +784,7 @@ Would you like me to search for something specific?"""
                 response = f"""I couldn't find any recipes in your database that use {', '.join(ingredients)}.
 
 Would you like me to search the internet for recipes using these ingredients?"""
-                button = self.create_recipe_action_button()
+                button = self.create_simple_add_button()
                 response += f"\n\nOr create your own recipe:\n[ACTION_BUTTON:{json.dumps(button)}]"
                 return response
 
@@ -617,25 +795,36 @@ Would you like me to search the internet for recipes using these ingredients?"""
 
             response = f"Great! I found {total_recipes} recipes in your database that use {', '.join(ingredients)}."
 
-            # Add action buttons for shown recipes
+            # Add action + preview buttons for shown recipes
             for recipe in recipes_to_show:
-                button = self.create_recipe_view_button(recipe)
-                response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+                buttons = self.create_recipe_buttons(recipe, "internal")
+                for button in buttons:
+                    response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
 
             # If there are more than 5 recipes, add "Show All" button
             if total_recipes > 5:
                 search_criteria = {"ingredients_used": ingredients}
                 temp_id = self.store_temp_recipe_list(unique_recipes, search_criteria)
-                show_all_button = {
-                    "type": "action_button",
-                    "text": f"Show All {total_recipes} Recipes",
-                    "action": "show_all_recipes",
-                    "metadata": {
-                        "temp_id": temp_id,
-                        "total_count": total_recipes,
-                        "criteria_description": f"recipes using {', '.join(ingredients)}"
+                button_creator = get_tool('create_action_buttons')
+
+                if button_creator:
+                    show_all_button = button_creator.create_show_all_button(
+                        temp_id, total_recipes, f"recipes using {', '.join(ingredients)}", "internal"
+                    )
+                else:
+                    # Fallback button
+                    show_all_button = {
+                        "type": "action_button",
+                        "text": f"Show All {total_recipes} Recipes with These Ingredients",
+                        "action": "show_all_recipes",
+                        "style": "secondary",
+                        "metadata": {
+                            "temp_id": temp_id,
+                            "total_count": total_recipes,
+                            "criteria_description": f"recipes using {', '.join(ingredients)}"
+                        }
                     }
-                }
+
                 response += f"\n\n[ACTION_BUTTON:{json.dumps(show_all_button)}]"
 
             return response
@@ -650,6 +839,9 @@ Would you like me to search the internet for recipes using these ingredients?"""
     Optional[Dict]:
         """Parse recipe file using the file parsing tool"""
         try:
+            if not self.are_tools_available():
+                return None
+
             file_parser = get_tool('parse_recipe_file')
             if not file_parser:
                 return None
@@ -677,6 +869,9 @@ Would you like me to search the internet for recipes using these ingredients?"""
         """Advanced recipe parsing from text using AI"""
         try:
             if not self.is_configured() or len(text_content) < 50:
+                return None
+
+            if not self.are_tools_available():
                 return None
 
             system_prompt = """You are a recipe extraction specialist. Extract complete recipe information and return as JSON.

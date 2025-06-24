@@ -14,6 +14,7 @@ from .tools import (
     IngredientSuggestionTool,
     FileParsingTool,
     RecipeFormatterTool,
+    ButtonCreatorTool,
     TOOLS,
     get_tool,
     list_available_tools
@@ -25,6 +26,7 @@ __all__ = [
     'IngredientSuggestionTool',
     'FileParsingTool',
     'RecipeFormatterTool',
+    'ButtonCreatorTool',
     'TOOLS',
     'get_tool',
     'list_available_tools'

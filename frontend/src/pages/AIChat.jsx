@@ -1,4 +1,4 @@
-// frontend/src/pages/AIChat.jsx - Updated with recipe list pagination
+// frontend/src/pages/AIChat.jsx - Final version with Preview Button Modal functionality
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -20,6 +20,12 @@ const AIChat = () => {
   const [error, setError] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
   const [dragOver, setDragOver] = useState(false);
+
+  // Preview modal state
+  const [previewModal, setPreviewModal] = useState({
+    show: false,
+    recipe: null
+  });
 
   // Authentication check
   useEffect(() => {
@@ -45,6 +51,20 @@ const AIChat = () => {
     }
   }, []);
 
+  // Close modal on escape key
+  useEffect(() => {
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setPreviewModal({ show: false, recipe: null });
+      }
+    };
+
+    if (previewModal.show) {
+      document.addEventListener('keydown', handleEscape);
+      return () => document.removeEventListener('keydown', handleEscape);
+    }
+  }, [previewModal.show]);
+
   const checkAiStatus = async () => {
     try {
       const response = await axios.get(`${apiBaseUrl}/ai/status`);
@@ -63,7 +83,7 @@ const AIChat = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // File handling functions
+  // File handling functions (unchanged)
   const handleFileSelect = (event) => {
     const file = event.target.files[0];
     if (file) {
@@ -119,6 +139,7 @@ const AIChat = () => {
     return null;
   };
 
+  // Upload file function (with preview button support)
   const uploadFile = async () => {
     if (!selectedFile) return;
 
@@ -174,14 +195,40 @@ const AIChat = () => {
 - **Serves:** ${response.data.recipe_data.serving_size || 'Not specified'}
 - **Category:** ${(response.data.recipe_data.genre || 'Not specified').charAt(0).toUpperCase() + (response.data.recipe_data.genre || 'Not specified').slice(1)}
 
-The recipe data has been prepared and is ready to be added to your collection! Click the button below to review and save it to your recipe database.`;
+The recipe data has been prepared and is ready to be added to your collection!`;
 
-          actionButtons = [{
-            type: "action_button",
-            text: `Add Recipe from ${selectedFile.name}`,
-            action: "create_recipe_from_file",
-            url: `/add-recipe?temp_id=${response.data.temp_id}`
-          }];
+          // Create preview data for the extracted recipe
+          const previewData = {
+            recipe_name: recipeName,
+            description: response.data.recipe_data.description || `Recipe extracted from ${selectedFile.name}`,
+            ingredients: response.data.recipe_data.ingredients || [],
+            instructions: response.data.recipe_data.instructions || [],
+            serving_size: response.data.recipe_data.serving_size || 4,
+            genre: response.data.recipe_data.genre || 'Recipe',
+            prep_time: response.data.recipe_data.prep_time || 0,
+            cook_time: response.data.recipe_data.cook_time || 0,
+            total_time: (response.data.recipe_data.prep_time || 0) + (response.data.recipe_data.cook_time || 0),
+            source: `Uploaded file: ${selectedFile.name}`,
+            dietary_restrictions: response.data.recipe_data.dietary_restrictions || [],
+            notes: response.data.recipe_data.notes || []
+          };
+
+          actionButtons = [
+            {
+              type: "action_button",
+              text: `Add Recipe from ${selectedFile.name}`,
+              action: "create_recipe_from_file",
+              url: `/add-recipe?temp_id=${response.data.temp_id}`,
+              style: "primary"
+            },
+            {
+              type: "preview_button",
+              text: "📋 Preview Recipe",
+              action: "preview_recipe",
+              style: "secondary",
+              preview_data: previewData
+            }
+          ];
 
         } else {
           // File processed but no recipe found
@@ -198,7 +245,8 @@ You can try:
             type: "action_button",
             text: "Add Recipe Manually",
             action: "create_recipe",
-            url: "/add-recipe"
+            url: "/add-recipe",
+            style: "primary"
           }];
         }
       } else {
@@ -214,7 +262,8 @@ Please try:
           type: "action_button",
           text: "Add Recipe Manually",
           action: "create_recipe",
-          url: "/add-recipe"
+          url: "/add-recipe",
+          style: "primary"
         }];
       }
 
@@ -279,7 +328,7 @@ Please try:
     return text.replace(/\[ACTION_BUTTON:({.*?})\]/g, '').trim();
   };
 
-  // NEW: Function to handle "Show All" action specifically
+  // Function to handle "Show All" action specifically
   const handleShowAllRecipes = async (button) => {
     if (!button.metadata || !button.metadata.temp_id) {
       console.error('Missing temp_id in show all button metadata');
@@ -289,11 +338,9 @@ Please try:
     try {
       setIsLoading(true);
 
-      // Determine action type based on button action
       const actionType = button.action === 'show_all_external_recipes' ? 'show_all_external_recipes' : 'show_all_recipes';
       const isExternal = button.action === 'show_all_external_recipes';
 
-      // Add a user message indicating the action
       const actionMessage = {
         id: Date.now(),
         type: 'user',
@@ -304,14 +351,13 @@ Please try:
       };
       setMessages(prev => [...prev, actionMessage]);
 
-      // Send request to backend with action type and metadata
       const conversationHistory = messages.slice(-10).map(msg => ({
         role: msg.type === 'user' ? 'user' : 'assistant',
         content: msg.content
       }));
 
       const response = await axios.post(`${apiBaseUrl}/ai/chat`, {
-        message: '',  // Empty message since this is an action
+        message: '',
         conversation_history: conversationHistory,
         action_type: actionType,
         action_metadata: {
@@ -319,7 +365,6 @@ Please try:
         }
       });
 
-      // Parse the response and add to messages
       const rawResponse = response.data.response;
       const actionButtons = parseActionButtons(rawResponse);
       const cleanedResponse = cleanResponseText(rawResponse);
@@ -349,27 +394,228 @@ Please try:
     }
   };
 
-  // Function to handle action button clicks
-  const handleActionButtonClick = (button) => {
-    // NEW: Handle both "show all recipes" actions specially
-    if (button.action === 'show_all_recipes' || button.action === 'show_all_external_recipes') {
+  // Function to handle button clicks
+  const handleButtonClick = (button) => {
+    if (button.type === 'preview_button') {
+      // Show preview modal
+      setPreviewModal({
+        show: true,
+        recipe: button.preview_data
+      });
+    } else if (button.action === 'show_all_recipes' || button.action === 'show_all_external_recipes') {
+      // Handle show all action
       handleShowAllRecipes(button);
-      return;
-    }
-
-    // Handle other action types (existing logic)
-    if (button.url) {
+    } else if (button.url) {
+      // Handle navigation
       if (button.url.startsWith('http')) {
-        // External URL
         window.open(button.url, '_blank');
       } else {
-        // Internal route
         navigate(button.url);
       }
     }
   };
 
-  // Component to render action buttons
+  // Recipe Preview Modal Component
+  const RecipePreviewModal = ({ recipe, show, onClose }) => {
+    if (!show || !recipe) return null;
+
+    const modalOverlayStyle = {
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      zIndex: 10000,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '1rem'
+    };
+
+    const modalStyle = {
+      backgroundColor: 'white',
+      borderRadius: '15px',
+      padding: '2rem',
+      maxWidth: '600px',
+      width: '100%',
+      maxHeight: '80vh',
+      overflowY: 'auto',
+      border: '3px solid #003366',
+      boxShadow: '0 10px 30px rgba(0, 51, 102, 0.3)',
+      animation: 'fadeInScale 0.3s ease-out'
+    };
+
+    const headerStyle = {
+      borderBottom: '2px solid #f0f8ff',
+      paddingBottom: '1rem',
+      marginBottom: '1.5rem',
+      position: 'relative'
+    };
+
+    const titleStyle = {
+      color: '#003366',
+      fontSize: '1.4rem',
+      fontWeight: 'bold',
+      margin: '0 0 0.5rem 0'
+    };
+
+    const closeButtonStyle = {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      background: 'none',
+      border: 'none',
+      fontSize: '1.5rem',
+      cursor: 'pointer',
+      color: '#666',
+      padding: '0.5rem'
+    };
+
+    const metaStyle = {
+      display: 'flex',
+      gap: '1rem',
+      flexWrap: 'wrap',
+      fontSize: '0.9rem',
+      color: '#666'
+    };
+
+    const sectionStyle = {
+      marginBottom: '1.5rem'
+    };
+
+    const sectionTitleStyle = {
+      fontSize: '1.1rem',
+      fontWeight: 'bold',
+      color: '#003366',
+      marginBottom: '0.5rem',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem'
+    };
+
+    const listStyle = {
+      paddingLeft: '1.5rem',
+      lineHeight: '1.6'
+    };
+
+    const badgeContainerStyle = {
+      display: 'flex',
+      gap: '0.5rem',
+      flexWrap: 'wrap',
+      marginTop: '0.5rem'
+    };
+
+    const badgeStyle = {
+      backgroundColor: '#e6f0ff',
+      color: '#003366',
+      padding: '0.25rem 0.75rem',
+      borderRadius: '15px',
+      fontSize: '0.8rem',
+      border: '1px solid #003366',
+      fontWeight: '500'
+    };
+
+    return (
+      <div style={modalOverlayStyle} onClick={onClose}>
+        <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
+          {/* Header */}
+          <div style={headerStyle}>
+            <button style={closeButtonStyle} onClick={onClose} title="Close">
+              ✕
+            </button>
+            <h2 style={titleStyle}>{recipe.recipe_name}</h2>
+            <div style={metaStyle}>
+              <span>🍽️ Serves {recipe.serving_size}</span>
+              <span>⏱️ {recipe.total_time} min total</span>
+              {recipe.prep_time > 0 && <span>⚡ {recipe.prep_time} min prep</span>}
+              {recipe.cook_time > 0 && <span>🔥 {recipe.cook_time} min cook</span>}
+              <span>📍 {recipe.source}</span>
+              {recipe.genre && <span>🏷️ {recipe.genre}</span>}
+            </div>
+          </div>
+
+          {/* Description */}
+          {recipe.description && (
+            <div style={sectionStyle}>
+              <p style={{ fontSize: '1rem', color: '#333', margin: 0, lineHeight: '1.6' }}>
+                {recipe.description}
+              </p>
+            </div>
+          )}
+
+          {/* Ingredients */}
+          {recipe.ingredients && recipe.ingredients.length > 0 && (
+            <div style={sectionStyle}>
+              <h3 style={sectionTitleStyle}>
+                📋 Ingredients ({recipe.ingredients.length})
+              </h3>
+              <ul style={listStyle}>
+                {recipe.ingredients.map((ingredient, index) => (
+                  <li key={index} style={{ marginBottom: '0.25rem' }}>
+                    {typeof ingredient === 'string' ? ingredient :
+                     typeof ingredient === 'object' ?
+                     `${ingredient.quantity || ''} ${ingredient.unit || ''} ${ingredient.name || ''}`.trim() :
+                     String(ingredient)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Instructions */}
+          {recipe.instructions && recipe.instructions.length > 0 && (
+            <div style={sectionStyle}>
+              <h3 style={sectionTitleStyle}>
+                📝 Instructions ({recipe.instructions.length} steps)
+              </h3>
+              <ol style={listStyle}>
+                {recipe.instructions.map((instruction, index) => (
+                  <li key={index} style={{ marginBottom: '0.5rem' }}>
+                    {String(instruction)}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          {/* Notes */}
+          {recipe.notes && recipe.notes.length > 0 && (
+            <div style={sectionStyle}>
+              <h3 style={sectionTitleStyle}>
+                📝 Notes
+              </h3>
+              <ul style={listStyle}>
+                {recipe.notes.map((note, index) => (
+                  <li key={index} style={{ marginBottom: '0.25rem' }}>
+                    {String(note)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Dietary Restrictions */}
+          {recipe.dietary_restrictions && recipe.dietary_restrictions.length > 0 && (
+            <div style={sectionStyle}>
+              <h3 style={sectionTitleStyle}>
+                🌟 Dietary Information
+              </h3>
+              <div style={badgeContainerStyle}>
+                {recipe.dietary_restrictions.map((restriction, index) => (
+                  <span key={index} style={badgeStyle}>
+                    {String(restriction).replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Action Buttons Component
   const ActionButtons = ({ buttons }) => {
     if (!buttons || buttons.length === 0) return null;
 
@@ -381,16 +627,44 @@ Please try:
         marginTop: '1rem'
       }}>
         {buttons.map((button, index) => {
-          // Different styling for "Show All" buttons
+          const isPreviewButton = button.type === 'preview_button';
           const isShowAllButton = button.action === 'show_all_recipes' || button.action === 'show_all_external_recipes';
+          const isExternalRecipe = button.metadata?.source === 'external';
+          const isInternalRecipe = button.metadata?.source === 'internal';
+
+          // Determine button styling
+          let backgroundColor = '#003366'; // Default primary
+          let hoverBackgroundColor = '#0066cc';
+
+          if (isPreviewButton) {
+            backgroundColor = '#6c757d'; // Gray for preview buttons
+            hoverBackgroundColor = '#5a6268';
+          } else if (isShowAllButton) {
+            backgroundColor = '#28a745'; // Green for show all
+            hoverBackgroundColor = '#218838';
+          } else if (isExternalRecipe) {
+            backgroundColor = '#17a2b8'; // Teal for external recipes
+            hoverBackgroundColor = '#138496';
+          } else if (isInternalRecipe) {
+            backgroundColor = '#6f42c1'; // Purple for internal recipes
+            hoverBackgroundColor = '#5a32a3';
+          }
 
           return (
             <button
               key={index}
-              onClick={() => handleActionButtonClick(button)}
+              onClick={() => handleButtonClick(button)}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = hoverBackgroundColor;
+                e.target.style.transform = 'translateY(-1px)';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = backgroundColor;
+                e.target.style.transform = 'translateY(0)';
+              }}
               style={{
                 padding: '10px 16px',
-                backgroundColor: isShowAllButton ? '#28a745' : '#003366',
+                backgroundColor: backgroundColor,
                 color: 'white',
                 border: 'none',
                 borderRadius: '8px',
@@ -403,16 +677,13 @@ Please try:
                 justifyContent: 'center',
                 gap: '0.5rem'
               }}
-              onMouseEnter={(e) => {
-                e.target.style.backgroundColor = isShowAllButton ? '#218838' : '#0066cc';
-                e.target.style.transform = 'translateY(-1px)';
-              }}
-              onMouseLeave={(e) => {
-                e.target.style.backgroundColor = isShowAllButton ? '#28a745' : '#003366';
-                e.target.style.transform = 'translateY(0)';
-              }}
             >
-              <span>{isShowAllButton ? '📋' : '🍳'}</span>
+              <span>
+                {isPreviewButton ? '📋' :
+                 isShowAllButton ? '📋' :
+                 isExternalRecipe ? '➕' :
+                 isInternalRecipe ? '👁️' : '🍳'}
+              </span>
               {button.text || 'Action'}
             </button>
           );
@@ -421,6 +692,7 @@ Please try:
     );
   };
 
+  // Rest of the functions remain the same (sendMessage, handleKeyPress, etc.)
   const sendMessage = async () => {
     if ((!inputMessage.trim() && !selectedFile) || isLoading) return;
 
@@ -499,6 +771,7 @@ Please try:
   const clearChat = () => {
     setMessages([]);
     setError('');
+    setPreviewModal({ show: false, recipe: null }); // Clear any open modals
   };
 
   const formatTimestamp = (timestamp) => {
@@ -525,7 +798,7 @@ Please try:
     }, 100);
   };
 
-  // Styles matching the app theme
+  // Styles matching the app theme (unchanged)
   const containerStyle = {
     padding: '1.25rem',
     backgroundColor: '#f0f8ff',
@@ -560,7 +833,8 @@ Please try:
     display: 'flex',
     flexDirection: 'column',
     minHeight: '500px',
-    maxHeight: '750px'
+    maxHeight: '750px',
+    position: 'relative'
   };
 
   const messagesAreaStyle = {
@@ -899,7 +1173,7 @@ Please try:
                 color: '#666',
                 flex: 1
               }}>
-                💡 Tip: Press Enter to send, Shift+Enter for new line
+                💡 Tip: Press Enter to send, Shift+Enter for new line. Use Preview buttons to see recipes before navigating!
               </div>
 
               {/* Small Upload Button */}
@@ -945,13 +1219,31 @@ Please try:
             </div>
           </div>
         </div>
+
+        {/* Recipe Preview Modal */}
+        <RecipePreviewModal
+          recipe={previewModal.recipe}
+          show={previewModal.show}
+          onClose={() => setPreviewModal({ show: false, recipe: null })}
+        />
       </div>
 
-      {/* Add CSS animation for loading spinner */}
+      {/* Add CSS animations */}
       <style>{`
         @keyframes spin {
           0% { transform: rotate(0deg); }
           100% { transform: rotate(360deg); }
+        }
+        
+        @keyframes fadeInScale {
+          0% { 
+            opacity: 0; 
+            transform: scale(0.9) translateY(20px);
+          }
+          100% { 
+            opacity: 1; 
+            transform: scale(1) translateY(0);
+          }
         }
       `}</style>
     </div>
