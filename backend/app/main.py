@@ -1860,6 +1860,43 @@ async def get_genres():
     return {"genres": [genre.value for genre in Genre]}
 
 
+if os.path.exists("frontend/build"):
+    app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
+
+
+    # Serve React app for all non-API routes
+    @app.get("/{full_path:path}")
+    async def serve_react_app(full_path: str):
+        """
+        Serve the React app for all routes that don't match API endpoints.
+        This enables React Router to handle client-side routing.
+        """
+        # Don't serve React app for API routes
+        if full_path.startswith("api") or full_path.startswith("docs") or full_path.startswith("redoc"):
+            # Let FastAPI handle these routes normally
+            raise HTTPException(status_code=404, detail="Not found")
+
+        # Check if file exists in build directory
+        file_path = Path("frontend/build") / full_path
+
+        if file_path.is_file():
+            return FileResponse(file_path)
+
+        # For all other routes, serve index.html (React Router will handle routing)
+        return FileResponse("frontend/build/index.html")
+
+
+    # Root route - serve React app
+    @app.get("/")
+    async def read_root():
+        return FileResponse("frontend/build/index.html")
+
+
+# Health check endpoint (useful for deployment)
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "message": "OnDEK Recipe App is running!"}
+
 if __name__ == "__main__":
     import uvicorn
 
