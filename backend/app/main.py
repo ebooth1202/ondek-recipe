@@ -1867,23 +1867,29 @@ if os.path.exists("frontend/build"):
     # Serve React app for all non-API routes
     @app.get("/{full_path:path}")
     async def serve_react_app(full_path: str):
-        """
-        Serve the React app for all routes that don't match API endpoints.
-        This enables React Router to handle client-side routing.
-        """
-        # Don't serve React app for API routes
-        if full_path.startswith("api") or full_path.startswith("docs") or full_path.startswith("redoc"):
-            # Let FastAPI handle these routes normally
+        # Don't intercept API routes
+        if full_path.startswith("api") or full_path.startswith("docs") or full_path.startswith(
+                "redoc") or full_path.startswith("health"):
             raise HTTPException(status_code=404, detail="Not found")
 
-        # Check if file exists in build directory
-        file_path = Path("frontend/build") / full_path
+        # Use absolute path resolution
+        import os
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        build_dir = os.path.join(base_dir, "frontend", "build")
+        index_path = os.path.join(build_dir, "index.html")
 
-        if file_path.is_file():
-            return FileResponse(file_path)
+        # Check if build directory exists
+        if not os.path.exists(index_path):
+            raise HTTPException(status_code=404, detail=f"Frontend not found at {index_path}")
 
-        # For all other routes, serve index.html (React Router will handle routing)
-        return FileResponse("frontend/build/index.html")
+        # Check if specific file exists
+        if full_path:
+            file_path = os.path.join(build_dir, full_path)
+            if os.path.isfile(file_path):
+                return FileResponse(file_path)
+
+        # For all other routes, serve index.html
+        return FileResponse(index_path)
 
 
     # Root route - serve React app
