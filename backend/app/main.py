@@ -1867,29 +1867,38 @@ if os.path.exists("frontend/build"):
     # Serve React app for all non-API routes
     @app.get("/{full_path:path}")
     async def serve_react_app(full_path: str):
-        # Don't intercept API routes
-        if full_path.startswith("api") or full_path.startswith("docs") or full_path.startswith(
-                "redoc") or full_path.startswith("health"):
+        """
+        Serve the React app for all routes that don't match API endpoints.
+        This enables React Router to handle client-side routing.
+        """
+        import os
+
+        # Don't serve React app for API routes
+        if full_path.startswith(("api", "docs", "redoc", "health", "photos")):
             raise HTTPException(status_code=404, detail="Not found")
 
-        # Use absolute path resolution
-        import os
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        build_dir = os.path.join(base_dir, "frontend", "build")
+        # Get absolute paths
+        app_dir = "/app"  # Heroku working directory
+        build_dir = os.path.join(app_dir, "frontend", "build")
         index_path = os.path.join(build_dir, "index.html")
 
-        # Check if build directory exists
-        if not os.path.exists(index_path):
-            raise HTTPException(status_code=404, detail=f"Frontend not found at {index_path}")
+        # If no path specified (root), serve index.html
+        if not full_path or full_path == "":
+            if os.path.exists(index_path):
+                return FileResponse(index_path)
+            else:
+                raise HTTPException(status_code=404, detail=f"Frontend not found at {index_path}")
 
-        # Check if specific file exists
-        if full_path:
-            file_path = os.path.join(build_dir, full_path)
-            if os.path.isfile(file_path):
-                return FileResponse(file_path)
+        # Check if specific file exists (for CSS, JS, etc.)
+        file_path = os.path.join(build_dir, full_path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
 
-        # For all other routes, serve index.html
-        return FileResponse(index_path)
+        # For all other routes (React Router paths), serve index.html
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        else:
+            raise HTTPException(status_code=404, detail="Frontend not available")
 
 
     # Root route - serve React app
