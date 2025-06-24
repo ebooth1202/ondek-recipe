@@ -474,5 +474,4 @@ Temporary Items
 *.msp
 
 # Windows shortcuts
-*.lnkfrontend/build/
 node_modules/
