@@ -93,16 +93,16 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        # Development origins
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
-        # Add your production URLs here when you have them
-        settings.base_url,
-        "https://*.herokuapp.com"  # Allow any Heroku subdomain
-    ] if not settings.is_production() else [
-        settings.base_url,
-        "https://your-frontend-domain.com"  # Replace with your actual frontend domain
+        # Production origins
+        settings.frontend_url,  # https://yourdomain.com
+        settings.base_url,      # https://api.yourdomain.com
+        # Backup Heroku URL
+        f"https://{os.getenv('HEROKU_APP_NAME', 'your-app-name')}.herokuapp.com"
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
