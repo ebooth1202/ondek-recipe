@@ -27,6 +27,9 @@ import json
 import shutil
 from pathlib import Path
 from .config import settings  # Make sure you import your settings
+from .database import db, Database
+from .utils.ai_helper import ai_helper
+
 
 # Load environment variables first
 # load_dotenv()
