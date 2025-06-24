@@ -1887,9 +1887,9 @@ if os.path.exists("frontend/build"):
 
 
     # Root route - serve React app
-    @app.get("/")
-    async def read_root():
-        return FileResponse("frontend/build/index.html")
+    # @app.get("/")
+    # async def read_root():
+    #     return FileResponse("frontend/build/index.html")
 
 
 # Health check endpoint (useful for deployment)
