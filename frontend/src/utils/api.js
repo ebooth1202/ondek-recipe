@@ -1,8 +1,10 @@
-// frontend/src/utils/api.js - Updated with missing endpoints
+// frontend/src/utils/api.js - Updated for production deployment
 import axios from 'axios';
 
-// API Configuration
-export const API_BASE_URL = 'http://127.0.0.1:8000';
+// API Configuration - Updated to work in both development and production
+export const API_BASE_URL = process.env.NODE_ENV === 'production'
+  ? window.location.origin  // Use same domain in production
+  : 'http://127.0.0.1:8000'; // Local development
 
 // API endpoints
 export const API_ENDPOINTS = {
@@ -25,21 +27,21 @@ export const API_ENDPOINTS = {
   USER_BY_ID: (id) => `/users/${id}`,
   USER_FAVORITES: '/users/me/favorites',
 
-  // AI endpoints (ADDED)
+  // AI endpoints
   AI_CHAT: '/ai/chat',
   AI_STATUS: '/ai/status',
   AI_UPLOAD_FILE: '/ai/upload-recipe-file',
   AI_RECIPE_SUGGESTIONS: '/ai/recipe-suggestions',
   AI_PARSE_RECIPE: '/ai/parse-recipe',
 
-  // Temp recipe endpoints (ADDED)
+  // Temp recipe endpoints
   TEMP_RECIPE: (id) => `/temp-recipe/${id}`,
   STORE_TEMP_RECIPE: '/store-temp-recipe',
 
   // Utility endpoints
   MEASURING_UNITS: '/measuring-units',
   GENRES: '/genres',
-  HEALTH: '/health' // ADDED for testing
+  HEALTH: '/health'
 };
 
 // Helper function to build full URL
@@ -47,7 +49,7 @@ export const buildApiUrl = (endpoint) => {
   return `${API_BASE_URL}${endpoint}`;
 };
 
-// Axios instance configuration (optional - for future use)
+// Axios instance configuration
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 10000,
@@ -83,13 +85,12 @@ apiClient.interceptors.response.use(
   }
 );
 
-// Connection test helper (ADDED)
+// Connection test helper
 export const testConnection = async () => {
   console.log('🔍 Testing backend connection...');
   console.log('API Base URL:', API_BASE_URL);
 
   try {
-    // Test health endpoint
     const response = await axios.get(buildApiUrl(API_ENDPOINTS.HEALTH));
     console.log('✅ Backend connection successful:', response.data);
     return { success: true, data: response.data };
@@ -99,8 +100,8 @@ export const testConnection = async () => {
       success: false,
       error: error.message,
       suggestions: [
-        'Make sure backend is running: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000',
-        'Check if port 8000 is accessible',
+        'Make sure backend is running',
+        'Check network connectivity',
         'Verify backend URL: ' + API_BASE_URL
       ]
     };
