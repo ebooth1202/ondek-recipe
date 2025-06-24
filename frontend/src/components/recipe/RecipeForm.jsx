@@ -1,4 +1,4 @@
-// RecipeForm.jsx - Updated to handle AI recipe auto-population and photo upload
+// RecipeForm.jsx - Fixed version with proper FormData handling
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -358,31 +358,38 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
 
   // Fetch options from API
   useEffect(() => {
-    const fetchOptions = async () => {
-      try {
-        const [unitsRes, genresRes] = await Promise.all([
-          axios.get(`${apiBaseUrl}/measuring-units`),
-          axios.get(`${apiBaseUrl}/genres`)
-        ]);
+  const fetchOptions = async () => {
+    try {
+      const [unitsRes, genresRes] = await Promise.all([
+        axios.get(`${apiBaseUrl}/measuring-units`),
+        axios.get(`${apiBaseUrl}/genres`)
+      ]);
+
+      // Use exact units from backend
+      if (unitsRes.data.units) {
         setAvailableUnits(unitsRes.data.units);
-
-        // Filter out dietary restrictions from genres
-        if (genresRes.data.genres) {
-          const filteredGenres = genresRes.data.genres.filter(genre =>
-            !['gluten_free', 'dairy_free', 'egg_free'].includes(genre)
-          );
-          setAvailableGenres(filteredGenres);
-        }
-      } catch (error) {
-        console.error('Error fetching options:', error);
-        // Keep default values if API fails
+        console.log('Available units from backend:', unitsRes.data.units);
       }
-    };
 
-    if (isAuthenticated()) {
-      fetchOptions();
+      // Filter out dietary restrictions from genres
+      if (genresRes.data.genres) {
+        const filteredGenres = genresRes.data.genres.filter(genre =>
+          !['gluten_free', 'dairy_free', 'egg_free'].includes(genre)
+        );
+        setAvailableGenres(filteredGenres);
+        console.log('Available genres from backend:', filteredGenres);
+      }
+    } catch (error) {
+      console.error('Error fetching options:', error);
+      // Keep default values if API fails - but log this
+      console.warn('Using default units/genres due to API failure');
     }
-  }, [isAuthenticated, apiBaseUrl]);
+  };
+
+  if (isAuthenticated()) {
+    fetchOptions();
+  }
+}, [isAuthenticated, apiBaseUrl]);
 
   // Fraction utilities - Robust
   const formatQuantity = (value) => {
@@ -835,263 +842,297 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
 
   // Form submission
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-    setSuccess('');
+  e.preventDefault();
+  setLoading(true);
+  setError('');
+  setSuccess('');
 
-    // Validate form
-    if (!formData.recipe_name.trim()) {
-      setError('Recipe name is required');
-      setLoading(false);
-      return;
-    }
-
-    const validIngredients = ingredients.filter(ing =>
-      ing.name.trim() && ing.quantity !== '' && ing.quantity !== null && ing.quantity !== undefined
-    );
-
-    if (validIngredients.length === 0) {
-      setError('At least one valid ingredient is required');
-      setLoading(false);
-      return;
-    }
-
-    const validInstructions = instructions.filter(inst => inst.trim());
-
-    if (validInstructions.length === 0) {
-      setError('At least one instruction is required');
-      setLoading(false);
-      return;
-    }
-
-    // Filter valid notes
-    const validNotes = notes.filter(note => note.trim());
-
-    try {
-      // Prepare the ingredients with parsed quantities
-      const processedIngredients = validIngredients.map(ing => {
-        // Parse the quantity to a float for submission
-        let qty = ing.quantity;
-        if (typeof qty === 'string') {
-          const parsed = parseQuantity(qty);
-          if (typeof parsed === 'number' && !isNaN(parsed)) {
-            qty = parsed;
-          }
-        }
-
-        return {
-          name: ing.name.trim(),
-          quantity: parseFloat(qty),
-          unit: ing.unit
-        };
-      });
-
-      const recipeData = {
-        recipe_name: formData.recipe_name.trim(),
-        description: formData.description.trim() || null,
-        serving_size: parseInt(formData.serving_size),
-        genre: formData.genre,
-        prep_time: parseInt(formData.prep_time || 0),
-        cook_time: parseInt(formData.cook_time || 0),
-        ingredients: processedIngredients,
-        instructions: validInstructions.map(inst => inst.trim()),
-        notes: validNotes.map(note => note.trim()),
-        dietary_restrictions: formData.dietary_restrictions
-      };
-
-      // Determine if we need to send as FormData (with photo) or JSON (without photo)
-      let requestData;
-      let requestHeaders = {};
-
-      if (photoFile) {
-        // Create FormData for file upload
-        const formDataToSend = new FormData();
-        formDataToSend.append('recipe_data', JSON.stringify(recipeData));
-        formDataToSend.append('photo', photoFile);
-        requestData = formDataToSend;
-        requestHeaders = {
-          'Content-Type': 'multipart/form-data'
-        };
-      } else {
-        // Send as regular JSON (original format)
-        requestData = recipeData;
-        requestHeaders = {
-          'Content-Type': 'application/json'
-        };
-      }
-
-      // Check if this is a duplication attempt by checking URL parameters
-      const urlParams = new URLSearchParams(location.search);
-      const isDuplicating = urlParams.get('duplicate') === 'true';
-      const tempId = urlParams.get('temp_id'); // Check for AI recipe
-
-      // If duplicating, check if any changes were made compared to the original
-      if (isDuplicating) {
-        // Get the original recipe from sessionStorage (might be null if page was refreshed)
-        const originalRecipeStr = sessionStorage.getItem('originalRecipe');
-
-        // If we still have the original recipe data, compare to prevent exact duplicates
-        if (originalRecipeStr) {
-          try {
-            const originalRecipe = JSON.parse(originalRecipeStr);
-
-            // Remove the "(Copy)" suffix for comparison
-            const nameWithoutCopy = recipeData.recipe_name.replace(' (Copy)', '').trim();
-
-            // Check if this is an exact duplicate (excluding the recipe name)
-            const isExactDuplicate =
-              nameWithoutCopy === originalRecipe.recipe_name &&
-              recipeData.serving_size === originalRecipe.serving_size &&
-              recipeData.genre === originalRecipe.genre &&
-              recipeData.prep_time === originalRecipe.prep_time &&
-              recipeData.cook_time === originalRecipe.cook_time &&
-              JSON.stringify(recipeData.ingredients) === JSON.stringify(originalRecipe.ingredients) &&
-              JSON.stringify(recipeData.instructions) === JSON.stringify(originalRecipe.instructions) &&
-              JSON.stringify(recipeData.notes) === JSON.stringify(originalRecipe.notes || []) &&
-              JSON.stringify(recipeData.dietary_restrictions) === JSON.stringify(originalRecipe.dietary_restrictions || []);
-
-            if (isExactDuplicate) {
-              setError('You must make at least one change to create a variant of this recipe.');
-              setLoading(false);
-              return;
-            }
-          } catch (error) {
-            console.error('Error comparing recipes:', error);
-            // Continue with save if comparison fails
-          }
-        }
-
-        // Clean up after comparison
-        sessionStorage.removeItem('originalRecipe');
-        sessionStorage.removeItem('duplicateRecipe');
-      }
-
-      // If there's a temp_id, clean it up after successful submission
-      if (tempId) {
-        try {
-          await axios.delete(`${apiBaseUrl}/temp-recipe/${tempId}`);
-          console.log('Cleaned up temp recipe:', tempId);
-        } catch (cleanupError) {
-          console.warn('Could not clean up temp recipe:', cleanupError);
-          // Don't fail the submission if cleanup fails
-        }
-      }
-
-      let response;
-
-      if (editMode && existingRecipe) {
-        // Update existing recipe
-        console.log('Updating recipe:', recipeData);
-        try {
-          response = await axios.put(`${apiBaseUrl}/recipes/${existingRecipe.id}`, requestData, {
-            headers: requestHeaders
-          });
-          setSuccess('Recipe updated successfully! 🎉');
-        } catch (error) {
-          // If FormData fails and we have a photo, try without photo as fallback
-          if (photoFile && error.response?.status >= 400) {
-            console.warn('Photo upload failed, trying without photo...');
-            setError('Photo upload not supported yet. Saving recipe without photo...');
-            response = await axios.put(`${apiBaseUrl}/recipes/${existingRecipe.id}`, recipeData, {
-              headers: {
-                'Content-Type': 'application/json'
-              }
-            });
-            setSuccess('Recipe updated successfully! (Photo could not be saved - feature coming soon) 🎉');
-            // Clear the photo from state since it wasn't saved
-            setPhotoFile(null);
-            setPhotoPreview(null);
-          } else {
-            throw error; // Re-throw if it's not a photo-related error
-          }
-        }
-      } else {
-        // Create new recipe
-        console.log('Creating recipe:', recipeData);
-        try {
-          response = await axios.post(`${apiBaseUrl}/recipes`, requestData, {
-            headers: requestHeaders
-          });
-
-          if (tempId) {
-            setSuccess('✨ Recipe from Ralph saved successfully! 🎉');
-          } else {
-            setSuccess('Recipe created successfully! 🎉');
-          }
-
-          // Reset form for new recipe
-          setFormData({
-            recipe_name: '',
-            description: '',
-            serving_size: 1,
-            genre: 'dinner',
-            prep_time: 0,
-            cook_time: 0,
-            dietary_restrictions: []
-          });
-          setIngredients([{ name: '', quantity: '', unit: 'cup' }]);
-          setInstructions(['']);
-          setNotes(['']);
-          setPhotoFile(null);
-          setPhotoPreview(null);
-        } catch (error) {
-          // If FormData fails and we have a photo, try without photo as fallback
-          if (photoFile && error.response?.status >= 400) {
-            console.warn('Photo upload failed, trying without photo...');
-            setError('Photo upload not supported yet. Saving recipe without photo...');
-            response = await axios.post(`${apiBaseUrl}/recipes`, recipeData, {
-              headers: {
-                'Content-Type': 'application/json'
-              }
-            });
-
-            if (tempId) {
-              setSuccess('✨ Recipe from Ralph saved successfully! (Photo could not be saved - feature coming soon) 🎉');
-            } else {
-              setSuccess('Recipe created successfully! (Photo could not be saved - feature coming soon) 🎉');
-            }
-
-            // Reset form for new recipe
-            setFormData({
-              recipe_name: '',
-              description: '',
-              serving_size: 1,
-              genre: 'dinner',
-              prep_time: 0,
-              cook_time: 0,
-              dietary_restrictions: []
-            });
-            setIngredients([{ name: '', quantity: '', unit: 'cup' }]);
-            setInstructions(['']);
-            setNotes(['']);
-            setPhotoFile(null);
-            setPhotoPreview(null);
-          } else {
-            throw error; // Re-throw if it's not a photo-related error
-          }
-        }
-      }
-
-      // Call the callback if provided
-      if (onSubmitSuccess) {
-        onSubmitSuccess(response.data);
-      }
-
-      // Redirect after a short delay if not in edit mode
-      if (!editMode) {
-        setTimeout(() => {
-          navigate('/recipes');
-        }, 2000);
-      }
-
-    } catch (error) {
-      console.error('Error saving recipe:', error);
-      setError(error.response?.data?.detail || 'Failed to save recipe');
-    }
-
+  // Validate form
+  if (!formData.recipe_name.trim()) {
+    setError('Recipe name is required');
     setLoading(false);
+    return;
+  }
+
+  const validIngredients = ingredients.filter(ing =>
+    ing.name.trim() && ing.quantity !== '' && ing.quantity !== null && ing.quantity !== undefined
+  );
+
+  if (validIngredients.length === 0) {
+    setError('At least one valid ingredient is required');
+    setLoading(false);
+    return;
+  }
+
+  const validInstructions = instructions.filter(inst => inst.trim());
+
+  if (validInstructions.length === 0) {
+    setError('At least one instruction is required');
+    setLoading(false);
+    return;
+  }
+
+  // Filter valid notes
+  const validNotes = notes.filter(note => note.trim());
+
+  try {
+    // Validate serving size
+    const servingSize = parseInt(formData.serving_size);
+    if (isNaN(servingSize) || servingSize <= 0 || servingSize > 100) {
+      setError('Serving size must be a number between 1 and 100');
+      setLoading(false);
+      return;
+    }
+
+    // Validate prep and cook times
+    const prepTime = parseInt(formData.prep_time || 0);
+    const cookTime = parseInt(formData.cook_time || 0);
+    if (prepTime < 0 || prepTime > 1440) {
+      setError('Prep time must be between 0 and 1440 minutes');
+      setLoading(false);
+      return;
+    }
+    if (cookTime < 0 || cookTime > 1440) {
+      setError('Cook time must be between 0 and 1440 minutes');
+      setLoading(false);
+      return;
+    }
+
+    // Validate recipe name length
+    if (formData.recipe_name.trim().length > 200) {
+      setError('Recipe name must be 200 characters or less');
+      setLoading(false);
+      return;
+    }
+
+    // Validate description length
+    if (formData.description && formData.description.length > 500) {
+      setError('Description must be 500 characters or less');
+      setLoading(false);
+      return;
+    }
+
+    // FIXED: Improved ingredient processing with better validation
+    const processedIngredients = validIngredients.map((ing, index) => {
+  // Parse the quantity to a float for submission
+  let qty = ing.quantity;
+  if (typeof qty === 'string') {
+    const parsed = parseQuantity(qty);
+    if (typeof parsed === 'number' && !isNaN(parsed)) {
+      qty = parsed;
+    } else {
+      // If we can't parse it, try parseFloat as fallback
+      qty = parseFloat(qty);
+      if (isNaN(qty)) {
+        throw new Error(`Invalid quantity for ingredient ${index + 1}: "${ing.quantity}". Please enter a valid number.`);
+      }
+    }
+  }
+
+  // Ensure quantity is a positive number
+  const finalQuantity = parseFloat(qty);
+  if (isNaN(finalQuantity) || finalQuantity <= 0) {
+    throw new Error(`Invalid quantity for ingredient ${index + 1}: "${ing.quantity}". Quantity must be a positive number.`);
+  }
+
+  // Validate unit against allowed units
+  const validUnits = [
+    'cup', 'cups', 'tablespoon', 'tablespoons', 'teaspoon', 'teaspoons',
+    'ounce', 'ounces', 'pound', 'pounds', 'gram', 'grams',
+    'kilogram', 'kilograms', 'liter', 'liters', 'milliliter', 'milliliters',
+    'piece', 'pieces', 'whole', 'stick', 'sticks', 'pinch', 'dash'
+  ];
+
+  if (!validUnits.includes(ing.unit)) {
+    throw new Error(`Invalid unit for ingredient ${index + 1}: "${ing.unit}". Please select a valid unit from the dropdown.`);
+  }
+
+  // Validate ingredient name
+  if (!ing.name || !ing.name.trim()) {
+    throw new Error(`Ingredient ${index + 1} name is required.`);
+  }
+
+  return {
+    name: ing.name.trim(),
+    quantity: finalQuantity,
+    unit: ing.unit
   };
+});
+
+    const recipeData = {
+      recipe_name: formData.recipe_name.trim(),
+      description: formData.description.trim() || null,
+      serving_size: servingSize,
+      genre: formData.genre,
+      prep_time: prepTime,
+      cook_time: cookTime,
+      ingredients: processedIngredients,
+      instructions: validInstructions.map(inst => inst.trim()),
+      notes: validNotes.map(note => note.trim()),
+      dietary_restrictions: formData.dietary_restrictions || []
+    };
+
+    // FIXED: Always use FormData for consistency with backend
+    const formDataToSend = new FormData();
+    formDataToSend.append('recipe_data', JSON.stringify(recipeData));
+
+    // Add photo if present
+    if (photoFile) {
+      formDataToSend.append('photo', photoFile);
+    }
+
+    // Debug logging to help identify issues
+    console.log('Sending recipe data:', recipeData);
+
+    // Check if this is a duplication attempt by checking URL parameters
+    const urlParams = new URLSearchParams(location.search);
+    const isDuplicating = urlParams.get('duplicate') === 'true';
+    const tempId = urlParams.get('temp_id'); // Check for AI recipe
+
+    // If duplicating, check if any changes were made compared to the original
+    if (isDuplicating) {
+      // Get the original recipe from sessionStorage (might be null if page was refreshed)
+      const originalRecipeStr = sessionStorage.getItem('originalRecipe');
+
+      // If we still have the original recipe data, compare to prevent exact duplicates
+      if (originalRecipeStr) {
+        try {
+          const originalRecipe = JSON.parse(originalRecipeStr);
+
+          // Remove the "(Copy)" suffix for comparison
+          const nameWithoutCopy = recipeData.recipe_name.replace(' (Copy)', '').trim();
+
+          // Check if this is an exact duplicate (excluding the recipe name)
+          const isExactDuplicate =
+            nameWithoutCopy === originalRecipe.recipe_name &&
+            recipeData.serving_size === originalRecipe.serving_size &&
+            recipeData.genre === originalRecipe.genre &&
+            recipeData.prep_time === originalRecipe.prep_time &&
+            recipeData.cook_time === originalRecipe.cook_time &&
+            JSON.stringify(recipeData.ingredients) === JSON.stringify(originalRecipe.ingredients) &&
+            JSON.stringify(recipeData.instructions) === JSON.stringify(originalRecipe.instructions) &&
+            JSON.stringify(recipeData.notes) === JSON.stringify(originalRecipe.notes || []) &&
+            JSON.stringify(recipeData.dietary_restrictions) === JSON.stringify(originalRecipe.dietary_restrictions || []);
+
+          if (isExactDuplicate) {
+            setError('You must make at least one change to create a variant of this recipe.');
+            setLoading(false);
+            return;
+          }
+        } catch (error) {
+          console.error('Error comparing recipes:', error);
+          // Continue with save if comparison fails
+        }
+      }
+
+      // Clean up after comparison
+      sessionStorage.removeItem('originalRecipe');
+      sessionStorage.removeItem('duplicateRecipe');
+    }
+
+    // If there's a temp_id, clean it up after successful submission
+    if (tempId) {
+      try {
+        await axios.delete(`${apiBaseUrl}/temp-recipe/${tempId}`);
+        console.log('Cleaned up temp recipe:', tempId);
+      } catch (cleanupError) {
+        console.warn('Could not clean up temp recipe:', cleanupError);
+        // Don't fail the submission if cleanup fails
+      }
+    }
+
+    let response;
+
+    if (editMode && existingRecipe) {
+      // Update existing recipe
+      console.log('Updating recipe with FormData');
+      response = await axios.put(`${apiBaseUrl}/recipes/${existingRecipe.id}`, formDataToSend);
+      setSuccess('Recipe updated successfully! 🎉');
+    } else {
+      // Create new recipe
+      console.log('Creating recipe with FormData');
+      response = await axios.post(`${apiBaseUrl}/recipes`, formDataToSend);
+
+      if (tempId) {
+        setSuccess('✨ Recipe from Ralph saved successfully! 🎉');
+      } else {
+        setSuccess('Recipe created successfully! 🎉');
+      }
+
+      // Reset form for new recipe
+      setFormData({
+        recipe_name: '',
+        description: '',
+        serving_size: 1,
+        genre: 'dinner',
+        prep_time: 0,
+        cook_time: 0,
+        dietary_restrictions: []
+      });
+      setIngredients([{ name: '', quantity: '', unit: 'cup' }]);
+      setInstructions(['']);
+      setNotes(['']);
+      setPhotoFile(null);
+      setPhotoPreview(null);
+    }
+
+    // Call the callback if provided
+    if (onSubmitSuccess) {
+      onSubmitSuccess(response.data);
+    }
+
+    // Redirect after a short delay if not in edit mode
+    if (!editMode) {
+      setTimeout(() => {
+        navigate('/recipes');
+      }, 2000);
+    }
+
+  } catch (error) {
+    console.error('Error saving recipe:', error);
+    console.log('Full error response:', error.response);
+
+    // Log the exact validation error details from backend
+    if (error.response?.data) {
+      console.log('Backend error details:', error.response.data);
+    }
+
+    // IMPROVED: Better error handling with specific validation messages
+    if (error.message && error.message.includes('Invalid quantity')) {
+      // This is our custom validation error
+      setError(error.message);
+    } else if (error.response?.data?.detail) {
+      // Backend validation error - show the specific details
+      let errorMessage = error.response.data.detail;
+
+      // If it's an array of validation errors, format them nicely
+      if (Array.isArray(errorMessage)) {
+        const formattedErrors = errorMessage.map(err => {
+          if (err.loc && err.msg) {
+            const field = err.loc.join(' -> ');
+            return `${field}: ${err.msg}`;
+          }
+          return err.msg || err;
+        });
+        errorMessage = formattedErrors.join('; ');
+      }
+
+      setError(`Validation error: ${errorMessage}`);
+    } else if (error.response?.status === 422) {
+      setError('Recipe validation failed. Please check the browser console for details and verify all fields are correctly filled.');
+    } else if (error.response?.status === 400) {
+      setError('Invalid recipe data. Please check your inputs and try again.');
+    } else if (error.response?.status === 413) {
+      setError('Recipe data or photo is too large. Please reduce the size and try again.');
+    } else if (error.message.includes('Network Error')) {
+      setError('Network error. Please check your connection and try again.');
+    } else {
+      setError('Failed to save recipe. Please try again.');
+    }
+  }
+
+  setLoading(false);
+};
 
   // Styles
   const containerStyle = {
@@ -1956,10 +1997,6 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
               fontStyle: 'italic'
             }}>
               💡 Add a photo to make your recipe more appealing! Supports JPG, PNG, and other image formats.
-              <br />
-              <span style={{ fontSize: '0.75rem', color: '#888' }}>
-                Note: Photo upload is experimental. If it fails, your recipe will be saved without the photo.
-              </span>
             </div>
           </div>
 

@@ -1,4 +1,4 @@
-# backend/app/toolset/tools.py - Updated with Preview Button functionality
+# backend/app/toolset/tools.py - Updated with Website Selection in ButtonCreatorTool
 
 import os
 import logging
@@ -17,13 +17,104 @@ logger = logging.getLogger(__name__)
 
 # Try to import database with error handling
 try:
-    from app.database import db
+    # Since main app can import database successfully, try the same patterns
+    try:
+        # Try importing from parent app directory (most likely location)
+        from ..database import db
 
-    logger.info("Database imported successfully in tools")
+        logger.info("Database imported successfully from app.database")
+    except ImportError:
+        try:
+            # Try the original import pattern
+            from app.database import db
+
+            logger.info("Database imported successfully from app.database")
+        except ImportError:
+            try:
+                # Try direct relative import
+                from ...database import db
+
+                logger.info("Database imported successfully using relative import")
+            except ImportError:
+                try:
+                    # Try absolute import
+                    from database import db
+
+                    logger.info("Database imported successfully using absolute import")
+                except ImportError:
+                    # Final attempt: use sys.path manipulation
+                    import sys
+                    import os
+
+                    # Get current file directory and try to find database.py
+                    current_dir = os.path.dirname(os.path.abspath(__file__))
+
+                    # Try different potential paths
+                    potential_paths = [
+                        os.path.join(current_dir, '..'),  # app directory
+                        os.path.join(current_dir, '..', '..'),  # backend directory
+                        os.path.join(current_dir, '..', '..', '..'),  # project root
+                    ]
+
+                    database_found = False
+                    for path in potential_paths:
+                        abs_path = os.path.abspath(path)
+                        if abs_path not in sys.path:
+                            sys.path.insert(0, abs_path)
+
+                        try:
+                            if os.path.exists(os.path.join(abs_path, 'database.py')):
+                                from database import db
+
+                                logger.info(f"Database imported successfully from path: {abs_path}")
+                                database_found = True
+                                break
+                            elif os.path.exists(os.path.join(abs_path, 'app', 'database.py')):
+                                from app.database import db
+
+                                logger.info(f"Database imported successfully from app.database at: {abs_path}")
+                                database_found = True
+                                break
+                        except ImportError:
+                            continue
+
+                    if not database_found:
+                        raise ImportError("Could not locate database module in any expected location")
+
     db_available = True
 except Exception as e:
     logger.error(f"Failed to import database in tools: {e}")
-    db = None
+    logger.warning("Internal recipe search and ingredient suggestions will not work without database access")
+
+
+    # Create a mock database for development/fallback
+    class MockRecipeCollection:
+        @staticmethod
+        def find(query=None, *args, **kwargs):
+            # Return an empty cursor-like object
+            return MockCursor()
+
+        @staticmethod
+        def count_documents(query=None):
+            return 0
+
+
+    class MockCursor:
+        def limit(self, n):
+            return []
+
+        def __iter__(self):
+            return iter([])
+
+        def __list__(self):
+            return []
+
+
+    class MockDatabase:
+        recipes = MockRecipeCollection()
+
+
+    db = MockDatabase()
     db_available = False
 
 
@@ -38,97 +129,627 @@ class RecipeSearchTool:
     def execute(self, criteria: Dict[str, Any], search_params: Dict[str, Any] = None) -> List[Dict]:
         """Search for recipes from external sources"""
         try:
+            logger.info(f"RecipeSearchTool.execute called with criteria: {criteria}, search_params: {search_params}")
+
             search_query = self._build_search_query(criteria, search_params)
 
-            # Get source with proper error handling
-            default_source = "allrecipes.com"
-            source = default_source
+            # Get ingredient with fallback
+            ingredient = criteria.get('ingredient', 'chocolate chip cookies') if criteria else 'chocolate chip cookies'
+            logger.info(f"Searching for ingredient: {ingredient}")
 
+            # Check if a specific website is requested
+            selected_website = None
             if search_params and search_params.get('specific_websites'):
                 websites = search_params.get('specific_websites', [])
                 if isinstance(websites, list) and len(websites) > 0:
-                    source = websites[0]
+                    selected_website = websites[0]
+                    logger.info(f"Specific website requested: {selected_website}")
 
-            # Get ingredient with fallback
-            ingredient = criteria.get('ingredient', 'cookies') if criteria else 'cookies'
+            # Handle website-specific search (this takes priority)
+            if selected_website:
+                if ingredient == 'recipe':
+                    # For generic searches on a specific website, provide variety
+                    logger.info(f"Generating varied results for {selected_website}")
+                    return self._generate_varied_recipe_results(criteria, search_params)
+                else:
+                    # For specific ingredient searches on a specific website
+                    logger.info(f"Generating website-specific results for {ingredient} on {selected_website}")
+                    return self._generate_website_specific_results(ingredient, selected_website, criteria,
+                                                                   search_params)
 
-            # Simulate external search results with properly formatted data
-            external_results = [
-                {
-                    "name": f"Classic {ingredient.title()} Recipe",
-                    "source": source,
-                    "description": f"A delicious and easy-to-make {ingredient} recipe perfect for any occasion. This classic recipe has been passed down through generations and creates the perfect texture every time.",
-                    "url": f"https://{source}/recipe/classic-{ingredient.lower().replace(' ', '-')}",
-                    "ingredients": [
-                        "2 cups all-purpose flour",
-                        "1 cup butter, softened",
-                        "3/4 cup granulated sugar",
-                        "1/2 cup brown sugar",
-                        "2 large eggs",
-                        "1 teaspoon vanilla extract",
-                        "1 teaspoon baking soda",
-                        "1/2 teaspoon salt"
-                    ],
-                    "instructions": [
-                        "Preheat oven to 375°F (190°C)",
-                        "In a large bowl, cream together butter and sugars until light and fluffy",
-                        "Beat in eggs one at a time, then add vanilla",
-                        "In separate bowl, whisk together flour, baking soda, and salt",
-                        "Gradually mix dry ingredients into wet ingredients",
-                        "Drop rounded tablespoons of dough onto ungreased baking sheets",
-                        "Bake for 9-11 minutes until golden brown",
-                        "Cool on baking sheet for 5 minutes before transferring to wire rack"
-                    ],
-                    "serving_size": 24,
-                    "prep_time": 15,
-                    "cook_time": 10,
-                    "genre": criteria.get('genre', 'dessert'),
-                    "notes": ["Store in airtight container for up to 1 week"],
-                    "dietary_restrictions": [],
-                    "cuisine_type": search_params.get('cuisine_type', 'american') if search_params else "american"
-                },
-                {
-                    "name": f"Gourmet {ingredient.title()} Delight",
-                    "source": source,
-                    "description": f"An elevated version of the classic {ingredient} with premium ingredients and professional techniques for exceptional results.",
-                    "url": f"https://{source}/recipe/gourmet-{ingredient.lower().replace(' ', '-')}",
-                    "ingredients": [
-                        "2 1/4 cups cake flour",
-                        "1 cup European butter",
-                        "1/2 cup turbinado sugar",
-                        "1/2 cup coconut sugar",
-                        "2 organic eggs",
-                        "1 tablespoon pure vanilla extract",
-                        "1 teaspoon baking soda",
-                        "1/2 teaspoon sea salt",
-                        "1 cup premium chocolate chips"
-                    ],
-                    "instructions": [
-                        "Preheat oven to 350°F (175°C)",
-                        "Cream butter and sugars in stand mixer until very light and fluffy (about 5 minutes)",
-                        "Add eggs one at a time, beating well after each addition, then add vanilla",
-                        "Sift together flour, baking soda, and salt in a separate bowl",
-                        "Fold dry ingredients into wet mixture using a wooden spoon",
-                        "Fold in chocolate chips gently to avoid overmixing",
-                        "Using a cookie scoop, portion dough onto parchment-lined baking sheets",
-                        "Bake 12-14 minutes until edges are set but centers are still soft",
-                        "Cool completely on baking sheet before transferring"
-                    ],
-                    "serving_size": 18,
-                    "prep_time": 20,
-                    "cook_time": 14,
-                    "genre": criteria.get('genre', 'dessert'),
-                    "notes": ["Use high-quality chocolate for best results", "Can be frozen for up to 3 months"],
-                    "dietary_restrictions": ["vegetarian"],
-                    "cuisine_type": search_params.get('cuisine_type', 'american') if search_params else "american"
-                }
-            ]
+            # Handle generic "recipe" search with variety (no specific website)
+            elif ingredient == 'recipe':
+                logger.info("Generating generic varied results")
+                return self._generate_varied_recipe_results(criteria, search_params)
 
-            return external_results
+            # Default generic search (fallback)
+            else:
+                logger.info("Generating generic results for specific ingredient")
+                return self._generate_generic_results(ingredient, criteria, search_params)
 
         except Exception as e:
             logger.error(f"Error in external recipe search: {e}")
-            return []
+            # Return a basic fallback instead of empty list
+            return [{
+                "name": "Classic Chocolate Chip Cookies",
+                "source": "fallback",
+                "description": "A reliable fallback recipe when search encounters issues.",
+                "url": "https://example.com/fallback-recipe",
+                "ingredients": ["2 cups flour", "1 cup butter", "1 cup sugar", "2 eggs", "1 tsp vanilla",
+                                "1 cup chocolate chips"],
+                "instructions": ["Mix ingredients", "Bake at 375°F for 10 minutes"],
+                "serving_size": 24,
+                "prep_time": 15,
+                "cook_time": 10,
+                "genre": "dessert",
+                "notes": ["Fallback recipe"],
+                "dietary_restrictions": ["vegetarian"],
+                "cuisine_type": "american"
+            }]
+
+    def _generate_website_specific_results(self, ingredient: str, website: str, criteria: Dict[str, Any],
+                                           search_params: Dict[str, Any]) -> List[Dict]:
+        """Generate website-specific search results"""
+        ingredient_clean = ingredient.lower().replace(' ', '-')
+
+        if website == "google.com":
+            # Google searches across multiple sites
+            return self._generate_google_results(ingredient, criteria, search_params)
+        elif website == "pinterest.com":
+            return self._generate_pinterest_results(ingredient, criteria, search_params)
+        elif website == "allrecipes.com":
+            return self._generate_allrecipes_results(ingredient, criteria, search_params)
+        elif website == "foodnetwork.com":
+            return self._generate_foodnetwork_results(ingredient, criteria, search_params)
+        elif website == "food.com":
+            return self._generate_food_com_results(ingredient, criteria, search_params)
+        elif website == "epicurious.com":
+            return self._generate_epicurious_results(ingredient, criteria, search_params)
+        else:
+            # Fallback for unknown websites
+            return self._generate_generic_results(ingredient, criteria, search_params)
+
+    def _generate_google_results(self, ingredient: str, criteria: Dict[str, Any], search_params: Dict[str, Any]) -> \
+            List[Dict]:
+        """Generate Google search results (multiple sources)"""
+        sources = ["allrecipes.com", "foodnetwork.com", "epicurious.com", "food.com"]
+        results = []
+
+        # Handle generic recipe search with variety
+        if ingredient == "recipe":
+            varied_ingredients = ["chocolate chip cookies", "chicken stir fry", "banana bread", "spaghetti carbonara"]
+            for i, varied_ingredient in enumerate(varied_ingredients):
+                source = sources[i]
+                results.append({
+                    "name": f"Popular {varied_ingredient.title()}",
+                    "source": source,
+                    "description": f"This popular {varied_ingredient} recipe is highly rated across multiple cooking sites. Perfect for any skill level!",
+                    "url": f"https://{source}/recipe/popular-{varied_ingredient.replace(' ', '-')}",
+                    "ingredients": self._get_ingredients_for_style("Popular"),
+                    "instructions": self._get_instructions_for_style("Popular"),
+                    "serving_size": 4 + (i * 2),
+                    "prep_time": 15 + (i * 5),
+                    "cook_time": 20 + (i * 5),
+                    "genre": ["dessert", "dinner", "breakfast", "dinner"][i],
+                    "notes": [f"Top-rated recipe from {source}", "Highly recommended"],
+                    "dietary_restrictions": ["vegetarian"] if "chicken" not in varied_ingredient else [],
+                    "cuisine_type": "popular"
+                })
+        else:
+            # Handle specific ingredient search
+            for i, source in enumerate(sources):
+                recipe_style = ["Classic", "Best Ever", "Perfect", "Ultimate"][i]
+                results.append({
+                    "name": f"{recipe_style} {ingredient.title()}",
+                    "source": source,
+                    "description": f"This {recipe_style.lower()} {ingredient} recipe from {source} delivers amazing results every time. Highly rated by thousands of home cooks!",
+                    "url": f"https://{source}/recipe/{recipe_style.lower()}-{ingredient.replace(' ', '-')}",
+                    "ingredients": self._get_ingredients_for_style(recipe_style),
+                    "instructions": self._get_instructions_for_style(recipe_style),
+                    "serving_size": 24 if i < 2 else 18,
+                    "prep_time": 15 + (i * 5),
+                    "cook_time": 10 + (i * 2),
+                    "genre": criteria.get('genre', 'dessert'),
+                    "notes": [f"Top-rated recipe from {source}", "Thousands of positive reviews"],
+                    "dietary_restrictions": ["vegetarian"] if i % 2 == 0 else [],
+                    "cuisine_type": "american"
+                })
+
+        return results
+
+    def _generate_varied_recipe_results(self, criteria: Dict[str, Any], search_params: Dict[str, Any]) -> List[Dict]:
+        """Generate varied recipe results for generic searches"""
+        logger.info(f"Generating varied recipe results with search_params: {search_params}")
+
+        varied_recipes = [
+            {
+                "ingredient": "chocolate chip cookies",
+                "genre": "dessert",
+                "description": "Classic chocolate chip cookies that everyone loves"
+            },
+            {
+                "ingredient": "chicken teriyaki",
+                "genre": "dinner",
+                "description": "Easy weeknight chicken teriyaki with rice"
+            },
+            {
+                "ingredient": "banana bread",
+                "genre": "breakfast",
+                "description": "Moist and delicious homemade banana bread"
+            },
+            {
+                "ingredient": "pasta carbonara",
+                "genre": "dinner",
+                "description": "Creamy Italian pasta carbonara recipe"
+            }
+        ]
+
+        # Get the selected website if specified
+        selected_website = None
+        if search_params and search_params.get('specific_websites'):
+            websites = search_params.get('specific_websites', [])
+            if isinstance(websites, list) and len(websites) > 0:
+                selected_website = websites[0]
+                logger.info(f"Selected website for varied results: {selected_website}")
+
+        results = []
+        for recipe_info in varied_recipes:
+            if selected_website:
+                logger.info(
+                    f"Generating website-specific results for {recipe_info['ingredient']} on {selected_website}")
+                # Use website-specific generation for each varied recipe
+                recipe_results = self._generate_website_specific_results(
+                    recipe_info["ingredient"],
+                    selected_website,
+                    {"ingredient": recipe_info["ingredient"], "genre": recipe_info["genre"]},
+                    search_params
+                )
+                # Take just the first result from each
+                if recipe_results:
+                    result = recipe_results[0]
+                    result["description"] = recipe_info["description"]
+                    results.append(result)
+                    logger.info(f"Added result: {result['name']}")
+                else:
+                    logger.warning(f"No results returned for {recipe_info['ingredient']} on {selected_website}")
+            else:
+                # Generate generic results for variety
+                results.append({
+                    "name": recipe_info["ingredient"].title(),
+                    "source": "various",
+                    "description": recipe_info["description"],
+                    "url": f"https://example.com/recipe/{recipe_info['ingredient'].replace(' ', '-')}",
+                    "ingredients": self._get_ingredients_for_style("Classic"),
+                    "instructions": self._get_instructions_for_style("Classic"),
+                    "serving_size": 4,
+                    "prep_time": 20,
+                    "cook_time": 25,
+                    "genre": recipe_info["genre"],
+                    "notes": ["Popular recipe choice"],
+                    "dietary_restrictions": ["vegetarian"] if "chicken" not in recipe_info["ingredient"] else [],
+                    "cuisine_type": "varied"
+                })
+
+        logger.info(f"Varied recipe generator returning {len(results)} total results")
+        return results
+
+    def _generate_pinterest_results(self, ingredient: str, criteria: Dict[str, Any], search_params: Dict[str, Any]) -> \
+            List[Dict]:
+        """Generate Pinterest-style results (visual, trendy)"""
+        results = []
+
+        if ingredient == "recipe":
+            # Generate trendy, visual recipes for generic search
+            trendy_recipes = [
+                {"name": "Instagram-Perfect Rainbow Smoothie Bowl", "ingredient": "smoothie bowl",
+                 "genre": "breakfast"},
+                {"name": "Viral TikTok Baked Feta Pasta", "ingredient": "baked feta pasta", "genre": "dinner"},
+                {"name": "Pinterest-Famous Cloud Bread", "ingredient": "cloud bread", "genre": "snack"},
+                {"name": "Trending Dalgona Coffee Cookies", "ingredient": "dalgona cookies", "genre": "dessert"}
+            ]
+
+            for i, recipe_info in enumerate(trendy_recipes):
+                results.append({
+                    "name": recipe_info["name"],
+                    "source": "pinterest.com",
+                    "description": f"This {recipe_info['name'].lower()} is taking Pinterest by storm! Perfect for sharing on social media with stunning visual appeal.",
+                    "url": f"https://pinterest.com/pin/{recipe_info['ingredient'].replace(' ', '-')}-recipe",
+                    "ingredients": self._get_ingredients_for_style("Trendy"),
+                    "instructions": self._get_instructions_for_style("Trendy", pinterest_style=True),
+                    "serving_size": 2 + (i * 2),
+                    "prep_time": 15 + (i * 5),
+                    "cook_time": 10 + (i * 3),
+                    "genre": recipe_info["genre"],
+                    "notes": ["Perfect for photos!", "Social media worthy", "Pin-worthy recipe"],
+                    "dietary_restrictions": ["vegetarian"],
+                    "cuisine_type": "trendy"
+                })
+        else:
+            # Generate specific ingredient results
+            styles = ["Instagram-Perfect", "Pinterest-Famous", "Viral", "Trending"]
+
+            for i, style in enumerate(styles):
+                results.append({
+                    "name": f"{style} {ingredient.title()}",
+                    "source": "pinterest.com",
+                    "description": f"These {style.lower()} {ingredient} are taking Pinterest by storm! Beautiful, delicious, and perfect for sharing on social media.",
+                    "url": f"https://pinterest.com/pin/{style.lower()}-{ingredient.replace(' ', '-')}-recipe",
+                    "ingredients": self._get_ingredients_for_style(style),
+                    "instructions": self._get_instructions_for_style(style, pinterest_style=True),
+                    "serving_size": 20 + (i * 4),
+                    "prep_time": 20 + (i * 5),
+                    "cook_time": 12 + (i * 3),
+                    "genre": criteria.get('genre', 'dessert'),
+                    "notes": ["Perfect for photos!", "Social media worthy presentation", "Pin-worthy recipe"],
+                    "dietary_restrictions": ["vegetarian"],
+                    "cuisine_type": "trendy"
+                })
+
+        logger.info(f"Pinterest generator returning {len(results)} results for ingredient: {ingredient}")
+        return results
+
+    def _generate_allrecipes_results(self, ingredient: str, criteria: Dict[str, Any], search_params: Dict[str, Any]) -> \
+            List[Dict]:
+        """Generate AllRecipes-style results (community tested)"""
+        if ingredient == "recipe":
+            # Generate popular community recipes for generic search
+            popular_recipes = [
+                {"name": "World's Best Lasagna", "ingredient": "lasagna", "genre": "dinner", "rating": 5.0},
+                {"name": "Perfect Chocolate Chip Cookies", "ingredient": "chocolate chip cookies", "genre": "dessert",
+                 "rating": 4.9},
+                {"name": "Fluffy Pancakes", "ingredient": "pancakes", "genre": "breakfast", "rating": 4.8},
+                {"name": "Classic Chicken Soup", "ingredient": "chicken soup", "genre": "dinner", "rating": 4.9}
+            ]
+
+            results = []
+            for i, recipe_info in enumerate(popular_recipes):
+                results.append({
+                    "name": recipe_info["name"],
+                    "source": "allrecipes.com",
+                    "description": f"This {recipe_info['name'].lower()} has earned a {recipe_info['rating']}/5 star rating from our community! Tested and loved by thousands of home cooks.",
+                    "url": f"https://allrecipes.com/recipe/{recipe_info['ingredient'].replace(' ', '-')}",
+                    "ingredients": self._get_ingredients_for_style("Community Favorite"),
+                    "instructions": self._get_instructions_for_style("Community Favorite", community_tested=True),
+                    "serving_size": 6 + (i * 2),
+                    "prep_time": 20 + (i * 5),
+                    "cook_time": 25 + (i * 5),
+                    "genre": recipe_info["genre"],
+                    "notes": [f"{recipe_info['rating']}/5 stars from community", "Thousands of reviews",
+                              "Tested and approved"],
+                    "dietary_restrictions": ["vegetarian"] if "chicken" not in recipe_info["ingredient"] else [],
+                    "cuisine_type": "american"
+                })
+        else:
+            # Generate specific ingredient results
+            styles = ["5-Star", "Community Favorite", "Most Popular", "Highly Rated"]
+            results = []
+
+            for i, style in enumerate(styles):
+                rating = 5.0 - (i * 0.2)
+                results.append({
+                    "name": f"{style} {ingredient.title()}",
+                    "source": "allrecipes.com",
+                    "description": f"This {style.lower()} {ingredient} recipe has been tested by our community and earned a {rating:.1f}/5 star rating. Trusted by home cooks everywhere!",
+                    "url": f"https://allrecipes.com/recipe/{style.lower().replace(' ', '-')}-{ingredient.replace(' ', '-')}",
+                    "ingredients": self._get_ingredients_for_style(style),
+                    "instructions": self._get_instructions_for_style(style, community_tested=True),
+                    "serving_size": 24,
+                    "prep_time": 15,
+                    "cook_time": 10 + i,
+                    "genre": criteria.get('genre', 'dessert'),
+                    "notes": [f"{rating:.1f}/5 stars from community", "Thousands of reviews", "Tested and approved"],
+                    "dietary_restrictions": ["vegetarian"],
+                    "cuisine_type": "american"
+                })
+
+        return results
+
+    def _generate_foodnetwork_results(self, ingredient: str, criteria: Dict[str, Any], search_params: Dict[str, Any]) -> \
+            List[Dict]:
+        """Generate Food Network-style results (chef recipes)"""
+        if ingredient == "recipe":
+            # Generate chef-inspired recipes for generic search
+            chef_recipes = [
+                {"name": "Bobby Flay's Perfect Grilled Steak", "ingredient": "grilled steak", "genre": "dinner"},
+                {"name": "Ina Garten's Lemon Bars", "ingredient": "lemon bars", "genre": "dessert"},
+                {"name": "Giada's Fresh Pasta Primavera", "ingredient": "pasta primavera", "genre": "dinner"},
+                {"name": "Emeril's Breakfast Hash", "ingredient": "breakfast hash", "genre": "breakfast"}
+            ]
+
+            results = []
+            for i, recipe_info in enumerate(chef_recipes):
+                results.append({
+                    "name": recipe_info["name"],
+                    "source": "foodnetwork.com",
+                    "description": f"Learn to make this {recipe_info['name'].lower()} with professional techniques from Food Network's top chefs. Restaurant-quality results at home!",
+                    "url": f"https://foodnetwork.com/recipes/{recipe_info['ingredient'].replace(' ', '-')}",
+                    "ingredients": self._get_ingredients_for_style("Chef's Special", professional=True),
+                    "instructions": self._get_instructions_for_style("Chef's Special", professional=True),
+                    "serving_size": 4 + (i * 2),
+                    "prep_time": 25 + (i * 5),
+                    "cook_time": 20 + (i * 5),
+                    "genre": recipe_info["genre"],
+                    "notes": ["Professional chef techniques", "Restaurant-quality results", "Celebrity chef recipe"],
+                    "dietary_restrictions": ["vegetarian"] if "steak" not in recipe_info["ingredient"] else [],
+                    "cuisine_type": "professional"
+                })
+        else:
+            # Generate specific ingredient results
+            chefs = ["Chef's Special", "Professional", "Restaurant-Style", "Gourmet"]
+            results = []
+
+            for i, style in enumerate(chefs):
+                results.append({
+                    "name": f"{style} {ingredient.title()}",
+                    "source": "foodnetwork.com",
+                    "description": f"This {style.lower()} {ingredient} recipe brings professional techniques to your home kitchen. Learn from the experts!",
+                    "url": f"https://foodnetwork.com/recipes/{style.lower().replace(' ', '-')}-{ingredient.replace(' ', '-')}",
+                    "ingredients": self._get_ingredients_for_style(style, professional=True),
+                    "instructions": self._get_instructions_for_style(style, professional=True),
+                    "serving_size": 18 + (i * 2),
+                    "prep_time": 25 + (i * 5),
+                    "cook_time": 12 + (i * 2),
+                    "genre": criteria.get('genre', 'dessert'),
+                    "notes": ["Professional chef techniques", "Restaurant-quality results", "Expert tips included"],
+                    "dietary_restrictions": ["vegetarian"],
+                    "cuisine_type": "professional"
+                })
+
+        return results
+
+    def _generate_food_com_results(self, ingredient: str, criteria: Dict[str, Any], search_params: Dict[str, Any]) -> \
+            List[Dict]:
+        """Generate Food.com-style results (home cook friendly)"""
+        if ingredient == "recipe":
+            # Generate beginner-friendly recipes for generic search
+            easy_recipes = [
+                {"name": "Easy 3-Ingredient Cookies", "ingredient": "3-ingredient cookies", "genre": "dessert"},
+                {"name": "Simple One-Pot Chicken and Rice", "ingredient": "chicken and rice", "genre": "dinner"},
+                {"name": "Quick Microwave Mug Cake", "ingredient": "mug cake", "genre": "dessert"},
+                {"name": "Beginner's Perfect Scrambled Eggs", "ingredient": "scrambled eggs", "genre": "breakfast"}
+            ]
+
+            results = []
+            for i, recipe_info in enumerate(easy_recipes):
+                results.append({
+                    "name": recipe_info["name"],
+                    "source": "food.com",
+                    "description": f"This {recipe_info['name'].lower()} is perfect for beginners! Simple ingredients, clear instructions, and delicious results every time.",
+                    "url": f"https://food.com/recipe/{recipe_info['ingredient'].replace(' ', '-')}",
+                    "ingredients": self._get_ingredients_for_style("Easy", simple=True),
+                    "instructions": self._get_instructions_for_style("Easy", simple=True),
+                    "serving_size": 2 + (i * 2),
+                    "prep_time": 5 + (i * 3),
+                    "cook_time": 10 + (i * 5),
+                    "genre": recipe_info["genre"],
+                    "notes": ["Beginner-friendly", "Simple ingredients", "Family approved"],
+                    "dietary_restrictions": ["vegetarian"] if "chicken" not in recipe_info["ingredient"] else [],
+                    "cuisine_type": "home-style"
+                })
+        else:
+            # Generate specific ingredient results
+            styles = ["Easy", "Quick & Simple", "Family-Friendly", "Beginner-Perfect"]
+            results = []
+
+            for i, style in enumerate(styles):
+                results.append({
+                    "name": f"{style} {ingredient.title()}",
+                    "source": "food.com",
+                    "description": f"This {style.lower()} {ingredient} recipe is perfect for home cooks of all skill levels. Simple ingredients, great results!",
+                    "url": f"https://food.com/recipe/{style.lower().replace(' ', '-')}-{ingredient.replace(' ', '-')}",
+                    "ingredients": self._get_ingredients_for_style(style, simple=True),
+                    "instructions": self._get_instructions_for_style(style, simple=True),
+                    "serving_size": 24,
+                    "prep_time": 10 + (i * 3),
+                    "cook_time": 8 + (i * 2),
+                    "genre": criteria.get('genre', 'dessert'),
+                    "notes": ["Beginner-friendly", "Simple ingredients", "Family approved"],
+                    "dietary_restrictions": ["vegetarian"],
+                    "cuisine_type": "home-style"
+                })
+
+        return results
+
+    def _generate_epicurious_results(self, ingredient: str, criteria: Dict[str, Any], search_params: Dict[str, Any]) -> \
+            List[Dict]:
+        """Generate Epicurious-style results (sophisticated)"""
+        if ingredient == "recipe":
+            # Generate sophisticated recipes for generic search
+            gourmet_recipes = [
+                {"name": "Sophisticated Coq au Vin", "ingredient": "coq au vin", "genre": "dinner"},
+                {"name": "Artisanal Sourdough Bread", "ingredient": "sourdough bread", "genre": "snack"},
+                {"name": "Refined Dark Chocolate Tart", "ingredient": "chocolate tart", "genre": "dessert"},
+                {"name": "Gourmet Mushroom Risotto", "ingredient": "mushroom risotto", "genre": "dinner"}
+            ]
+
+            results = []
+            for i, recipe_info in enumerate(gourmet_recipes):
+                results.append({
+                    "name": recipe_info["name"],
+                    "source": "epicurious.com",
+                    "description": f"This {recipe_info['name'].lower()} elevates home cooking with sophisticated techniques and premium ingredients for the discerning palate.",
+                    "url": f"https://epicurious.com/recipes/food/views/{recipe_info['ingredient'].replace(' ', '-')}",
+                    "ingredients": self._get_ingredients_for_style("Sophisticated", gourmet=True),
+                    "instructions": self._get_instructions_for_style("Sophisticated", gourmet=True),
+                    "serving_size": 4 + (i * 2),
+                    "prep_time": 40 + (i * 10),
+                    "cook_time": 30 + (i * 10),
+                    "genre": recipe_info["genre"],
+                    "notes": ["Premium ingredients", "Sophisticated flavors", "Gourmet techniques"],
+                    "dietary_restrictions": ["vegetarian"],
+                    "cuisine_type": "gourmet"
+                })
+        else:
+            # Generate specific ingredient results
+            styles = ["Sophisticated", "Artisanal", "Gourmet", "Refined"]
+            results = []
+
+            for i, style in enumerate(styles):
+                results.append({
+                    "name": f"{style} {ingredient.title()}",
+                    "source": "epicurious.com",
+                    "description": f"This {style.lower()} {ingredient} recipe elevates a classic with premium ingredients and refined techniques for discerning palates.",
+                    "url": f"https://epicurious.com/recipes/food/views/{style.lower()}-{ingredient.replace(' ', '-')}",
+                    "ingredients": self._get_ingredients_for_style(style, gourmet=True),
+                    "instructions": self._get_instructions_for_style(style, gourmet=True),
+                    "serving_size": 16 + (i * 2),
+                    "prep_time": 30 + (i * 5),
+                    "cook_time": 15 + (i * 3),
+                    "genre": criteria.get('genre', 'dessert'),
+                    "notes": ["Premium ingredients", "Sophisticated flavors", "Gourmet techniques"],
+                    "dietary_restrictions": ["vegetarian"],
+                    "cuisine_type": "gourmet"
+                })
+
+        return results
+
+    def _generate_generic_results(self, ingredient: str, criteria: Dict[str, Any], search_params: Dict[str, Any]) -> \
+            List[Dict]:
+        """Generate generic search results as fallback"""
+        return [
+            {
+                "name": f"Classic {ingredient.title()} Recipe",
+                "source": "allrecipes.com",
+                "description": f"A traditional {ingredient} recipe with proven results.",
+                "url": f"https://allrecipes.com/recipe/classic-{ingredient.replace(' ', '-')}",
+                "ingredients": self._get_ingredients_for_style("Classic"),
+                "instructions": self._get_instructions_for_style("Classic"),
+                "serving_size": 24,
+                "prep_time": 15,
+                "cook_time": 10,
+                "genre": criteria.get('genre', 'dessert'),
+                "notes": ["Tried and true recipe"],
+                "dietary_restrictions": ["vegetarian"],
+                "cuisine_type": "traditional"
+            }
+        ]
+
+    def _get_ingredients_for_style(self, style: str, **kwargs) -> List[str]:
+        """Get ingredients based on recipe style"""
+        base_ingredients = [
+            "2 cups all-purpose flour",
+            "1 cup butter, softened",
+            "3/4 cup granulated sugar",
+            "1/2 cup brown sugar",
+            "2 large eggs",
+            "1 teaspoon vanilla extract",
+            "1 teaspoon baking soda",
+            "1/2 teaspoon salt"
+        ]
+
+        if kwargs.get('gourmet'):
+            return [
+                "2 1/4 cups European cake flour",
+                "1 cup premium European butter",
+                "3/4 cup organic cane sugar",
+                "1/2 cup muscovado sugar",
+                "2 farm-fresh eggs",
+                "1 tablespoon Madagascar vanilla extract",
+                "1 teaspoon aluminum-free baking soda",
+                "1/2 teaspoon sea salt",
+                "8 oz high-quality dark chocolate, chopped"
+            ]
+        elif kwargs.get('professional'):
+            return base_ingredients + ["1 cup high-quality chocolate chips", "1/4 teaspoon cream of tartar"]
+        elif kwargs.get('simple'):
+            return [
+                "2 cups flour",
+                "1 cup butter",
+                "1 cup sugar",
+                "2 eggs",
+                "1 tsp vanilla",
+                "1 tsp baking soda",
+                "1/2 tsp salt",
+                "1 cup chocolate chips"
+            ]
+        elif style in ["Popular", "Trendy", "Community Favorite"]:
+            return base_ingredients + ["1 1/2 cups chocolate chips"]
+        else:
+            return base_ingredients + ["1 cup chocolate chips"]
+
+    def _get_instructions_for_style(self, style: str, **kwargs) -> List[str]:
+        """Get instructions based on recipe style"""
+        if kwargs.get('pinterest_style'):
+            return [
+                "📸 Preheat oven to 375°F and line baking sheets with parchment",
+                "✨ Cream butter and sugars until light and fluffy (perfect for photos!)",
+                "🥚 Add eggs one at a time, then vanilla",
+                "🍪 Mix in dry ingredients until just combined",
+                "📌 Scoop dough onto prepared sheets using a cookie scoop for uniform size",
+                "⏰ Bake 9-11 minutes until golden edges",
+                "💫 Cool completely for the perfect Instagram shot!"
+            ]
+        elif kwargs.get('professional'):
+            return [
+                "Preheat oven to 375°F with racks in upper and lower thirds",
+                "Using a stand mixer, cream butter and sugars on medium speed for 5 minutes until very light",
+                "Add eggs one at a time, beating well after each addition, then vanilla",
+                "In a separate bowl, whisk together flour, baking soda, salt, and cream of tartar",
+                "On low speed, gradually add dry ingredients until just combined",
+                "Fold in chocolate chips by hand to avoid overmixing",
+                "Using a 1.5-inch scoop, portion dough 2 inches apart on parchment-lined sheets",
+                "Bake 9-11 minutes, rotating pans halfway through, until edges are set",
+                "Cool on pans for 5 minutes before transferring to wire racks"
+            ]
+        elif kwargs.get('simple'):
+            return [
+                "Heat oven to 375°F",
+                "Mix butter and sugar",
+                "Add eggs and vanilla",
+                "Mix in flour, baking soda, and salt",
+                "Stir in chocolate chips",
+                "Drop spoonfuls on cookie sheet",
+                "Bake 9-11 minutes",
+                "Cool and enjoy!"
+            ]
+        elif kwargs.get('gourmet'):
+            return [
+                "Preheat oven to 350°F and line baking sheets with silicone mats",
+                "Using a stand mixer with paddle attachment, cream butter and sugars for 8 minutes until very pale",
+                "Incorporate eggs one at a time, ensuring full emulsion, then add vanilla",
+                "Sift together flour, baking soda, and salt in a separate bowl",
+                "Fold dry ingredients into butter mixture using a wooden spoon until just combined",
+                "Gently fold in chopped chocolate pieces",
+                "Using a portion scoop, place dough 3 inches apart on prepared sheets",
+                "Bake 12-14 minutes until edges are lightly golden but centers remain soft",
+                "Allow to rest on baking sheets for 10 minutes before transferring to cooling racks"
+            ]
+        elif kwargs.get('community_tested'):
+            return [
+                "Preheat oven to 375°F (community recommended temperature)",
+                "Cream butter and sugars until fluffy - this step is crucial according to reviewers!",
+                "Beat in eggs one at a time, then vanilla (fresh vanilla makes a difference!)",
+                "Mix flour, baking soda, and salt in separate bowl",
+                "Gradually combine wet and dry ingredients (don't overmix!)",
+                "Fold in chocolate chips - use good quality ones as recommended by the community",
+                "Drop rounded spoonfuls onto ungreased sheets (2 inches apart)",
+                "Bake 9-11 minutes until edges are golden - watch carefully!",
+                "Cool on sheet for 5 minutes before transferring (prevents breaking)"
+            ]
+        elif style in ["Popular", "Trendy", "Community Favorite"]:
+            return [
+                "Preheat oven to 375°F",
+                "In a large bowl, cream together butter and sugars until light and fluffy",
+                "Beat in eggs one at a time, then add vanilla extract",
+                "In separate bowl, whisk together flour, baking soda, and salt",
+                "Gradually mix dry ingredients into wet ingredients until just combined",
+                "Fold in add-ins (chocolate chips, nuts, etc.)",
+                "Drop rounded tablespoons of dough onto lined baking sheets",
+                "Bake for 9-11 minutes until edges are golden brown",
+                "Cool on baking sheet for 5 minutes before transferring to wire rack"
+            ]
+        else:
+            return [
+                "Preheat oven to 375°F (190°C)",
+                "In a large bowl, cream together butter and sugars until light and fluffy",
+                "Beat in eggs one at a time, then add vanilla",
+                "In separate bowl, whisk together flour, baking soda, and salt",
+                "Gradually mix dry ingredients into wet ingredients",
+                "Stir in chocolate chips",
+                "Drop rounded tablespoons of dough onto ungreased baking sheets",
+                "Bake for 9-11 minutes until golden brown",
+                "Cool on baking sheet for 5 minutes before transferring to wire rack"
+            ]
 
     def _build_search_query(self, criteria: Dict[str, Any], search_params: Dict[str, Any] = None) -> str:
         """Build search query for external APIs"""
@@ -602,11 +1223,57 @@ class RecipeFormatterTool:
 
 
 class ButtonCreatorTool:
-    """Tool for creating action buttons with preview functionality"""
+    """Tool for creating action buttons with preview and website selection functionality"""
 
     def __init__(self):
         self.name = "create_action_buttons"
-        self.description = "Create action buttons with preview functionality"
+        self.description = "Create action buttons with preview and website selection functionality"
+
+        # Website configuration - centralized for easy maintenance
+        self.supported_websites = [
+            {
+                "name": "Pinterest",
+                "url": "pinterest.com",
+                "icon": "📌",
+                "color": "#bd081c",
+                "description": "Visual recipe discovery platform"
+            },
+            {
+                "name": "AllRecipes",
+                "url": "allrecipes.com",
+                "icon": "🥄",
+                "color": "#e43125",
+                "description": "Trusted recipe community"
+            },
+            {
+                "name": "Food Network",
+                "url": "foodnetwork.com",
+                "icon": "📺",
+                "color": "#fa6918",
+                "description": "Professional chef recipes"
+            },
+            {
+                "name": "Food.com",
+                "url": "food.com",
+                "icon": "🍽️",
+                "color": "#ff6b35",
+                "description": "Community recipe sharing"
+            },
+            {
+                "name": "Epicurious",
+                "url": "epicurious.com",
+                "icon": "👨‍🍳",
+                "color": "#333333",
+                "description": "Gourmet cooking magazine"
+            },
+            {
+                "name": "Google",
+                "url": "google.com",
+                "icon": "🔍",
+                "color": "#4285f4",
+                "description": "Search across all recipe sites"
+            }
+        ]
 
     def create_recipe_buttons(self, recipe: Dict[str, Any], recipe_type: str = "internal") -> List[Dict[str, Any]]:
         """Create both action and preview buttons for a recipe"""
@@ -631,8 +1298,8 @@ class ButtonCreatorTool:
                 }
             })
         else:
-            # Add button for external recipes
-            buttons.append({
+            # Add button for external recipes - CRITICAL: Use the URL if provided by AI helper
+            button_data = {
                 "type": "action_button",
                 "text": f"Add {recipe.get('name', 'Recipe')}",
                 "action": "create_recipe",
@@ -642,7 +1309,16 @@ class ButtonCreatorTool:
                     "type": "add_recipe",
                     "source": "external"
                 }
-            })
+            }
+
+            # IMPORTANT: Use the URL that AI helper set up if available
+            if 'url' in recipe:
+                button_data['url'] = recipe['url']
+            else:
+                # Fallback to generic add recipe page if no URL
+                button_data['url'] = "/add-recipe"
+
+            buttons.append(button_data)
 
         # Preview button for all recipes
         buttons.append({
@@ -676,10 +1352,16 @@ class ButtonCreatorTool:
 
     def create_search_permission_buttons(self, search_criteria: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Create fun Yes/No buttons for search permission"""
+
+        # Determine what they're searching for to customize button text
+        ingredient = search_criteria.get('ingredient', 'recipes')
+        if ingredient == 'recipe':
+            ingredient = 'recipes'
+
         return [
             {
                 "type": "permission_button",
-                "text": "🌟 Yes, search the web!",
+                "text": f"🌟 Yes! Search for {ingredient}",
                 "action": "search_web_yes",
                 "style": "success",
                 "metadata": {
@@ -690,7 +1372,7 @@ class ButtonCreatorTool:
             },
             {
                 "type": "permission_button",
-                "text": "😅 No thanks",
+                "text": "😅 Nope, something else!",
                 "action": "search_web_no",
                 "style": "secondary",
                 "metadata": {
@@ -699,6 +1381,43 @@ class ButtonCreatorTool:
                 }
             }
         ]
+
+    def create_website_selection_buttons(self, search_criteria: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Create website selection buttons for external search"""
+        logger.info(f"Creating website selection buttons with search_criteria: {search_criteria}")
+
+        buttons = []
+
+        for website in self.supported_websites:
+            button = {
+                "type": "website_selection_button",
+                "text": f"{website['icon']} {website['name']}",
+                "action": "search_website",  # CRITICAL: This must be "search_website"
+                "style": "website",
+                "metadata": {
+                    "website": website['url'],
+                    "website_name": website['name'],
+                    "search_criteria": search_criteria,
+                    "color": website['color'],
+                    "description": website['description']
+                }
+            }
+            buttons.append(button)
+            logger.info(f"Created button for {website['name']} with action: {button['action']}")
+
+        logger.info(f"Total buttons created: {len(buttons)}")
+        return buttons
+
+    def get_website_info(self, website_url: str) -> Optional[Dict[str, Any]]:
+        """Get website configuration by URL"""
+        for website in self.supported_websites:
+            if website['url'] == website_url:
+                return website
+        return None
+
+    def get_all_supported_websites(self) -> List[Dict[str, Any]]:
+        """Get list of all supported websites"""
+        return self.supported_websites.copy()
 
     def create_show_all_button(self, temp_id: str, total_count: int,
                                criteria_description: str, source: str = "internal") -> Dict[str, Any]:

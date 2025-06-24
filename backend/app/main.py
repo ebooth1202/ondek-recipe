@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 import os
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from enum import Enum
 import re
 from statistics import mean
@@ -707,60 +707,114 @@ async def create_recipe(
         # Parse the JSON recipe data from form
         recipe_dict = json.loads(recipe_data)
         recipe = Recipe(**recipe_dict)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid recipe data format")
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error: {e}")
+        raise HTTPException(status_code=400, detail="Invalid recipe data format. Please check your recipe information.")
+    except ValidationError as e:
+        logger.error(f"Recipe validation error: {e}")
+        # Extract specific field errors for better user feedback
+        error_details = []
+        for error in e.errors():
+            field = " -> ".join(str(x) for x in error["loc"])
+            message = error["msg"]
+            error_details.append(f"{field}: {message}")
+        raise HTTPException(status_code=422, detail=f"Recipe validation failed: {'; '.join(error_details)}")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid recipe data: {str(e)}")
+        logger.error(f"Recipe parsing error: {e}")
+        raise HTTPException(status_code=400,
+                            detail=f"Invalid recipe data: Please review your recipe information and try again.")
 
-    recipe_doc = {
-        "recipe_name": recipe.recipe_name,
-        "description": recipe.description,
-        "ingredients": [ing.dict() for ing in recipe.ingredients],
-        "instructions": recipe.instructions,
-        "serving_size": recipe.serving_size,
-        "genre": recipe.genre.value,
-        "prep_time": recipe.prep_time or 0,
-        "cook_time": recipe.cook_time or 0,
-        "notes": recipe.notes or [],
-        "dietary_restrictions": recipe.dietary_restrictions or [],
-        "created_by": current_user["username"],
-        "created_at": datetime.now(),
-        "photo_url": None  # Will be updated if photo is provided
-    }
+    # Validate required fields more specifically
+    if not recipe.recipe_name or not recipe.recipe_name.strip():
+        raise HTTPException(status_code=400, detail="Recipe name is required")
 
-    # Insert recipe first to get the ID
-    result = db.recipes.insert_one(recipe_doc)
-    recipe_id = str(result.inserted_id)
+    if not recipe.ingredients or len(recipe.ingredients) == 0:
+        raise HTTPException(status_code=400, detail="At least one ingredient is required")
 
-    # Handle photo upload if provided
-    photo_url = None
-    if photo and photo.filename:
-        photo_url = await save_uploaded_photo(photo, recipe_id)
-        if photo_url:
-            # Update the recipe with the photo URL
-            db.recipes.update_one(
-                {"_id": result.inserted_id},
-                {"$set": {"photo_url": photo_url}}
-            )
-            recipe_doc["photo_url"] = photo_url
+    if not recipe.instructions or len(recipe.instructions) == 0:
+        raise HTTPException(status_code=400, detail="At least one instruction is required")
 
-    ingredients = [Ingredient(**ing) for ing in recipe_doc["ingredients"]]
-    return RecipeResponse(
-        id=recipe_id,
-        recipe_name=recipe_doc["recipe_name"],
-        description=recipe_doc.get("description"),
-        ingredients=ingredients,
-        instructions=recipe_doc["instructions"],
-        serving_size=recipe_doc["serving_size"],
-        genre=Genre(recipe_doc["genre"]),
-        prep_time=recipe_doc.get("prep_time", 0),
-        cook_time=recipe_doc.get("cook_time", 0),
-        notes=recipe_doc.get("notes", []),
-        dietary_restrictions=recipe_doc.get("dietary_restrictions", []),
-        created_by=recipe_doc["created_by"],
-        created_at=recipe_doc["created_at"],
-        photo_url=photo_url
-    )
+    # Validate ingredient data
+    for i, ingredient in enumerate(recipe.ingredients):
+        if not ingredient.name or not ingredient.name.strip():
+            raise HTTPException(status_code=400, detail=f"Ingredient {i + 1} name is required")
+        if ingredient.quantity <= 0:
+            raise HTTPException(status_code=400, detail=f"Ingredient {i + 1} quantity must be greater than 0")
+
+    # Validate instructions
+    for i, instruction in enumerate(recipe.instructions):
+        if not instruction or not instruction.strip():
+            raise HTTPException(status_code=400, detail=f"Instruction {i + 1} cannot be empty")
+
+    try:
+        recipe_doc = {
+            "recipe_name": recipe.recipe_name.strip(),
+            "description": recipe.description.strip() if recipe.description else None,
+            "ingredients": [ing.dict() for ing in recipe.ingredients],
+            "instructions": [inst.strip() for inst in recipe.instructions if inst.strip()],
+            "serving_size": recipe.serving_size,
+            "genre": recipe.genre.value,
+            "prep_time": recipe.prep_time or 0,
+            "cook_time": recipe.cook_time or 0,
+            "notes": [note.strip() for note in (recipe.notes or []) if note.strip()],
+            "dietary_restrictions": recipe.dietary_restrictions or [],
+            "created_by": current_user["username"],
+            "created_at": datetime.now(),
+            "photo_url": None  # Will be updated if photo is provided
+        }
+
+        # Insert recipe first to get the ID
+        result = db.recipes.insert_one(recipe_doc)
+        recipe_id = str(result.inserted_id)
+
+        # Handle photo upload if provided
+        photo_url = None
+        if photo and photo.filename and photo.filename.strip():
+            try:
+                photo_url = await save_uploaded_photo(photo, recipe_id)
+                if photo_url:
+                    # Update the recipe with the photo URL
+                    db.recipes.update_one(
+                        {"_id": result.inserted_id},
+                        {"$set": {"photo_url": photo_url}}
+                    )
+                    recipe_doc["photo_url"] = photo_url
+                    logger.info(f"Photo uploaded successfully for recipe {recipe_id}: {photo_url}")
+                else:
+                    logger.warning(f"Photo upload failed for recipe {recipe_id}")
+            except Exception as photo_error:
+                logger.error(f"Photo upload error for recipe {recipe_id}: {photo_error}")
+                # Don't fail the recipe creation if photo upload fails
+                pass
+
+        # Prepare response
+        ingredients = [Ingredient(**ing) for ing in recipe_doc["ingredients"]]
+        return RecipeResponse(
+            id=recipe_id,
+            recipe_name=recipe_doc["recipe_name"],
+            description=recipe_doc.get("description"),
+            ingredients=ingredients,
+            instructions=recipe_doc["instructions"],
+            serving_size=recipe_doc["serving_size"],
+            genre=Genre(recipe_doc["genre"]),
+            prep_time=recipe_doc.get("prep_time", 0),
+            cook_time=recipe_doc.get("cook_time", 0),
+            notes=recipe_doc.get("notes", []),
+            dietary_restrictions=recipe_doc.get("dietary_restrictions", []),
+            created_by=recipe_doc["created_by"],
+            created_at=recipe_doc["created_at"],
+            photo_url=photo_url
+        )
+
+    except Exception as e:
+        logger.error(f"Error saving recipe to database: {e}")
+        # Clean up if recipe was partially created
+        try:
+            if 'result' in locals() and result.inserted_id:
+                db.recipes.delete_one({"_id": result.inserted_id})
+        except:
+            pass
+        raise HTTPException(status_code=500, detail="Failed to save recipe. Please try again.")
 
 
 @app.get("/recipes", response_model=List[RecipeResponse])
@@ -1379,6 +1433,8 @@ async def delete_recipe(
 class ChatMessage(BaseModel):
     message: str
     conversation_history: Optional[List[dict]] = []
+    action_type: Optional[str] = None
+    action_metadata: Optional[dict] = None
 
 
 class ChatResponse(BaseModel):
@@ -1423,7 +1479,9 @@ async def ai_chat(chat_data: ChatMessage, current_user: dict = Depends(get_curre
         # Process the chat message with enhanced recipe creation support
         response_text = await ai_helper.chat_about_recipes(
             user_message=chat_data.message,
-            conversation_history=chat_data.conversation_history
+            conversation_history=chat_data.conversation_history,
+            action_type=chat_data.action_type,
+            action_metadata=chat_data.action_metadata
         )
 
         return ChatResponse(

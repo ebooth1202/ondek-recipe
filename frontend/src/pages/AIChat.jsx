@@ -1,4 +1,4 @@
-// frontend/src/pages/AIChat.jsx - Final version with Preview Button Modal functionality
+// frontend/src/pages/AIChat.jsx - Updated with Permission Button functionality
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -394,8 +394,137 @@ Please try:
     }
   };
 
+  // Function to handle permission button actions (YES/NO for web search)
+  const handlePermissionAction = async (button) => {
+    try {
+      setIsLoading(true);
+
+      // Create user message showing their choice
+      const isYesAction = button.action === 'search_web_yes';
+      const actionMessage = {
+        id: Date.now(),
+        type: 'user',
+        content: isYesAction ? '🌟 Yes, search the web!' : '😅 No thanks',
+        timestamp: new Date(),
+        actionButtons: [],
+        isAction: true
+      };
+      setMessages(prev => [...prev, actionMessage]);
+
+      const conversationHistory = messages.slice(-10).map(msg => ({
+        role: msg.type === 'user' ? 'user' : 'assistant',
+        content: msg.content
+      }));
+
+      const response = await axios.post(`${apiBaseUrl}/ai/chat`, {
+        message: '',
+        conversation_history: conversationHistory,
+        action_type: button.action,
+        action_metadata: button.metadata
+      });
+
+      const rawResponse = response.data.response;
+      const actionButtons = parseActionButtons(rawResponse);
+      const cleanedResponse = cleanResponseText(rawResponse);
+
+      const aiMessage = {
+        id: Date.now() + 1,
+        type: 'ai',
+        content: cleanedResponse,
+        timestamp: new Date(response.data.timestamp),
+        actionButtons: actionButtons
+      };
+
+      setMessages(prev => [...prev, aiMessage]);
+
+    } catch (error) {
+      console.error('Error handling permission action:', error);
+      const errorMessage = {
+        id: Date.now() + 1,
+        type: 'error',
+        content: 'Sorry, I encountered an error processing your response. Please try again.',
+        timestamp: new Date(),
+        actionButtons: []
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Function to handle website selection actions
+  const handleWebsiteSelection = async (button) => {
+    try {
+      setIsLoading(true);
+
+      // Create user message showing their website choice
+      const websiteName = button.metadata?.website_name || 'selected website';
+      const actionMessage = {
+        id: Date.now(),
+        type: 'user',
+        content: `🔍 Search ${websiteName}`,
+        timestamp: new Date(),
+        actionButtons: [],
+        isAction: true
+      };
+      setMessages(prev => [...prev, actionMessage]);
+
+      const conversationHistory = messages.slice(-10).map(msg => ({
+        role: msg.type === 'user' ? 'user' : 'assistant',
+        content: msg.content
+      }));
+
+      // CRITICAL: Make sure we send the correct action_type and all metadata
+      const requestData = {
+        message: '', // Empty message since this is an action
+        conversation_history: conversationHistory,
+        action_type: button.action, // This should be "search_website"
+        action_metadata: {
+          website: button.metadata?.website || '',
+          website_name: button.metadata?.website_name || '',
+          search_criteria: button.metadata?.search_criteria || {},
+          // Include all metadata for debugging
+          ...button.metadata
+        }
+      };
+
+      console.log('Sending website search request:', requestData); // Debug logging
+
+      const response = await axios.post(`${apiBaseUrl}/ai/chat`, requestData);
+
+      const rawResponse = response.data.response;
+      const actionButtons = parseActionButtons(rawResponse);
+      const cleanedResponse = cleanResponseText(rawResponse);
+
+      const aiMessage = {
+        id: Date.now() + 1,
+        type: 'ai',
+        content: cleanedResponse,
+        timestamp: new Date(response.data.timestamp),
+        actionButtons: actionButtons
+      };
+
+      setMessages(prev => [...prev, aiMessage]);
+
+    } catch (error) {
+      console.error('Error handling website selection:', error);
+      const errorMessage = {
+        id: Date.now() + 1,
+        type: 'error',
+        content: 'Sorry, I encountered an error while searching that website. Please try again.',
+        timestamp: new Date(),
+        actionButtons: []
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Function to handle button clicks
   const handleButtonClick = (button) => {
+    console.log('Button clicked:', button); // Debug logging
+
     if (button.type === 'preview_button') {
       // Show preview modal
       setPreviewModal({
@@ -405,6 +534,13 @@ Please try:
     } else if (button.action === 'show_all_recipes' || button.action === 'show_all_external_recipes') {
       // Handle show all action
       handleShowAllRecipes(button);
+    } else if (button.type === 'permission_button' && (button.action === 'search_web_yes' || button.action === 'search_web_no')) {
+      // Handle permission buttons (YES/NO for web search)
+      handlePermissionAction(button);
+    } else if (button.type === 'website_selection_button' && button.action === 'search_website') {
+      // Handle website selection buttons - CRITICAL PATH
+      console.log('Handling website selection button:', button.metadata);
+      handleWebsiteSelection(button);
     } else if (button.url) {
       // Handle navigation
       if (button.url.startsWith('http')) {
@@ -412,6 +548,8 @@ Please try:
       } else {
         navigate(button.url);
       }
+    } else {
+      console.warn('Unhandled button type:', button);
     }
   };
 
@@ -629,6 +767,10 @@ Please try:
         {buttons.map((button, index) => {
           const isPreviewButton = button.type === 'preview_button';
           const isShowAllButton = button.action === 'show_all_recipes' || button.action === 'show_all_external_recipes';
+          const isPermissionButton = button.type === 'permission_button';
+          const isWebsiteButton = button.type === 'website_selection_button';
+          const isYesPermission = button.action === 'search_web_yes';
+          const isNoPermission = button.action === 'search_web_no';
           const isExternalRecipe = button.metadata?.source === 'external';
           const isInternalRecipe = button.metadata?.source === 'internal';
 
@@ -642,6 +784,15 @@ Please try:
           } else if (isShowAllButton) {
             backgroundColor = '#28a745'; // Green for show all
             hoverBackgroundColor = '#218838';
+          } else if (isYesPermission) {
+            backgroundColor = '#28a745'; // Green for YES buttons
+            hoverBackgroundColor = '#218838';
+          } else if (isNoPermission) {
+            backgroundColor = '#dc3545'; // Red for NO buttons
+            hoverBackgroundColor = '#c82333';
+          } else if (isWebsiteButton && button.metadata?.color) {
+            backgroundColor = button.metadata.color; // Use website brand color
+            hoverBackgroundColor = button.metadata.color + 'dd'; // Slightly darker
           } else if (isExternalRecipe) {
             backgroundColor = '#17a2b8'; // Teal for external recipes
             hoverBackgroundColor = '#138496';
@@ -650,24 +801,107 @@ Please try:
             hoverBackgroundColor = '#5a32a3';
           }
 
+          // Add special styling for interactive buttons
+          const specialButtonStyle = (isPermissionButton || isWebsiteButton) ? {
+            transform: 'scale(1)',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            fontWeight: 'bold',
+            fontSize: isWebsiteButton ? '14px' : '15px',
+            border: isWebsiteButton ? `2px solid ${backgroundColor}20` : 'none'
+          } : {};
+
+          // Special grid layout for website buttons
+          if (isWebsiteButton && index === 0) {
+            // Check if this is the first website button and if there are multiple website buttons
+            const websiteButtonsInGroup = buttons.filter(b => b.type === 'website_selection_button');
+            if (websiteButtonsInGroup.length > 1) {
+              return (
+                <div key="website-buttons-grid" style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                  gap: '0.5rem',
+                  marginTop: '0.5rem'
+                }}>
+                  {websiteButtonsInGroup.map((websiteButton, wsIndex) => {
+                    const bgColor = websiteButton.metadata?.color || '#003366';
+                    const hoverColor = bgColor + 'dd';
+
+                    return (
+                      <button
+                        key={`website-${wsIndex}`}
+                        onClick={() => handleButtonClick(websiteButton)}
+                        onMouseEnter={(e) => {
+                          e.target.style.backgroundColor = hoverColor;
+                          e.target.style.transform = 'scale(1.05)';
+                          e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.25)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.backgroundColor = bgColor;
+                          e.target.style.transform = 'scale(1)';
+                          e.target.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+                        }}
+                        style={{
+                          padding: '10px 12px',
+                          backgroundColor: bgColor,
+                          color: 'white',
+                          border: `2px solid ${bgColor}20`,
+                          borderRadius: '10px',
+                          cursor: 'pointer',
+                          fontSize: '13px',
+                          fontWeight: 'bold',
+                          transition: 'all 0.3s ease',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.3rem',
+                          transform: 'scale(1)',
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                          minHeight: '44px'
+                        }}
+                        title={`Search ${websiteButton.metadata?.website_name || 'website'}`}
+                      >
+                        {websiteButton.text || 'Website'}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            }
+          }
+
+          // Skip rendering individual website buttons if they're part of a grid
+          if (isWebsiteButton && buttons.filter(b => b.type === 'website_selection_button').length > 1) {
+            return null;
+          }
+
           return (
             <button
               key={index}
               onClick={() => handleButtonClick(button)}
               onMouseEnter={(e) => {
                 e.target.style.backgroundColor = hoverBackgroundColor;
-                e.target.style.transform = 'translateY(-1px)';
+                if (isPermissionButton || isWebsiteButton) {
+                  e.target.style.transform = 'scale(1.05)';
+                  e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.25)';
+                } else {
+                  e.target.style.transform = 'translateY(-1px)';
+                }
               }}
               onMouseLeave={(e) => {
                 e.target.style.backgroundColor = backgroundColor;
-                e.target.style.transform = 'translateY(0)';
+                if (isPermissionButton || isWebsiteButton) {
+                  e.target.style.transform = 'scale(1)';
+                  e.target.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+                } else {
+                  e.target.style.transform = 'translateY(0)';
+                }
               }}
               style={{
-                padding: '10px 16px',
+                padding: (isPermissionButton || isWebsiteButton) ? '12px 20px' : '10px 16px',
                 backgroundColor: backgroundColor,
                 color: 'white',
                 border: 'none',
-                borderRadius: '8px',
+                borderRadius: (isPermissionButton || isWebsiteButton) ? '12px' : '8px',
                 cursor: 'pointer',
                 fontSize: '14px',
                 fontWeight: '500',
@@ -675,16 +909,23 @@ Please try:
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '0.5rem'
+                gap: '0.5rem',
+                ...specialButtonStyle
               }}
             >
               <span>
                 {isPreviewButton ? '📋' :
                  isShowAllButton ? '📋' :
+                 isYesPermission ? '🌟' :
+                 isNoPermission ? '😅' :
+                 isWebsiteButton ? button.text?.split(' ')[0] || '🌐' :
                  isExternalRecipe ? '➕' :
                  isInternalRecipe ? '👁️' : '🍳'}
               </span>
-              {button.text || 'Action'}
+              {isWebsiteButton ?
+                button.text?.substring(button.text.indexOf(' ') + 1) || 'Search' :
+                button.text || 'Action'
+              }
             </button>
           );
         })}

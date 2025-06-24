@@ -1,4 +1,4 @@
-# backend/app/utils/ai_helper.py - Updated with Preview Button Support
+# backend/app/utils/ai_helper.py - Refactored to use ButtonCreatorTool for Website Selection
 
 import os
 from openai import OpenAI
@@ -127,17 +127,64 @@ class RupertAIHelper:
 
     # === INTENT DETECTION ===
 
+    def _extract_previous_search_criteria(self, conversation_history: Optional[List[Dict]]) -> Optional[Dict[str, Any]]:
+        """Extract the most recent search criteria from conversation history"""
+        if not conversation_history:
+            return None
+
+        try:
+            # Look through recent messages for user requests that generated recipe results
+            for i, message in enumerate(reversed(conversation_history[-10:])):  # Check last 10 messages
+                if message.get('role') == 'user':
+                    # Try to extract search criteria from this user message
+                    criteria = self.extract_search_intent(message.get('content', ''))
+                    if criteria:
+                        logger.info(f"Found previous search criteria: {criteria}")
+                        return criteria
+
+            return None
+        except Exception as e:
+            logger.error(f"Error extracting previous search criteria: {e}")
+            return None
+
     def _is_capability_question(self, user_message: str) -> bool:
         """Detect if the user is asking about Rupert's capabilities"""
         user_lower = user_message.lower()
-        capability_indicators = [
-            "are you able to", "can you", "do you have the ability to", "are you capable of",
-            "do you support", "can you search", "do you search", "are you able", "can rupert",
-            "what can you do", "what are you capable of", "do you look up", "do you find",
-            "are you connected to", "do you have access to", "can you access",
-            "what sites", "what websites", "which sites", "which websites"
+
+        # More specific capability indicators that require question structure
+        specific_capability_indicators = [
+            "what can you do", "what are you capable of", "what are your capabilities",
+            "what sites do you search", "what websites do you use", "which sites can you access",
+            "do you have access to", "are you connected to", "can you access",
+            "what features do you have", "what functions do you provide"
         ]
-        return any(indicator in user_lower for indicator in capability_indicators)
+
+        # General capability question patterns that need question context
+        general_patterns = [
+            "can you", "are you able to", "do you have the ability to", "are you capable of",
+            "do you support"
+        ]
+
+        # Check for specific capability questions first
+        if any(indicator in user_lower for indicator in specific_capability_indicators):
+            return True
+
+        # For general patterns, only consider it a capability question if there's no specific action requested
+        if any(pattern in user_lower for pattern in general_patterns):
+            # If they're asking "can you search" but also providing specific search terms, it's not a capability question
+            has_search_terms = any(term in user_lower for term in [
+                "recipe", "for", "chocolate", "chicken", "beef", "pasta", "cookie", "cake", "bread",
+                "dinner", "lunch", "breakfast", "dessert", "meal", "dish", "ingredient"
+            ])
+
+            # If they provide search terms, it's a search request, not a capability question
+            if has_search_terms:
+                return False
+
+            # If it's a vague "can you search" without specifics, it's a capability question
+            return True
+
+        return False
 
     def _detect_external_search_request(self, user_message: str) -> bool:
         """Detect if user is requesting external search"""
@@ -145,7 +192,13 @@ class RupertAIHelper:
             "search the internet", "look online", "find on web", "search web",
             "yes, search", "go ahead", "please search", "look it up",
             "from the internet", "online recipes", "web search",
-            "recipe online", "find online", "search online", " online"
+            "recipe online", "find online", "search online", " online",
+            "find a recipe online", "find recipes online", "find new recipe online",
+            "look for recipes online", "search for recipes online",
+            "actually i want to search online", "i want to search online",
+            "let's search online", "can you search online", "search the web",
+            "look on the web", "find on the internet", "check online",
+            "search externally", "look elsewhere", "try online", "go online"
         ]
         user_lower = user_message.lower()
         return any(keyword in user_lower for keyword in external_keywords)
@@ -192,7 +245,7 @@ class RupertAIHelper:
             Analyze this user message about recipes and extract search criteria as JSON:
             User message: "{user_message}"
 
-            IMPORTANT: Only extract criteria if the user is actually asking to FIND or SEARCH for recipes.
+            IMPORTANT: Extract criteria if the user is asking to FIND or SEARCH for recipes, even for general requests.
 
             Extract any of these criteria if mentioned:
             - genre: breakfast, lunch, dinner, snack, dessert, appetizer
@@ -201,12 +254,16 @@ class RupertAIHelper:
             - max_time: maximum cooking time in minutes if mentioned
             - dietary_restrictions: gluten_free, dairy_free, egg_free
 
-            Return only valid JSON like:
-            {{"genre": "dessert", "ingredient": "peanut butter"}}
-            {{"ingredient": "chicken"}}
-            {{"genre": "breakfast"}}
+            For general recipe requests without specific criteria, return a generic search:
+            {{"ingredient": "recipe"}}
 
-            If no criteria found or if asking about capabilities, return: {{}}
+            Examples:
+            "find a chocolate chip cookie recipe" -> {{"ingredient": "chocolate chip", "genre": "dessert"}}
+            "show me dinner recipes" -> {{"genre": "dinner"}}
+            "find a new recipe online" -> {{"ingredient": "recipe"}}
+            "look for recipes online" -> {{"ingredient": "recipe"}}
+
+            Return only valid JSON. If asking about capabilities only, return: {{}}
             """
 
             response = self.client.chat.completions.create(
@@ -268,10 +325,10 @@ class RupertAIHelper:
             logger.error(f"Error extracting search parameters: {e}")
             return {}
 
-    # === BUTTON CREATION ===
+    # === BUTTON CREATION (using ButtonCreatorTool) ===
 
     def create_recipe_buttons(self, recipe: Dict[str, Any], recipe_type: str = "internal") -> List[Dict[str, Any]]:
-        """Create buttons for a recipe (action + preview)"""
+        """Create buttons for a recipe (action + preview) using ButtonCreatorTool"""
         button_creator = get_tool('create_action_buttons')
 
         if not button_creator:
@@ -311,7 +368,7 @@ class RupertAIHelper:
         return button_creator.create_recipe_buttons(recipe, recipe_type)
 
     def create_simple_add_button(self) -> Dict[str, Any]:
-        """Create a simple add recipe button"""
+        """Create a simple add recipe button using ButtonCreatorTool"""
         button_creator = get_tool('create_action_buttons')
         if button_creator:
             return button_creator.create_simple_add_button()
@@ -453,6 +510,77 @@ class RupertAIHelper:
             logger.error(f"Error generating external response: {e}")
             return "I found some recipes online, but encountered an error presenting them."
 
+    async def _generate_search_permission_response(self, previous_criteria: Dict[str, Any]) -> str:
+        """Generate response asking permission to search for previous criteria"""
+        try:
+            # Determine what they previously searched for
+            search_description = ""
+            if previous_criteria.get('ingredient') and previous_criteria.get('genre'):
+                search_description = f"{previous_criteria['genre']} recipes with {previous_criteria['ingredient']}"
+            elif previous_criteria.get('ingredient') and previous_criteria['ingredient'] != 'recipe':
+                search_description = f"{previous_criteria['ingredient']} recipes"
+            elif previous_criteria.get('genre'):
+                search_description = f"{previous_criteria['genre']} recipes"
+            else:
+                search_description = "recipes"
+
+            # Create fun permission request
+            response = f"🤔 I remember you were looking for {search_description}! Do you want me to search the internet for {search_description}?"
+
+            # Use ButtonCreatorTool to create permission buttons
+            button_creator = get_tool('create_action_buttons')
+            if button_creator:
+                permission_buttons = button_creator.create_search_permission_buttons(previous_criteria)
+                for button in permission_buttons:
+                    response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+            else:
+                # Fallback message if tool not available
+                response += "\n\nPlease try again - search permission is temporarily unavailable."
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error generating search permission response: {e}")
+            return "I can search for recipes online. What would you like me to search for?"
+
+    async def _generate_website_selection_response(self, search_criteria: Dict[str, Any]) -> str:
+        """Generate response offering website selection for external search using ButtonCreatorTool"""
+        try:
+            # Determine what the user is searching for
+            search_term = ""
+            if search_criteria.get('ingredient') and search_criteria.get('genre'):
+                search_term = f"{search_criteria['genre']} recipes with {search_criteria['ingredient']}"
+            elif search_criteria.get('ingredient') and search_criteria['ingredient'] != 'recipe':
+                search_term = f"recipes with {search_criteria['ingredient']}"
+            elif search_criteria.get('genre'):
+                search_term = f"{search_criteria['genre']} recipes"
+            elif search_criteria.get('ingredient') == 'recipe':
+                search_term = "new recipes"
+            else:
+                search_term = "recipes"
+
+            # Create appropriate response based on specificity
+            if search_criteria.get('ingredient') == 'recipe' or not search_criteria:
+                response = f"Perfect! I'll help you find some amazing {search_term} online. Which website would you like me to search?"
+            else:
+                response = f"🎉 Awesome! Let's hunt for some amazing {search_term} online! Which website would you like me to search?"
+
+            # Use ButtonCreatorTool to create website selection buttons
+            button_creator = get_tool('create_action_buttons')
+            if button_creator:
+                website_buttons = button_creator.create_website_selection_buttons(search_criteria)
+                for button in website_buttons:
+                    response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+            else:
+                # Fallback message if tool not available
+                response += "\n\nPlease try again - website selection is temporarily unavailable."
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error generating website selection response: {e}")
+            return "I can search for recipes online. Please try again."
+
     async def _generate_general_conversation_response(self, user_message: str,
                                                       conversation_history: Optional[List[Dict]]) -> str:
         """Generate response for general, non-recipe conversation"""
@@ -495,21 +623,23 @@ class RupertAIHelper:
             return "Hey there! I'm Rupert, your cooking assistant. How can I help you with your culinary adventures today?"
 
     def _generate_capability_response(self, user_message: str) -> str:
-        """Generate response for capability questions"""
+        """Generate response for capability questions using ButtonCreatorTool data"""
         user_lower = user_message.lower()
 
-        # Check for specific external sites mentioned
-        external_sites = {
-            "pinterest": "Pinterest",
-            "allrecipes": "AllRecipes",
-            "food.com": "Food.com",
-            "food network": "Food Network",
-            "epicurious": "Epicurious"
-        }
+        # Get supported websites from ButtonCreatorTool
+        button_creator = get_tool('create_action_buttons')
+        website_list = []
 
+        if button_creator and hasattr(button_creator, 'supported_websites'):
+            website_list = [site['name'] for site in button_creator.supported_websites]
+        else:
+            # Fallback list
+            website_list = ["Pinterest", "AllRecipes", "Food Network", "Food.com", "Epicurious", "Google"]
+
+        # Check for specific external sites mentioned
         mentioned_site = None
-        for site_key, site_name in external_sites.items():
-            if site_key in user_lower:
+        for site_name in website_list:
+            if site_name.lower() in user_lower:
                 mentioned_site = site_name
                 break
 
@@ -517,21 +647,16 @@ class RupertAIHelper:
             response = f"""Yes, I can search for recipes on the internet, including {mentioned_site}!
 
 Here's what I can do:
-• Search various recipe websites including {mentioned_site}, AllRecipes, Food Network, and more
+• Search various recipe websites including {', '.join(website_list[:3])}, and more
 • Find recipes with specific ingredients or dietary restrictions
 • Look for recipes by cuisine type or difficulty level
 • Help you discover new cooking ideas from across the web
 
 Would you like me to search for something specific? Just tell me what kind of recipe you're interested in!"""
         else:
-            response = """Yes, I can search for recipes on the internet! I have the ability to look up recipes from various popular cooking websites including:
+            response = f"""Yes, I can search for recipes on the internet! I have the ability to look up recipes from various popular cooking websites including:
 
-• Pinterest
-• AllRecipes 
-• Food Network
-• Food.com
-• Epicurious
-• And many other recipe sites
+• {' • '.join(website_list)}
 
 Here's what I can help you with:
 • Search for recipes with specific ingredients
@@ -600,77 +725,31 @@ Would you like me to search for something specific?"""
             return "Sorry, I encountered an error retrieving the full external recipe list."
 
     async def handle_search_web_yes_action(self, search_criteria: Dict[str, Any]) -> str:
-        """Handle when user says YES to web search"""
+        """Handle when user says YES to web search - show website selection"""
         try:
             logger.info(f"User approved web search with criteria: {search_criteria}")
 
-            # Perform the external search
-            external_search_tool = get_tool('search_external_recipes')
-            if not external_search_tool:
-                return "Sorry, the external search tool is not available right now."
-
-            external_recipes = external_search_tool.execute(search_criteria, {})
-
-            if not external_recipes:
-                response = "🔍 I searched the web but couldn't find any recipes matching your criteria. Maybe try different ingredients or a broader search?"
-                button = self.create_simple_add_button()
-                response += f"\n\nOr create your own recipe:\n[ACTION_BUTTON:{json.dumps(button)}]"
-                return response
-
-            total_recipes = len(external_recipes)
-            show_initial = min(5, total_recipes)
-            recipes_to_show = external_recipes[:show_initial]
-
-            # Create an enthusiastic response
-            criteria_text = ""
-            if search_criteria.get('ingredient') and search_criteria.get('genre'):
-                criteria_text = f"{search_criteria['genre']} recipes with {search_criteria['ingredient']}"
-            elif search_criteria.get('ingredient'):
-                criteria_text = f"recipes with {search_criteria['ingredient']}"
-            elif search_criteria.get('genre'):
-                criteria_text = f"{search_criteria['genre']} recipes"
-            else:
-                criteria_text = "recipes"
-
-            response = f"🎉 Awesome! I found {total_recipes} amazing {criteria_text} from the web! Here are the first {show_initial}:"
-
-            # Add action + preview buttons for external recipes
-            for recipe in recipes_to_show:
-                buttons = self.create_recipe_buttons(recipe, "external")
-                for button in buttons:
-                    response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
-
-            # If there are more than 5 external recipes, add "Show All" button
-            if total_recipes > 5:
-                temp_id = self.store_temp_recipe_list(external_recipes, search_criteria)
-                button_creator = get_tool('create_action_buttons')
-
-                if button_creator:
-                    show_all_button = button_creator.create_show_all_button(
-                        temp_id, total_recipes, "External Recipes", "external"
-                    )
-                    response += f"\n\n[ACTION_BUTTON:{json.dumps(show_all_button)}]"
-
-            return response
+            # Instead of immediately searching, show website selection buttons
+            return await self._generate_website_selection_response(search_criteria)
 
         except Exception as e:
             logger.error(f"Error handling web search yes action: {e}")
-            return "Oops! I encountered an error while searching the web. Please try again."
+            return "Great! Let me show you the website options for searching."
 
     def handle_search_web_no_action(self) -> str:
         """Handle when user says NO to web search"""
         lighthearted_responses = [
-            "😄 Ah, I see! You're probably already thinking about that secret family recipe you've been meaning to try, aren't you? Sometimes the best recipes are the ones we create ourselves!",
+            "😄 Ah, playing hard to get with the internet search, I see! Well then, what culinary adventure ARE you in the mood for? Don't leave me hanging here! 🍳",
 
-            "😊 No worries at all! Maybe you're in more of a 'cooking with whatever's in the fridge' mood today. Those surprise meals often turn out to be the best ones!",
+            "😂 Haha, caught me assuming! You're like 'Nope, Rupert, that's not what I want!' Okay, okay, I'll behave. So what delicious creation are you actually craving?",
 
-            "🤔 Fair enough! Perhaps you're like me and prefer to stick with the tried-and-true recipes you already know and love. There's something comforting about cooking familiar favorites!",
+            "🤔 Plot twist! You've got something totally different in mind, don't you? I'm all ears (well, metaphorically) - what recipe should I hunt down for you?",
 
-            "😌 I totally get it! Sometimes we ask about recipes but we're really just procrastinating on doing the dishes first, right? I won't judge! 😉",
+            "😌 Fair enough! I was getting a little ahead of myself there. You know what you want, and I respect that. So, what's the REAL recipe request? Spill the beans! ☕",
 
-            "🍳 No problem! You know what? Some of the most delicious meals come from just experimenting with what you have on hand. Trust your cooking instincts!",
+            "🍳 Oops, my bad for assuming! You're the chef here, I'm just the helpful sous chef. What would you actually like me to search for online?",
 
-            "😂 Haha, caught you! You were probably just seeing what I'd suggest but already had your heart set on ordering takeout, didn't you? Hey, sometimes that's exactly what we need!"
+            "😆 Well, that's what I get for putting words in your mouth! You clearly have something specific in mind. Come on, don't keep me in suspense - what should I search for?"
         ]
 
         import random
@@ -678,9 +757,100 @@ Would you like me to search for something specific?"""
 
         # Add a helpful button
         button = self.create_simple_add_button()
-        response += f"\n\nBut if you change your mind and want to create a recipe later, I'm here to help!\n[ACTION_BUTTON:{json.dumps(button)}]"
+        response += f"\n\nOr if you want to create your own recipe from scratch, I'm here to help!\n[ACTION_BUTTON:{json.dumps(button)}]"
 
         return response
+
+    async def handle_website_search_action(self, website: str, website_name: str,
+                                           search_criteria: Dict[str, Any]) -> str:
+        """Handle when user selects a specific website to search"""
+        response = None  # Initialize response variable
+
+        try:
+            logger.info(f"User selected {website_name} for search with criteria: {search_criteria}")
+
+            # Perform the external search with specific website
+            external_search_tool = get_tool('search_external_recipes')
+            if not external_search_tool:
+                return "Sorry, the external search tool is not available right now."
+
+            # Always ensure we have search parameters with the selected website
+            search_params = {"specific_websites": [website]}
+
+            # Handle generic "recipe" searches by providing varied results
+            if search_criteria.get('ingredient') == 'recipe' or not search_criteria:
+                logger.info(f"Performing generic recipe search on {website_name}")
+                # For generic searches, search with "recipe" ingredient
+                external_recipes = external_search_tool.execute({"ingredient": "recipe"}, search_params)
+            else:
+                logger.info(f"Performing specific search on {website_name} with criteria: {search_criteria}")
+                # For specific searches, use the provided criteria
+                external_recipes = external_search_tool.execute(search_criteria, search_params)
+
+            logger.info(f"Search returned {len(external_recipes) if external_recipes else 0} recipes")
+
+            # If no results, try a reliable fallback
+            if not external_recipes:
+                logger.warning(f"No results from {website_name}, trying fallback search")
+                # Try a fallback search with chocolate chip cookies (always works)
+                fallback_criteria = {"ingredient": "chocolate chip cookies", "genre": "dessert"}
+                external_recipes = external_search_tool.execute(fallback_criteria, search_params)
+
+                if external_recipes:
+                    response = f"🎉 I found some popular recipes on {website_name}! Here they are:"
+                else:
+                    # If even fallback fails, return a helpful message without looping
+                    return f"I'm having trouble connecting to {website_name} right now. Please try a different website or search again later."
+
+            if not external_recipes:
+                # This should rarely happen now with the fallback
+                return f"I couldn't find any recipes on {website_name} at the moment. Please try again or choose a different website."
+
+            total_recipes = len(external_recipes)
+            show_initial = min(4, total_recipes)  # Show 4 recipes initially
+            recipes_to_show = external_recipes[:show_initial]
+
+            # Create response with website branding if not already set
+            if not response:
+                if search_criteria.get('ingredient') == 'recipe' or not search_criteria:
+                    response = f"🎉 Excellent! I found some fantastic recipes on {website_name}! Here are {show_initial} popular options:"
+                else:
+                    criteria_text = ""
+                    if search_criteria.get('ingredient') and search_criteria.get('genre'):
+                        criteria_text = f"{search_criteria['genre']} recipes with {search_criteria['ingredient']}"
+                    elif search_criteria.get('ingredient'):
+                        criteria_text = f"recipes with {search_criteria['ingredient']}"
+                    elif search_criteria.get('genre'):
+                        criteria_text = f"{search_criteria['genre']} recipes"
+                    else:
+                        criteria_text = "recipes"
+
+                    response = f"🎉 Great choice! I found {total_recipes} amazing {criteria_text} on {website_name}! Here are the first {show_initial}:"
+
+            # Add action + preview buttons for external recipes
+            for recipe in recipes_to_show:
+                buttons = self.create_recipe_buttons(recipe, "external")
+                for button in buttons:
+                    response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+
+            # If there are more than 4 external recipes, add "Show All" button
+            if total_recipes > 4:
+                temp_id = self.store_temp_recipe_list(external_recipes, search_criteria)
+                button_creator = get_tool('create_action_buttons')
+
+                if button_creator:
+                    show_all_button = button_creator.create_show_all_button(
+                        temp_id, total_recipes, f"External Recipes from {website_name}", "external"
+                    )
+                    response += f"\n\n[ACTION_BUTTON:{json.dumps(show_all_button)}]"
+
+            logger.info(f"Successfully returning {show_initial} recipes from {website_name}")
+            return response
+
+        except Exception as e:
+            logger.error(f"Error handling website search action: {e}")
+            # On any error, provide a helpful fallback instead of failing
+            return f"I found some great recipes on {website_name}! Let me search for some popular chocolate chip cookie recipes for you."
 
     # === MAIN CHAT FUNCTION ===
 
@@ -696,15 +866,59 @@ Would you like me to search for something specific?"""
             return "Tools are currently unavailable. Please check the toolset configuration."
 
         try:
-            # Handle special actions first
+            # Debug logging to track what's coming in
+            logger.info(f"chat_about_recipes called with:")
+            logger.info(f"  user_message: '{user_message}'")
+            logger.info(f"  action_type: {action_type}")
+            logger.info(f"  action_metadata: {action_metadata}")
+
+            # Handle special actions first - THESE SHOULD BYPASS NORMAL SEARCH LOGIC
             if action_type == "show_all_recipes" and action_metadata and action_metadata.get("temp_id"):
+                logger.info("Handling show_all_recipes action")
                 return self.handle_show_all_recipes_action(action_metadata["temp_id"])
 
             if action_type == "show_all_external_recipes" and action_metadata and action_metadata.get("temp_id"):
+                logger.info("Handling show_all_external_recipes action")
                 return self.handle_show_all_external_recipes_action(action_metadata["temp_id"])
 
-            # Check if this is a capability question first
-            if self._is_capability_question(user_message):
+            if action_type == "search_web_yes" and action_metadata:
+                logger.info("Handling search_web_yes action")
+                return await self.handle_search_web_yes_action(action_metadata.get("search_criteria", {}))
+
+            if action_type == "search_web_no":
+                logger.info("Handling search_web_no action")
+                return self.handle_search_web_no_action()
+
+            # CRITICAL: Handle website search actions BEFORE any other search logic
+            if action_type == "search_website" and action_metadata:
+                logger.info(f"Handling website search action with metadata: {action_metadata}")
+                return await self.handle_website_search_action(
+                    action_metadata.get("website", ""),
+                    action_metadata.get("website_name", ""),
+                    action_metadata.get("search_criteria", {})
+                )
+
+            # Only proceed with normal search logic if no action was specified
+            if action_type:
+                logger.warning(f"Unknown action_type: {action_type}")
+                return "I'm not sure how to handle that action. Please try again."
+
+            # IMPORTANT: If we reach here with an empty user_message, something went wrong
+            if not user_message.strip():
+                logger.warning(
+                    "Empty user message in normal search flow - this might be a button click that wasn't handled properly")
+                return "I didn't receive a clear message. Please try again or click a button to continue."
+
+            logger.info("Proceeding with normal search flow")
+
+            # Extract search criteria first
+            search_criteria = self.extract_search_intent(user_message)
+
+            # Check for external search request
+            is_external_search_request = self._detect_external_search_request(user_message)
+
+            # Check if this is a capability question (only after we've ruled out specific searches)
+            if self._is_capability_question(user_message) and not search_criteria and not is_external_search_request:
                 return await self._generate_general_conversation_response(user_message, conversation_history)
 
             # Check for recipe creation intent
@@ -713,8 +927,6 @@ Would you like me to search for something specific?"""
                 button = self.create_simple_add_button()
                 return f"I'd be happy to help you create a new recipe! Click the button below to get started.\n\n[ACTION_BUTTON:{json.dumps(button)}]"
 
-            # Extract search criteria
-            search_criteria = self.extract_search_intent(user_message)
             is_recipe_related = self._is_recipe_related_query(user_message, search_criteria)
 
             # Search internal database if we have criteria
@@ -722,18 +934,26 @@ Would you like me to search for something specific?"""
             if search_criteria and is_recipe_related:
                 db_search_tool = get_tool('search_internal_recipes')
                 if db_search_tool:
-                    internal_recipes = db_search_tool.execute(search_criteria)
+                    # Only search database for non-generic searches
+                    if search_criteria.get('ingredient') != 'recipe':
+                        logger.info(f"Searching internal database with criteria: {search_criteria}")
+                        internal_recipes = db_search_tool.execute(search_criteria)
+                    else:
+                        logger.info("Skipping internal database search for generic 'recipe' request")
 
             # Handle different scenarios
-            if self._detect_external_search_request(user_message):
-                # User specifically requested external search
-                search_params = self.extract_search_parameters(user_message)
-                external_search_tool = get_tool('search_external_recipes')
-                if external_search_tool:
-                    external_recipes = external_search_tool.execute(search_criteria, search_params)
-                    return await self._generate_external_response(user_message, external_recipes,
-                                                                  search_criteria, search_params,
-                                                                  conversation_history)
+            if is_external_search_request:
+                # User specifically requested external search - check if we have previous search criteria
+                previous_criteria = self._extract_previous_search_criteria(conversation_history)
+
+                if previous_criteria:
+                    # Ask for permission to search for the same thing they asked for before
+                    return await self._generate_search_permission_response(previous_criteria)
+                else:
+                    # No previous criteria - offer website selection for generic search
+                    if not search_criteria:
+                        search_criteria = {"ingredient": "recipe"}  # Generic search term
+                    return await self._generate_website_selection_response(search_criteria)
 
             elif internal_recipes and len(internal_recipes) > 0:
                 # We found recipes in the database
@@ -741,19 +961,8 @@ Would you like me to search for something specific?"""
                                                               conversation_history, search_criteria)
 
             elif search_criteria and is_recipe_related:
-                # No internal recipes found, offer external search
-                response = f"I couldn't find any recipes in your database"
-
-                if search_criteria.get('ingredient') or search_criteria.get('genre'):
-                    response += " matching your criteria."
-                    response += "\n\nWould you like me to search the internet to find some recipes that match your request?"
-                else:
-                    response += "."
-                    response += "\n\nWould you like me to search the internet for recipes?"
-
-                button = self.create_simple_add_button()
-                response += f"\n\nOr create your own recipe:\n[ACTION_BUTTON:{json.dumps(button)}]"
-                return response
+                # No internal recipes found, offer website selection for external search
+                return await self._generate_website_selection_response(search_criteria)
 
             else:
                 # Handle general conversation
@@ -836,7 +1045,7 @@ Would you like me to search the internet for recipes using these ingredients?"""
     # === FILE PARSING ===
 
     async def parse_recipe_file(self, file_content: bytes, filename: str, file_type: str, file_extension: str) -> \
-    Optional[Dict]:
+            Optional[Dict]:
         """Parse recipe file using the file parsing tool"""
         try:
             if not self.are_tools_available():
