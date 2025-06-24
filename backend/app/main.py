@@ -29,7 +29,7 @@ from pathlib import Path
 from .config import settings  # Make sure you import your settings
 from .database import db, Database
 from .utils.ai_helper import ai_helper
-
+from fastapi.staticfiles import StaticFiles
 
 # Load environment variables first
 # load_dotenv()
@@ -423,6 +423,11 @@ async def health_check():
         "ai": "configured" if (ai_available and ai_helper and ai_helper.is_configured()) else "not configured"
     }
 
+
+@app.get("/")
+async def serve_react_index():
+    """Serve React app index.html for root route"""
+    return FileResponse("/app/frontend/build/index.html")
 
 # Basic routes
 # @app.get("/")
@@ -1863,8 +1868,10 @@ async def get_genres():
     return {"genres": [genre.value for genre in Genre]}
 
 
-# if os.path.exists("frontend/build"):
-#     app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
+
+if os.path.exists("frontend/build"):
+    app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
+
 #
 #
 #     @app.get("/")
@@ -1922,6 +1929,25 @@ async def get_genres():
     # @app.get("/")
     # async def read_root():
     #     return FileResponse("frontend/build/index.html")
+
+
+# Catch-all route for React Router (SPA)
+@app.get("/{full_path:path}")
+async def serve_react_spa(full_path: str):
+    """Serve React SPA for all other routes"""
+    # Block API routes
+    if full_path.startswith(("api", "docs", "redoc", "health", "photos", "test")):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    # Try to serve static file first (CSS, JS, images, etc.)
+    static_file_path = f"/app/frontend/build/{full_path}"
+    if os.path.isfile(static_file_path):
+        return FileResponse(static_file_path)
+
+    # Fallback to index.html for all React Router routes
+    return FileResponse("/app/frontend/build/index.html")
+
+
 
 
 # Health check endpoint (useful for deployment)
