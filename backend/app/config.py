@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 if not os.getenv("DYNO"):
     load_dotenv()
 
-
 class Settings(BaseSettings):
     # MongoDB connection
     mongo_uri: str = os.getenv("MONGO_URI") or os.getenv("MONGODB_URL")
@@ -22,14 +21,18 @@ class Settings(BaseSettings):
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
 
     # Domain configuration
-    domain: str = os.getenv("DOMAIN", "yourdomain.com")  # Your Netlify domain
-    api_subdomain: str = os.getenv("API_SUBDOMAIN", "api")
+    domain: str = os.getenv("DOMAIN", "localhost")
+    api_subdomain: str = os.getenv("API_SUBDOMAIN", "")
 
     # Base URL for the application
     @property
     def base_url(self) -> str:
         if self.is_production():
-            return f"https://{self.api_subdomain}.{self.domain}"
+            # For Heroku, use the full domain without subdomain
+            if self.api_subdomain and self.api_subdomain.strip():
+                return f"https://{self.api_subdomain}.{self.domain}"
+            else:
+                return f"https://{self.domain}"
         return "http://127.0.0.1:8000"
 
     # Frontend URL
@@ -48,6 +51,5 @@ class Settings(BaseSettings):
 
     def is_production(self) -> bool:
         return self.environment == "production" or bool(os.getenv("DYNO"))
-
 
 settings = Settings()
