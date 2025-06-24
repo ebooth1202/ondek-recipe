@@ -1,4 +1,4 @@
-# backend/app/utils/ai_helper.py - Refactored to use ButtonCreatorTool for Website Selection
+# backend/app/utils/ai_helper.py - Complete file with Rupert name correction feature
 
 import os
 from openai import OpenAI
@@ -124,6 +124,52 @@ class RupertAIHelper:
         ]
         for key in expired_keys:
             del temp_recipe_lists[key]
+
+    # === NAME CORRECTION FEATURE ===
+
+    def _detect_and_correct_name(self, user_message: str) -> Optional[str]:
+        """Detect common misspellings of Rupert and return a fun correction"""
+        user_lower = user_message.lower()
+
+        # Common misspellings and variations of "Rupert"
+        incorrect_names = [
+            "ralph", "robert", "roger", "rubin", "robin", "ruben",
+            "ruppert", "rupart", "ruport", "repurt", "rubert",
+            "rodger", "roland", "ronald", "russell", "randy",
+            "richard", "raymond", "rick", "roy", "ray"
+        ]
+
+        # Look for these names being used to address the AI
+        name_patterns = [
+            r'\b(hi|hey|hello|thanks|thank you|ok|okay)\s+{}\b',
+            r'\b{}\s+(can you|could you|please|help|find|search)',
+            r'\b{}\s*[,!?]',
+            r'^{}\s',  # Name at start of message
+            r'\b{}\s+(what|how|where|when|why)',
+        ]
+
+        for name in incorrect_names:
+            for pattern in name_patterns:
+                if re.search(pattern.format(name), user_lower):
+                    # Fun correction responses
+                    corrections = [
+                        f"😄 Ahem! It's *Rupert* (R-U-P-E-R-T), not {name.title()}! I'm a distinguished cooking assistant, not your neighbor {name.title()}! 😉",
+
+                        f"🧐 Close, but it's actually *Rupert*! {name.title()} is probably off somewhere NOT helping with recipes. Lucky you got me instead! 🍳",
+
+                        f"😂 Haha, {name.title()}? I think you've got me confused with someone else! I'm *Rupert* - the one and only culinary AI assistant around here!",
+
+                        f"🤔 {name.title()}? Nope, that's not me! I'm *Rupert* - think 'Recipe + Expert' = Rupert! (Okay, that's not really how it works, but close enough!) 🍽️",
+
+                        f"✨ Plot twist: I'm actually *Rupert*, not {name.title()}! Easy mistake though - we distinguished cooking assistants all look alike, right? 😄",
+
+                        f"🍳 *Rupert* here! Though I appreciate the {name.title()} comparison - I'm sure they're lovely, but I'm the one with all the recipe knowledge! 😉",
+                    ]
+
+                    import random
+                    return random.choice(corrections)
+
+        return None
 
     # === INTENT DETECTION ===
 
@@ -325,6 +371,178 @@ class RupertAIHelper:
             logger.error(f"Error extracting search parameters: {e}")
             return {}
 
+    def _expand_ingredient_terms(self, search_criteria: Dict[str, Any]) -> Dict[str, Any]:
+        """Expand abbreviated ingredient terms to full versions for better database matching"""
+        if not search_criteria.get('ingredient'):
+            return search_criteria
+
+        ingredient = search_criteria['ingredient'].lower().strip()
+
+        # Common ingredient abbreviations and variations
+        ingredient_expansions = {
+            # Chocolate variations
+            'choco': 'chocolate',
+            'choc': 'chocolate',
+            'cocoa': 'chocolate',
+
+            # Cookie/dessert variations
+            'choco chip': 'chocolate chip',
+            'choc chip': 'chocolate chip',
+            'cc cookie': 'chocolate chip cookie',
+            'choco chip cookie': 'chocolate chip cookie',
+            'choc chip cookie': 'chocolate chip cookie',
+
+            # Vegetable variations
+            'veggie': 'vegetable',
+            'veggies': 'vegetables',
+            'veg': 'vegetable',
+
+            # Meat variations
+            'chix': 'chicken',
+            'chkn': 'chicken',
+
+            # Cheese variations
+            'chedz': 'cheddar',
+            'mozz': 'mozzarella',
+            'parm': 'parmesan',
+
+            # Pasta variations
+            'mac cheese': 'macaroni cheese',
+            'mac and cheese': 'macaroni and cheese',
+            'spaghetti': 'pasta',
+            'penne': 'pasta',
+            'linguine': 'pasta',
+
+            # Bread variations
+            'sammie': 'sandwich',
+            'sammy': 'sandwich',
+            'grilled cheese': 'sandwich',
+
+            # Common food shortcuts
+            'pb': 'peanut butter',
+            'pb&j': 'peanut butter jelly',
+            'pbj': 'peanut butter jelly',
+            'blt': 'bacon lettuce tomato',
+
+            # Spice variations
+            'paprik': 'paprika',
+            'cumin': 'cumin',
+            'cinamon': 'cinnamon',
+            'cinammon': 'cinnamon',
+
+            # Fruit variations
+            'strawb': 'strawberry',
+            'blueb': 'blueberry',
+            'raspb': 'raspberry',
+
+            # Breakfast items
+            'pancakes': 'pancake',
+            'waffles': 'waffle',
+            'french toast': 'toast',
+
+            # Common typos/variations
+            'tomatoe': 'tomato',
+            'potatoe': 'potato',
+            'onoin': 'onion',
+            'galic': 'garlic',
+            'garlick': 'garlic',
+        }
+
+        # Direct replacement if found
+        if ingredient in ingredient_expansions:
+            logger.info(f"Expanding '{ingredient}' to '{ingredient_expansions[ingredient]}'")
+            search_criteria['ingredient'] = ingredient_expansions[ingredient]
+            return search_criteria
+
+        # Check for partial matches (e.g., "choco chip" within a longer phrase)
+        for short_form, full_form in ingredient_expansions.items():
+            if short_form in ingredient:
+                expanded_ingredient = ingredient.replace(short_form, full_form)
+                logger.info(f"Expanding '{ingredient}' to '{expanded_ingredient}' (partial match)")
+                search_criteria['ingredient'] = expanded_ingredient
+                return search_criteria
+
+        # Return original if no expansion found
+        return search_criteria
+
+    def _create_alternative_search_terms(self, ingredient: str) -> List[str]:
+        """Create alternative search terms for better matching"""
+        alternatives = [ingredient]
+
+        # Add singular/plural variations
+        if ingredient.endswith('s') and len(ingredient) > 3:
+            # Remove 's' for singular
+            alternatives.append(ingredient[:-1])
+        elif not ingredient.endswith('s'):
+            # Add 's' for plural
+            alternatives.append(ingredient + 's')
+
+        # Add common word variations
+        word_variants = {
+            'cookie': ['cookies', 'biscuit', 'biscuits'],
+            'chocolate': ['choco', 'choc', 'cocoa'],
+            'chicken': ['chix', 'chkn', 'poultry'],
+            'vegetable': ['veggie', 'veggies', 'veg'],
+            'sandwich': ['sammie', 'sammy', 'sub'],
+            'pasta': ['noodle', 'noodles', 'spaghetti', 'penne', 'linguine'],
+            'cheese': ['cheddar', 'mozzarella', 'parmesan'],
+        }
+
+        for base_word, variants in word_variants.items():
+            if base_word in ingredient.lower():
+                for variant in variants:
+                    if variant not in ingredient.lower():
+                        alternatives.append(ingredient.lower().replace(base_word, variant))
+            elif any(variant in ingredient.lower() for variant in variants):
+                # If ingredient contains a variant, add the base word version
+                for variant in variants:
+                    if variant in ingredient.lower():
+                        alternatives.append(ingredient.lower().replace(variant, base_word))
+
+        # Remove duplicates and return
+        return list(set(alternatives))
+
+    def _enhanced_database_search(self, search_criteria: Dict[str, Any]) -> List[Dict]:
+        """Enhanced database search with ingredient expansion and fuzzy matching"""
+        try:
+            if not self.are_tools_available():
+                return []
+
+            # First, expand abbreviated terms
+            expanded_criteria = self._expand_ingredient_terms(search_criteria.copy())
+
+            # Try exact search with expanded terms first
+            db_search_tool = get_tool('search_internal_recipes')
+            if not db_search_tool:
+                return []
+
+            recipes = db_search_tool.execute(expanded_criteria)
+
+            # If we found recipes with expanded terms, return them
+            if recipes:
+                logger.info(f"Found {len(recipes)} recipes with expanded search terms")
+                return recipes
+
+            # If no results with expanded terms, try alternative search terms
+            if expanded_criteria.get('ingredient'):
+                original_ingredient = expanded_criteria['ingredient']
+                alternatives = self._create_alternative_search_terms(original_ingredient)
+
+                for alternative in alternatives:
+                    if alternative != original_ingredient:
+                        alt_criteria = expanded_criteria.copy()
+                        alt_criteria['ingredient'] = alternative
+                        alt_recipes = db_search_tool.execute(alt_criteria)
+
+                        if alt_recipes:
+                            logger.info(f"Found {len(alt_recipes)} recipes with alternative term '{alternative}'")
+                            return alt_recipes
+
+            return []
+
+        except Exception as e:
+            logger.error(f"Error in enhanced database search: {e}")
+            return []
     # === BUTTON CREATION (using ButtonCreatorTool) ===
 
     def create_recipe_buttons(self, recipe: Dict[str, Any], recipe_type: str = "internal") -> List[Dict[str, Any]]:
@@ -402,11 +620,24 @@ class RupertAIHelper:
         """Generate response based on internal database recipes with pagination"""
         try:
             criteria_description = ""
+            search_feedback = ""
+
             if search_criteria:
                 if search_criteria.get('ingredient') and search_criteria.get('genre'):
                     criteria_description = f"{search_criteria['genre']} recipes with {search_criteria['ingredient']}"
                 elif search_criteria.get('ingredient'):
                     criteria_description = f"recipes with {search_criteria['ingredient']}"
+
+                    # Check if we made an intelligent expansion
+                    original_ingredient = user_message.lower()
+                    found_ingredient = search_criteria['ingredient'].lower()
+
+                    # If the found ingredient is different/longer than what user typed, mention it
+                    if (found_ingredient != original_ingredient and
+                            found_ingredient not in original_ingredient and
+                            len(found_ingredient) > len(original_ingredient)):
+                        search_feedback = f" (I found matches for '{found_ingredient}')"
+
                 elif search_criteria.get('genre'):
                     criteria_description = f"{search_criteria['genre']} recipes"
 
@@ -414,10 +645,11 @@ class RupertAIHelper:
             show_initial = min(5, total_recipes)
 
             if criteria_description:
-                response = f"I found {total_recipes} {criteria_description} in your database."
+                response = f"I found {total_recipes} {criteria_description} in your database{search_feedback}."
             else:
                 response = f"I found {total_recipes} recipes in your database."
 
+            # Rest of the method remains the same...
             # Show first 5 recipes with action + preview buttons
             recipes_to_show = recipes[:show_initial]
             for recipe in recipes_to_show:
@@ -872,6 +1104,60 @@ Would you like me to search for something specific?"""
             logger.info(f"  action_type: {action_type}")
             logger.info(f"  action_metadata: {action_metadata}")
 
+            # NEW: Check for name corrections FIRST (only for regular chat, not actions)
+            if not action_type and user_message:
+                name_correction = self._detect_and_correct_name(user_message)
+                if name_correction:
+                    logger.info("Name correction triggered")
+
+                    # Clean the message by removing the incorrect name references
+                    user_lower = user_message.lower()
+                    incorrect_names = [
+                        "ralph", "robert", "roger", "rubin", "robin", "ruben",
+                        "ruppert", "rupart", "ruport", "repurt", "rubert",
+                        "rodger", "roland", "ronald", "russell", "randy",
+                        "richard", "raymond", "rick", "roy", "ray"
+                    ]
+
+                    cleaned_message = user_message
+                    for name in incorrect_names:
+                        patterns_to_clean = [
+                            rf'\b(hi|hey|hello|thanks|thank you|ok|okay)\s+{name}\b',
+                            rf'\b{name}\s*[,!?]',
+                            rf'^{name}\s+',
+                            rf'\b{name}\s+'
+                        ]
+                        for pattern in patterns_to_clean:
+                            cleaned_message = re.sub(pattern, '', cleaned_message, flags=re.IGNORECASE).strip()
+
+                    # If there's still a meaningful request, process it
+                    if cleaned_message and len(cleaned_message.split()) > 1:
+                        search_criteria = self.extract_search_intent(cleaned_message)
+
+                        if search_criteria:
+                            # Handle recipe request with name correction using enhanced search
+                            internal_recipes = []
+                            if search_criteria.get('ingredient') != 'recipe':
+                                internal_recipes = self._enhanced_database_search(search_criteria)
+
+                            if internal_recipes:
+                                response = await self._generate_internal_response(
+                                    cleaned_message, internal_recipes, conversation_history, search_criteria
+                                )
+                            else:
+                                response = await self._generate_website_selection_response(search_criteria)
+
+                            return f"{name_correction}\n\nNow, {response}"
+                        else:
+                            # General conversation with name correction
+                            response = await self._generate_general_conversation_response(
+                                cleaned_message, conversation_history
+                            )
+                            return f"{name_correction}\n\n{response}"
+                    else:
+                        # Just the name correction
+                        return f"{name_correction}\n\nWhat can I help you cook up today? 🍳"
+
             # Handle special actions first - THESE SHOULD BYPASS NORMAL SEARCH LOGIC
             if action_type == "show_all_recipes" and action_metadata and action_metadata.get("temp_id"):
                 logger.info("Handling show_all_recipes action")
@@ -932,14 +1218,18 @@ Would you like me to search for something specific?"""
             # Search internal database if we have criteria
             internal_recipes = []
             if search_criteria and is_recipe_related:
-                db_search_tool = get_tool('search_internal_recipes')
-                if db_search_tool:
-                    # Only search database for non-generic searches
-                    if search_criteria.get('ingredient') != 'recipe':
-                        logger.info(f"Searching internal database with criteria: {search_criteria}")
-                        internal_recipes = db_search_tool.execute(search_criteria)
+                # ENHANCED: Use intelligent ingredient matching instead of basic search
+                if search_criteria.get('ingredient') != 'recipe':
+                    logger.info(f"Performing enhanced search with criteria: {search_criteria}")
+                    internal_recipes = self._enhanced_database_search(search_criteria)
+
+                    # Log what we found for debugging
+                    if internal_recipes:
+                        logger.info(f"Enhanced search found {len(internal_recipes)} recipes")
                     else:
-                        logger.info("Skipping internal database search for generic 'recipe' request")
+                        logger.info("Enhanced search found no recipes")
+                else:
+                    logger.info("Skipping internal database search for generic 'recipe' request")
 
             # Handle different scenarios
             if is_external_search_request:
@@ -960,9 +1250,41 @@ Would you like me to search for something specific?"""
                 return await self._generate_internal_response(user_message, internal_recipes,
                                                               conversation_history, search_criteria)
 
+
+
             elif search_criteria and is_recipe_related:
-                # No internal recipes found, offer website selection for external search
-                return await self._generate_website_selection_response(search_criteria)
+
+                # ENHANCED: We searched but found no internal recipes - show intelligent search feedback
+                criteria_description = ""
+                search_feedback = ""
+                if search_criteria.get('ingredient') and search_criteria.get('genre'):
+                    criteria_description = f"{search_criteria['genre']} recipes with {search_criteria['ingredient']}"
+                elif search_criteria.get('ingredient') and search_criteria['ingredient'] != 'recipe':
+                    criteria_description = f"recipes with {search_criteria['ingredient']}"
+
+                    # Show that we tried intelligent expansions
+                    original_input = user_message.lower()
+                    search_term = search_criteria['ingredient'].lower()
+
+                    if search_term != original_input and search_term not in original_input:
+                        search_feedback = f" (I even tried searching for '{search_criteria['ingredient']}' and similar variations)"
+
+                elif search_criteria.get('genre'):
+                    criteria_description = f"{search_criteria['genre']} recipes"
+                else:
+                    criteria_description = "recipes"
+
+                # Inform user about internal search results with intelligence feedback
+                response = f"I searched your recipe database but didn't find any {criteria_description}{search_feedback}. "
+
+                # Add encouraging message and offer external search
+                response += f"But don't worry! I can search the internet to find some great {criteria_description} for you. "
+
+                # Generate website selection response
+                website_selection = await self._generate_website_selection_response(search_criteria)
+
+                # Combine the messages
+                return f"{response}{website_selection}"
 
             else:
                 # Handle general conversation
