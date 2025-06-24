@@ -118,6 +118,9 @@ app.add_middleware(
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key")
 security = HTTPBearer()
 
+@app.get("/test")
+async def test_route():
+    return {"message": "Test route works", "build_exists": os.path.exists("/app/frontend/build")}
 
 # Pydantic Models (keeping existing models...)
 class UserRole(str, Enum):
@@ -1860,59 +1863,59 @@ async def get_genres():
     return {"genres": [genre.value for genre in Genre]}
 
 
-if os.path.exists("frontend/build"):
-    app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
-
-
-    @app.get("/")
-    async def serve_root():
-        """Explicitly handle root route"""
-        import os
-        index_path = "/app/frontend/build/index.html"
-        logger.info(f"Root route: serving {index_path}")
-
-        if os.path.exists(index_path):
-            return FileResponse(index_path)
-        else:
-            raise HTTPException(status_code=404, detail=f"Root: Index not found at {index_path}")
-
-    # Serve React app for all non-API routes
-    @app.get("/{full_path:path}")
-    async def serve_react_app(full_path: str):
-        """Debug version to see what's happening"""
-        import os
-
-        # Log what we're trying to serve
-        logger.info(f"Serving request for path: '{full_path}'")
-
-        # Don't serve React app for API routes
-        if full_path.startswith(("api", "docs", "redoc", "health", "photos")):
-            logger.info(f"Blocking API route: {full_path}")
-            raise HTTPException(status_code=404, detail="Not found")
-
-        # Check build directory
-        app_dir = "/app"
-        build_dir = os.path.join(app_dir, "frontend", "build")
-        index_path = os.path.join(build_dir, "index.html")
-
-        logger.info(f"Looking for files in: {build_dir}")
-        logger.info(f"Index file path: {index_path}")
-        logger.info(f"Index file exists: {os.path.exists(index_path)}")
-
-        # List what's actually in the build directory
-        try:
-            build_contents = os.listdir(build_dir)
-            logger.info(f"Build directory contents: {build_contents}")
-        except Exception as e:
-            logger.error(f"Error listing build directory: {e}")
-            raise HTTPException(status_code=404, detail=f"Build directory error: {e}")
-
-        # Always serve index.html for now (for debugging)
-        if os.path.exists(index_path):
-            logger.info(f"Serving index.html from: {index_path}")
-            return FileResponse(index_path)
-        else:
-            raise HTTPException(status_code=404, detail=f"Index file not found at: {index_path}")
+# if os.path.exists("frontend/build"):
+#     app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
+#
+#
+#     @app.get("/")
+#     async def serve_root():
+#         """Explicitly handle root route"""
+#         import os
+#         index_path = "/app/frontend/build/index.html"
+#         logger.info(f"Root route: serving {index_path}")
+#
+#         if os.path.exists(index_path):
+#             return FileResponse(index_path)
+#         else:
+#             raise HTTPException(status_code=404, detail=f"Root: Index not found at {index_path}")
+#
+#     # Serve React app for all non-API routes
+#     @app.get("/{full_path:path}")
+#     async def serve_react_app(full_path: str):
+#         """Debug version to see what's happening"""
+#         import os
+#
+#         # Log what we're trying to serve
+#         logger.info(f"Serving request for path: '{full_path}'")
+#
+#         # Don't serve React app for API routes
+#         if full_path.startswith(("api", "docs", "redoc", "health", "photos")):
+#             logger.info(f"Blocking API route: {full_path}")
+#             raise HTTPException(status_code=404, detail="Not found")
+#
+#         # Check build directory
+#         app_dir = "/app"
+#         build_dir = os.path.join(app_dir, "frontend", "build")
+#         index_path = os.path.join(build_dir, "index.html")
+#
+#         logger.info(f"Looking for files in: {build_dir}")
+#         logger.info(f"Index file path: {index_path}")
+#         logger.info(f"Index file exists: {os.path.exists(index_path)}")
+#
+#         # List what's actually in the build directory
+#         try:
+#             build_contents = os.listdir(build_dir)
+#             logger.info(f"Build directory contents: {build_contents}")
+#         except Exception as e:
+#             logger.error(f"Error listing build directory: {e}")
+#             raise HTTPException(status_code=404, detail=f"Build directory error: {e}")
+#
+#         # Always serve index.html for now (for debugging)
+#         if os.path.exists(index_path):
+#             logger.info(f"Serving index.html from: {index_path}")
+#             return FileResponse(index_path)
+#         else:
+#             raise HTTPException(status_code=404, detail=f"Index file not found at: {index_path}")
 
 
     # Root route - serve React app
