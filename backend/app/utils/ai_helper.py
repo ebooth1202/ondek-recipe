@@ -294,21 +294,21 @@ class RupertAIHelper:
                         IMPORTANT: Extract specific food items mentioned, even if they say "want to make" or "going to cook".
         
                         Extract any of these criteria if mentioned:
-                        - genre: breakfast, lunch, dinner, snack, dessert, appetizer
-                        - ingredient: any specific food item mentioned (cookies, pancakes, bread, etc.)
-                        - name: recipe name if specifically mentioned
-                        - max_time: maximum cooking time in minutes if mentioned
-                        - dietary_restrictions: gluten_free, dairy_free, egg_free
-        
-                        Only use generic "recipe" if NO specific food item is mentioned:
-                        {{"ingredient": "recipe"}}
-        
-                        Examples:
-                        "i want to make some cookies" -> {{"ingredient": "cookies", "genre": "dessert"}}
-                        "find a chocolate chip cookie recipe" -> {{"ingredient": "chocolate chip", "genre": "dessert"}}
-                        "show me dinner recipes" -> {{"genre": "dinner"}}
-                        "find a new recipe online" -> {{"ingredient": "recipe"}}
-                        "i want to bake bread" -> {{"ingredient": "bread", "genre": "snack"}}
+                                - genre: breakfast, lunch, dinner, snack, dessert, appetizer
+                                - ingredient: any specific food item mentioned (cookies, pancakes, bread, etc.)
+                                - name: recipe name if specifically mentioned
+                                - max_time: maximum cooking time in minutes if mentioned
+                                - dietary_restrictions: gluten_free, dairy_free, egg_free
+                                - show_favorites: true if asking for favorite/favorited recipes
+                    
+                                Only use generic "recipe" if NO specific food item is mentioned:
+                                {{"ingredient": "recipe"}}
+                    
+                                Examples:
+                                "i want to make some cookies" -> {{"ingredient": "cookies", "genre": "dessert"}}
+                                "show me my favorite recipes" -> {{"show_favorites": true}}
+                                "find my favorited desserts" -> {{"show_favorites": true, "genre": "dessert"}}
+                                "list of favorites" -> {{"show_favorites": true}}
         
                         Return only valid JSON. If asking about capabilities only, return: {{}}
                         """
@@ -624,7 +624,12 @@ class RupertAIHelper:
             search_feedback = ""
 
             if search_criteria:
-                if search_criteria.get('ingredient') and search_criteria.get('genre'):
+                if search_criteria.get('show_favorites'):
+                    if search_criteria.get('genre'):
+                        criteria_description = f"favorite {search_criteria['genre']} recipes"
+                    else:
+                        criteria_description = f"favorite recipes"
+                elif search_criteria.get('ingredient') and search_criteria.get('genre'):
                     criteria_description = f"{search_criteria['genre']} recipes with {search_criteria['ingredient']}"
                 elif search_criteria.get('ingredient'):
                     criteria_description = f"recipes with {search_criteria['ingredient']}"
@@ -650,7 +655,6 @@ class RupertAIHelper:
             else:
                 response = f"I found {total_recipes} recipes in your database."
 
-            # Rest of the method remains the same...
             # Show first 5 recipes with action + preview buttons
             recipes_to_show = recipes[:show_initial]
             for recipe in recipes_to_show:

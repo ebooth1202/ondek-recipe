@@ -827,10 +827,56 @@ class DatabaseSearchTool:
                     {"notes": {"$regex": pattern_string, "$options": "i"}}
                 ]
 
+            if "name" in criteria:
+                query["recipe_name"] = {"$regex": criteria["name"], "$options": "i"}
+
+            if "max_time" in criteria:
+                query["$expr"] = {
+                    "$lte": [
+                        {"$add": [{"$ifNull": ["$prep_time", 0]}, {"$ifNull": ["$cook_time", 0]}]},
+                        criteria["max_time"]
+                    ]
+                }
+
+            if "dietary_restrictions" in criteria:
+                query["dietary_restrictions"] = {"$in": criteria["dietary_restrictions"]}
+
+            if "show_favorites" in criteria and criteria["show_favorites"]:
+                # Handle favorites stored in separate collection
+                # Get all favorited recipe_ids from the favorites collection
+                favorite_recipe_ids = []
+                try:
+                    favorite_docs = list(db.favorites.find({}, {"recipe_id": 1}))
+                    logger.info(f"DEBUG: Found {len(favorite_docs)} favorite documents")
+                    logger.info(f"DEBUG: Favorite docs: {favorite_docs}")
+
+                    favorite_recipe_ids = [doc["recipe_id"] for doc in favorite_docs if "recipe_id" in doc]
+                    logger.info(f"DEBUG: Extracted recipe IDs: {favorite_recipe_ids}")
+                except Exception as e:
+                    logger.error(f"Error getting favorite recipe IDs: {e}")
+
+                if favorite_recipe_ids:
+                    # Convert string IDs to ObjectId if needed
+                    object_ids = []
+                    for fav_id in favorite_recipe_ids:
+                        try:
+                            if isinstance(fav_id, str):
+                                object_ids.append(ObjectId(fav_id))
+                            else:
+                                object_ids.append(fav_id)
+                        except:
+                            object_ids.append(fav_id)  # Keep as-is if conversion fails
+
+                    # Search for recipes with these IDs
+                    query["_id"] = {"$in": object_ids}
+                else:
+                    # No favorites found, return empty result
+                    return []
+
             logger.info(f"Database search query: {query}")
             recipes = list(db.recipes.find(query).limit(50))
 
-            # If no exact matches and ingredient has spaces, try fallback
+            # Enhanced fallback: if no matches and ingredient has spaces, try individual words
             if len(recipes) == 0 and "ingredient" in criteria and " " in criteria["ingredient"]:
                 words = criteria["ingredient"].split()
                 word_patterns = []
@@ -893,6 +939,35 @@ class DatabaseSearchTool:
 
             if "dietary_restrictions" in criteria:
                 query["dietary_restrictions"] = {"$in": criteria["dietary_restrictions"]}
+
+            if "show_favorites" in criteria and criteria["show_favorites"]:
+                # Handle favorites stored in separate collection
+                # Get all favorited recipe_ids from the favorites collection
+                favorite_recipe_ids = []
+                try:
+                    favorite_docs = list(db.favorites.find({}, {"recipe_id": 1}))
+                    favorite_recipe_ids = [doc["recipe_id"] for doc in favorite_docs if "recipe_id" in doc]
+                except Exception as e:
+                    logger.error(f"Error getting favorite recipe IDs for count: {e}")
+
+                if favorite_recipe_ids:
+                    # Convert string IDs to ObjectId if needed
+                    from bson import ObjectId
+                    object_ids = []
+                    for fav_id in favorite_recipe_ids:
+                        try:
+                            if isinstance(fav_id, str):
+                                object_ids.append(ObjectId(fav_id))
+                            else:
+                                object_ids.append(fav_id)
+                        except:
+                            object_ids.append(fav_id)  # Keep as-is if conversion fails
+
+                    # Count recipes with these IDs
+                    query["_id"] = {"$in": object_ids}
+                else:
+                    # No favorites found, return 0
+                    return 0
 
             return db.recipes.count_documents(query)
 
