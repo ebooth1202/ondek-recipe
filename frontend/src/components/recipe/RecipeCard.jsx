@@ -10,7 +10,7 @@ const getApiBaseUrl = () => {
   }
   // If in production, use your production backend URL
   // Replace this with your actual production backend URL
-  return 'https://your-backend-app.herokuapp.com';
+  return 'https://ondek-recipe-testing-2777bc2152f6.herokuapp.com';
 };
 
 const API_BASE_URL = getApiBaseUrl();
