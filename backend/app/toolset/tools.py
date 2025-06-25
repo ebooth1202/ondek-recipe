@@ -1321,17 +1321,23 @@ class ButtonCreatorTool:
             buttons.append(button_data)
 
         # Preview button for all recipes
+        preview_metadata = {
+            "recipe_name": recipe.get('name', 'Unknown Recipe'),
+            "type": "preview_recipe",
+            "source": recipe_type
+        }
+
+        # Add recipe_id for internal recipes so favorite button can work
+        if recipe_type == "internal" and 'id' in recipe:
+            preview_metadata['recipe_id'] = recipe['id']
+
         buttons.append({
             "type": "preview_button",
             "text": "📋 Preview",
             "action": "preview_recipe",
             "style": "secondary",
             "preview_data": preview_data,
-            "metadata": {
-                "recipe_name": recipe.get('name', 'Unknown Recipe'),
-                "type": "preview_recipe",
-                "source": recipe_type
-            }
+            "metadata": preview_metadata
         })
 
         return buttons

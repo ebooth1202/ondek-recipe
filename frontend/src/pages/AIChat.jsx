@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { API_BASE_URL, API_ENDPOINTS, apiClient } from '../utils/api';
+import FavoriteButton from '../components/FavoriteButton';
 
 const AIChat = () => {
   const { isAuthenticated, user } = useAuth();
@@ -24,7 +25,8 @@ const AIChat = () => {
   // Preview modal state
   const [previewModal, setPreviewModal] = useState({
     show: false,
-    recipe: null
+    recipe: null,
+    buttonMetadata: null
   });
 
   // Authentication check
@@ -55,7 +57,7 @@ const AIChat = () => {
   useEffect(() => {
     const handleEscape = (event) => {
       if (event.key === 'Escape') {
-        setPreviewModal({ show: false, recipe: null });
+        setPreviewModal({ show: false, recipe: null, buttonMetadata: null });
       }
     };
 
@@ -529,7 +531,8 @@ Please try:
       // Show preview modal
       setPreviewModal({
         show: true,
-        recipe: button.preview_data
+        recipe: button.preview_data,
+        buttonMetadata: button.metadata
       });
     } else if (button.action === 'show_all_recipes' || button.action === 'show_all_external_recipes') {
       // Handle show all action
@@ -554,204 +557,242 @@ Please try:
   };
 
   // Recipe Preview Modal Component
-  const RecipePreviewModal = ({ recipe, show, onClose }) => {
-    if (!show || !recipe) return null;
+  // Recipe Preview Modal Component
+// Recipe Preview Modal Component
+const RecipePreviewModal = ({ recipe, show, onClose, buttonMetadata }) => {
+  const [isFavorited, setIsFavorited] = useState(false);
 
-    const modalOverlayStyle = {
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      width: '100%',
-      height: '100%',
-      backgroundColor: 'rgba(0, 0, 0, 0.5)',
-      zIndex: 10000,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '1rem'
-    };
+  // Check if this internal recipe is favorited
+  useEffect(() => {
+    if (show && buttonMetadata?.source === 'internal' && buttonMetadata?.recipe_id) {
+      const checkFavoriteStatus = async () => {
+        try {
+          const response = await apiClient.get(API_ENDPOINTS.RECIPE_FAVORITE_STATUS(buttonMetadata.recipe_id));
+          setIsFavorited(response.data.is_favorited);
+        } catch (error) {
+          console.error('Error checking favorite status:', error);
+        }
+      };
+      checkFavoriteStatus();
+    }
+  }, [show, buttonMetadata]);
 
-    const modalStyle = {
-      backgroundColor: 'white',
-      borderRadius: '15px',
-      padding: '2rem',
-      maxWidth: '600px',
-      width: '100%',
-      maxHeight: '80vh',
-      overflowY: 'auto',
-      border: '3px solid #003366',
-      boxShadow: '0 10px 30px rgba(0, 51, 102, 0.3)',
-      animation: 'fadeInScale 0.3s ease-out'
-    };
+  if (!show || !recipe) return null;
 
-    const headerStyle = {
-      borderBottom: '2px solid #f0f8ff',
-      paddingBottom: '1rem',
-      marginBottom: '1.5rem',
-      position: 'relative'
-    };
+  const modalOverlayStyle = {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    zIndex: 10000,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '1rem'
+  };
 
-    const titleStyle = {
-      color: '#003366',
-      fontSize: '1.4rem',
-      fontWeight: 'bold',
-      margin: '0 0 0.5rem 0'
-    };
+  const modalStyle = {
+    backgroundColor: 'white',
+    borderRadius: '15px',
+    padding: '2rem',
+    maxWidth: '600px',
+    width: '100%',
+    maxHeight: '80vh',
+    overflowY: 'auto',
+    border: '3px solid #003366',
+    boxShadow: '0 10px 30px rgba(0, 51, 102, 0.3)',
+    animation: 'fadeInScale 0.3s ease-out'
+  };
 
-    const closeButtonStyle = {
-      position: 'absolute',
-      top: 0,
-      right: 0,
-      background: 'none',
-      border: 'none',
-      fontSize: '1.5rem',
-      cursor: 'pointer',
-      color: '#666',
-      padding: '0.5rem'
-    };
+  const headerStyle = {
+    borderBottom: '2px solid #f0f8ff',
+    paddingBottom: '1rem',
+    marginBottom: '1.5rem',
+    position: 'relative'
+  };
 
-    const metaStyle = {
-      display: 'flex',
-      gap: '1rem',
-      flexWrap: 'wrap',
-      fontSize: '0.9rem',
-      color: '#666'
-    };
+  const titleStyle = {
+    color: '#003366',
+    fontSize: '1.4rem',
+    fontWeight: 'bold',
+    margin: '0 0 0.5rem 0'
+  };
 
-    const sectionStyle = {
-      marginBottom: '1.5rem'
-    };
+  const closeButtonStyle = {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    background: 'none',
+    border: 'none',
+    fontSize: '1.5rem',
+    cursor: 'pointer',
+    color: '#666',
+    padding: '0.5rem'
+  };
 
-    const sectionTitleStyle = {
-      fontSize: '1.1rem',
-      fontWeight: 'bold',
-      color: '#003366',
-      marginBottom: '0.5rem',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem'
-    };
+  const metaStyle = {
+    display: 'flex',
+    gap: '1rem',
+    flexWrap: 'wrap',
+    fontSize: '0.9rem',
+    color: '#666'
+  };
 
-    const listStyle = {
-      paddingLeft: '1.5rem',
-      lineHeight: '1.6'
-    };
+  const sectionStyle = {
+    marginBottom: '1.5rem'
+  };
 
-    const badgeContainerStyle = {
-      display: 'flex',
-      gap: '0.5rem',
-      flexWrap: 'wrap',
-      marginTop: '0.5rem'
-    };
+  const sectionTitleStyle = {
+    fontSize: '1.1rem',
+    fontWeight: 'bold',
+    color: '#003366',
+    marginBottom: '0.5rem',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem'
+  };
 
-    const badgeStyle = {
-      backgroundColor: '#e6f0ff',
-      color: '#003366',
-      padding: '0.25rem 0.75rem',
-      borderRadius: '15px',
-      fontSize: '0.8rem',
-      border: '1px solid #003366',
-      fontWeight: '500'
-    };
+  const listStyle = {
+    paddingLeft: '1.5rem',
+    lineHeight: '1.6'
+  };
 
-    return (
-      <div style={modalOverlayStyle} onClick={onClose}>
-        <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
-          {/* Header */}
-          <div style={headerStyle}>
-            <button style={closeButtonStyle} onClick={onClose} title="Close">
-              ✕
-            </button>
-            <h2 style={titleStyle}>{recipe.recipe_name}</h2>
-            <div style={metaStyle}>
-              <span>🍽️ Serves {recipe.serving_size}</span>
-              <span>⏱️ {recipe.total_time} min total</span>
-              {recipe.prep_time > 0 && <span>⚡ {recipe.prep_time} min prep</span>}
-              {recipe.cook_time > 0 && <span>🔥 {recipe.cook_time} min cook</span>}
-              <span>📍 {recipe.source}</span>
-              {recipe.genre && <span>🏷️ {recipe.genre}</span>}
+  const badgeContainerStyle = {
+    display: 'flex',
+    gap: '0.5rem',
+    flexWrap: 'wrap',
+    marginTop: '0.5rem'
+  };
+
+  const badgeStyle = {
+    backgroundColor: '#e6f0ff',
+    color: '#003366',
+    padding: '0.25rem 0.75rem',
+    borderRadius: '15px',
+    fontSize: '0.8rem',
+    border: '1px solid #003366',
+    fontWeight: '500'
+  };
+
+  return (
+    <div style={modalOverlayStyle} onClick={onClose}>
+      <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div style={headerStyle}>
+          <button style={closeButtonStyle} onClick={onClose} title="Close">
+            ✕
+          </button>
+          {/* Show favorite badge for internal recipes that are favorited */}
+          {buttonMetadata?.source === 'internal' && isFavorited && (
+            <div style={{
+              position: 'absolute',
+              top: '-10px',
+              right: '50px',
+              backgroundColor: '#dc3545',
+              color: 'white',
+              padding: '8px 18px',
+              borderRadius: '15px',
+              fontSize: '16px',
+              fontWeight: 'bold',
+              boxShadow: '0 2px 8px rgba(220, 53, 69, 0.3)',
+              zIndex: 1000,
+              letterSpacing: 1,
+            }}>
+              ❤️ Favorite
+            </div>
+          )}
+          <h2 style={titleStyle}>{recipe.recipe_name}</h2>
+          <div style={metaStyle}>
+            <span>🍽️ Serves {recipe.serving_size}</span>
+            <span>⏱️ {recipe.total_time} min total</span>
+            {recipe.prep_time > 0 && <span>⚡ {recipe.prep_time} min prep</span>}
+            {recipe.cook_time > 0 && <span>🔥 {recipe.cook_time} min cook</span>}
+            <span>📍 {recipe.source}</span>
+            {recipe.genre && <span>🏷️ {recipe.genre}</span>}
+          </div>
+        </div>
+
+        {/* Description */}
+        {recipe.description && (
+          <div style={sectionStyle}>
+            <p style={{ fontSize: '1rem', color: '#333', margin: 0, lineHeight: '1.6' }}>
+              {recipe.description}
+            </p>
+          </div>
+        )}
+
+        {/* Ingredients */}
+        {recipe.ingredients && recipe.ingredients.length > 0 && (
+          <div style={sectionStyle}>
+            <h3 style={sectionTitleStyle}>
+              📋 Ingredients ({recipe.ingredients.length})
+            </h3>
+            <ul style={listStyle}>
+              {recipe.ingredients.map((ingredient, index) => (
+                <li key={index} style={{ marginBottom: '0.25rem' }}>
+                  {typeof ingredient === 'string' ? ingredient :
+                   typeof ingredient === 'object' ?
+                   `${ingredient.quantity || ''} ${ingredient.unit || ''} ${ingredient.name || ''}`.trim() :
+                   String(ingredient)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Instructions */}
+        {recipe.instructions && recipe.instructions.length > 0 && (
+          <div style={sectionStyle}>
+            <h3 style={sectionTitleStyle}>
+              📝 Instructions ({recipe.instructions.length} steps)
+            </h3>
+            <ol style={listStyle}>
+              {recipe.instructions.map((instruction, index) => (
+                <li key={index} style={{ marginBottom: '0.5rem' }}>
+                  {String(instruction)}
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+
+        {/* Notes */}
+        {recipe.notes && recipe.notes.length > 0 && (
+          <div style={sectionStyle}>
+            <h3 style={sectionTitleStyle}>
+              📝 Notes
+            </h3>
+            <ul style={listStyle}>
+              {recipe.notes.map((note, index) => (
+                <li key={index} style={{ marginBottom: '0.25rem' }}>
+                  {String(note)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Dietary Restrictions */}
+        {recipe.dietary_restrictions && recipe.dietary_restrictions.length > 0 && (
+          <div style={sectionStyle}>
+            <h3 style={sectionTitleStyle}>
+              🌟 Dietary Information
+            </h3>
+            <div style={badgeContainerStyle}>
+              {recipe.dietary_restrictions.map((restriction, index) => (
+                <span key={index} style={badgeStyle}>
+                  {String(restriction).replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                </span>
+              ))}
             </div>
           </div>
-
-          {/* Description */}
-          {recipe.description && (
-            <div style={sectionStyle}>
-              <p style={{ fontSize: '1rem', color: '#333', margin: 0, lineHeight: '1.6' }}>
-                {recipe.description}
-              </p>
-            </div>
-          )}
-
-          {/* Ingredients */}
-          {recipe.ingredients && recipe.ingredients.length > 0 && (
-            <div style={sectionStyle}>
-              <h3 style={sectionTitleStyle}>
-                📋 Ingredients ({recipe.ingredients.length})
-              </h3>
-              <ul style={listStyle}>
-                {recipe.ingredients.map((ingredient, index) => (
-                  <li key={index} style={{ marginBottom: '0.25rem' }}>
-                    {typeof ingredient === 'string' ? ingredient :
-                     typeof ingredient === 'object' ?
-                     `${ingredient.quantity || ''} ${ingredient.unit || ''} ${ingredient.name || ''}`.trim() :
-                     String(ingredient)}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Instructions */}
-          {recipe.instructions && recipe.instructions.length > 0 && (
-            <div style={sectionStyle}>
-              <h3 style={sectionTitleStyle}>
-                📝 Instructions ({recipe.instructions.length} steps)
-              </h3>
-              <ol style={listStyle}>
-                {recipe.instructions.map((instruction, index) => (
-                  <li key={index} style={{ marginBottom: '0.5rem' }}>
-                    {String(instruction)}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
-
-          {/* Notes */}
-          {recipe.notes && recipe.notes.length > 0 && (
-            <div style={sectionStyle}>
-              <h3 style={sectionTitleStyle}>
-                📝 Notes
-              </h3>
-              <ul style={listStyle}>
-                {recipe.notes.map((note, index) => (
-                  <li key={index} style={{ marginBottom: '0.25rem' }}>
-                    {String(note)}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Dietary Restrictions */}
-          {recipe.dietary_restrictions && recipe.dietary_restrictions.length > 0 && (
-            <div style={sectionStyle}>
-              <h3 style={sectionTitleStyle}>
-                🌟 Dietary Information
-              </h3>
-              <div style={badgeContainerStyle}>
-                {recipe.dietary_restrictions.map((restriction, index) => (
-                  <span key={index} style={badgeStyle}>
-                    {String(restriction).replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+        )}
       </div>
-    );
-  };
+    </div>
+  );
+};
 
   // Action Buttons Component
   const ActionButtons = ({ buttons }) => {
@@ -1012,7 +1053,7 @@ Please try:
   const clearChat = () => {
     setMessages([]);
     setError('');
-    setPreviewModal({ show: false, recipe: null }); // Clear any open modals
+    setPreviewModal({ show: false, recipe: null, buttonMetadata: null }); // Clear any open modals
   };
 
   const formatTimestamp = (timestamp) => {
@@ -1465,7 +1506,8 @@ Please try:
         <RecipePreviewModal
           recipe={previewModal.recipe}
           show={previewModal.show}
-          onClose={() => setPreviewModal({ show: false, recipe: null })}
+          onClose={() => setPreviewModal({ show: false, recipe: null, buttonMetadata: null })}
+          buttonMetadata={previewModal.buttonMetadata}
         />
       </div>
 
