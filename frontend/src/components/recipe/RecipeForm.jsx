@@ -175,15 +175,13 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
       const tempId = urlParams.get('temp_id');
 
       if (tempId) {
-        console.log('Found temp_id in URL:', tempId);
         setIsLoadingTempRecipe(true);
 
         try {
-          console.log('Fetching temp recipe from:', `${apiBaseUrl}/temp-recipe/${tempId}`);
           const response = await axios.get(`${apiBaseUrl}/temp-recipe/${tempId}`);
           const tempRecipeData = response.data.recipe_data;
 
-          console.log('Loaded temp recipe data:', tempRecipeData);
+
 
           if (tempRecipeData) {
             // Populate form with AI recipe data
@@ -239,7 +237,6 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
 
   // Handle edit mode separately
   useEffect(() => {
-    console.log('Edit mode useEffect running:', { editMode, existingRecipe: !!existingRecipe });
 
     if (editMode && existingRecipe) {
       console.log('Setting form data from existing recipe:', {
@@ -277,7 +274,6 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
         setPhotoPreview(existingRecipe.photo_url);
       }
 
-      console.log('Form data set for edit mode');
     }
   }, [editMode, existingRecipe]);
 
