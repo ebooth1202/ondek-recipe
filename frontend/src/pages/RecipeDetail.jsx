@@ -6,20 +6,7 @@ import RatingsAndReviews from '../components/RatingsAndReviews';
 import FavoriteButton from '../components/FavoriteButton';
 import RecipeForm from '../components/recipe/RecipeForm';
 import { API_BASE_URL, API_ENDPOINTS, apiClient } from '../utils/api';
-// Remove Fraction.js import - we'll use a simpler approach
 
-// Dynamic API base URL - detects environment automatically
-// const getApiBaseUrl = () => {
-//   // If running locally (localhost or 127.0.0.1), use local backend
-//   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-//     return 'http://127.0.0.1:8000';
-//   }
-//   // If in production, use your production backend URL
-//   // Replace this with your actual production backend URL
-//   return 'https://ondek-recipe-testing-2777bc2152f6.herokuapp.com/';
-// };
-
-// const API_BASE_URL = getApiBaseUrl();
 
 // Format genre display name
 const formatGenreName = (genre) => {
