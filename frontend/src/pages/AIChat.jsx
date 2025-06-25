@@ -558,8 +558,11 @@ Please try:
   // Recipe Preview Modal Component
   // Recipe Preview Modal Component
 // Recipe Preview Modal Component
+// Recipe Preview Modal Component
+// Recipe Preview Modal Component
 const RecipePreviewModal = ({ recipe, show, onClose, buttonMetadata }) => {
   const [isFavorited, setIsFavorited] = useState(false);
+  const [ratingSummary, setRatingSummary] = useState(null);
 
   // Check if this internal recipe is favorited
   useEffect(() => {
@@ -573,6 +576,26 @@ const RecipePreviewModal = ({ recipe, show, onClose, buttonMetadata }) => {
         }
       };
       checkFavoriteStatus();
+    } else {
+      setIsFavorited(false);
+      setRatingSummary(null);
+    }
+  }, [show, buttonMetadata]);
+
+  // Fetch rating summary for internal recipes
+  useEffect(() => {
+    if (show && buttonMetadata?.source === 'internal' && buttonMetadata?.recipe_id) {
+      const fetchRatingSummary = async () => {
+        try {
+          const response = await apiClient.get(`/recipes/${buttonMetadata.recipe_id}/ratings/summary`);
+          if (response.data.total_ratings > 0) {
+            setRatingSummary(response.data);
+          }
+        } catch (error) {
+          console.error('Error fetching rating summary:', error);
+        }
+      };
+      fetchRatingSummary();
     }
   }, [show, buttonMetadata]);
 
@@ -691,15 +714,14 @@ const RecipePreviewModal = ({ recipe, show, onClose, buttonMetadata }) => {
               right: '50px',
               backgroundColor: '#dc3545',
               color: 'white',
-              padding: '8px 18px',
+              padding: '8px 12px',
               borderRadius: '15px',
-              fontSize: '16px',
+              fontSize: '14px',
               fontWeight: 'bold',
               boxShadow: '0 2px 8px rgba(220, 53, 69, 0.3)',
-              zIndex: 1000,
-              letterSpacing: 1,
+              zIndex: 1000
             }}>
-              ❤️ Favorite
+              ❤️ Favorited
             </div>
           )}
           <h2 style={titleStyle}>{recipe.recipe_name}</h2>
@@ -786,6 +808,42 @@ const RecipePreviewModal = ({ recipe, show, onClose, buttonMetadata }) => {
                 </span>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Rating Summary - only show if recipe has reviews */}
+        {ratingSummary && (
+          <div style={{
+            marginTop: '1.5rem',
+            padding: '1rem',
+            backgroundColor: '#f0f8ff',
+            borderRadius: '10px',
+            border: '1px solid #003366',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.5rem'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+              {[1, 2, 3, 4, 5].map((starValue) => (
+                <span
+                  key={starValue}
+                  style={{
+                    fontSize: '24px',
+                    color: starValue <= ratingSummary.average_rating ? '#ffc107' : '#e0e0e0'
+                  }}
+                >
+                  {starValue <= ratingSummary.average_rating ? '★' : '☆'}
+                </span>
+              ))}
+            </div>
+            <span style={{
+              fontSize: '18px',
+              color: '#003366',
+              fontWeight: '500'
+            }}>
+              {ratingSummary.average_rating.toFixed(1)} ({ratingSummary.total_ratings} review{ratingSummary.total_ratings !== 1 ? 's' : ''})
+            </span>
           </div>
         )}
       </div>
