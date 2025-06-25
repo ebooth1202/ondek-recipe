@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { API_BASE_URL, API_ENDPOINTS, apiClient } from '../utils/api';
-import FavoriteButton from '../components/FavoriteButton';
 
 const AIChat = () => {
   const { isAuthenticated, user } = useAuth();
