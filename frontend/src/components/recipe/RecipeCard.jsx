@@ -2,6 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
+// Dynamic API base URL - detects environment automatically
+const getApiBaseUrl = () => {
+  // If running locally (localhost or 127.0.0.1), use local backend
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return 'http://127.0.0.1:8000';
+  }
+  // If in production, use your production backend URL
+  // Replace this with your actual production backend URL
+  return 'https://your-backend-app.herokuapp.com';
+};
+
+const API_BASE_URL = getApiBaseUrl();
+
 // Format genre display name
 const formatGenreName = (genre) => {
   if (!genre) return '';
@@ -31,7 +44,7 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
   useEffect(() => {
     const checkFavoriteStatus = async () => {
       try {
-        const response = await axios.get(`http://127.0.0.1:8000/recipes/${recipe.id}/favorite-status`);
+        const response = await axios.get(`${API_BASE_URL}/recipes/${recipe.id}/favorite-status`);
         setIsFavorited(response.data.is_favorited);
       } catch (error) {
         console.error('Error checking favorite status:', error);
@@ -56,10 +69,10 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
     try {
       if (isFavorited) {
         // Remove from favorites
-        await axios.delete(`http://127.0.0.1:8000/recipes/${recipe.id}/favorite`);
+        await axios.delete(`${API_BASE_URL}/recipes/${recipe.id}/favorite`);
       } else {
         // Add to favorites
-        await axios.post(`http://127.0.0.1:8000/recipes/${recipe.id}/favorite`);
+        await axios.post(`${API_BASE_URL}/recipes/${recipe.id}/favorite`);
       }
 
       setIsFavorited(!isFavorited);
