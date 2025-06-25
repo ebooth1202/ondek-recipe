@@ -803,7 +803,13 @@ class DatabaseSearchTool:
                 ingredient_term = criteria["ingredient"]
                 escaped_ingredient = re.escape(ingredient_term)
                 regex_pattern = f"\\b{escaped_ingredient}\\b"
-                query["ingredients.name"] = {"$regex": regex_pattern, "$options": "i"}
+
+                # Search both ingredient names and recipe names for better matching
+                # This fixes the issue where "pancakes" wouldn't find "Pancake Recipe"
+                query["$or"] = [
+                    {"ingredients.name": {"$regex": regex_pattern, "$options": "i"}},
+                    {"recipe_name": {"$regex": regex_pattern, "$options": "i"}}
+                ]
 
             if "name" in criteria:
                 query["recipe_name"] = {"$regex": criteria["name"], "$options": "i"}
