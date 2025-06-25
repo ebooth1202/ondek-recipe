@@ -802,28 +802,30 @@ class DatabaseSearchTool:
             if "ingredient" in criteria:
                 ingredient_term = criteria["ingredient"]
                 escaped_ingredient = re.escape(ingredient_term)
-                regex_pattern = f"\\b{escaped_ingredient}\\b"
 
-                # Search both ingredient names and recipe names for better matching
-                # This fixes the issue where "pancakes" wouldn't find "Pancake Recipe"
+                # Create multiple search patterns for better matching
+                search_patterns = [escaped_ingredient]
+
+                # Add singular/plural variations
+                if ingredient_term.endswith('s') and len(ingredient_term) > 3:
+                    # Remove 's' for singular (cookies -> cookie)
+                    singular = ingredient_term[:-1]
+                    search_patterns.append(re.escape(singular))
+                elif not ingredient_term.endswith('s'):
+                    # Add 's' for plural (cookie -> cookies)
+                    plural = ingredient_term + 's'
+                    search_patterns.append(re.escape(plural))
+
+                # Create flexible regex pattern (no word boundaries for partial matching)
+                pattern_string = "|".join(search_patterns)
+
+                # Search across multiple fields for comprehensive results
                 query["$or"] = [
-                    {"ingredients.name": {"$regex": regex_pattern, "$options": "i"}},
-                    {"recipe_name": {"$regex": regex_pattern, "$options": "i"}}
+                    {"ingredients.name": {"$regex": pattern_string, "$options": "i"}},
+                    {"recipe_name": {"$regex": pattern_string, "$options": "i"}},
+                    {"description": {"$regex": pattern_string, "$options": "i"}},
+                    {"notes": {"$regex": pattern_string, "$options": "i"}}
                 ]
-
-            if "name" in criteria:
-                query["recipe_name"] = {"$regex": criteria["name"], "$options": "i"}
-
-            if "max_time" in criteria:
-                query["$expr"] = {
-                    "$lte": [
-                        {"$add": [{"$ifNull": ["$prep_time", 0]}, {"$ifNull": ["$cook_time", 0]}]},
-                        criteria["max_time"]
-                    ]
-                }
-
-            if "dietary_restrictions" in criteria:
-                query["dietary_restrictions"] = {"$in": criteria["dietary_restrictions"]}
 
             logger.info(f"Database search query: {query}")
             recipes = list(db.recipes.find(query).limit(50))
@@ -831,9 +833,24 @@ class DatabaseSearchTool:
             # If no exact matches and ingredient has spaces, try fallback
             if len(recipes) == 0 and "ingredient" in criteria and " " in criteria["ingredient"]:
                 words = criteria["ingredient"].split()
-                word_patterns = [f"\\b{re.escape(word)}\\b" for word in words]
+                word_patterns = []
+
+                for word in words:
+                    word_patterns.append(re.escape(word))
+                    # Add singular/plural for each word too
+                    if word.endswith('s') and len(word) > 3:
+                        word_patterns.append(re.escape(word[:-1]))
+                    elif not word.endswith('s'):
+                        word_patterns.append(re.escape(word + 's'))
+
+                fallback_pattern = "|".join(word_patterns)
                 fallback_query = query.copy()
-                fallback_query["ingredients.name"] = {"$regex": "|".join(word_patterns), "$options": "i"}
+                fallback_query["$or"] = [
+                    {"ingredients.name": {"$regex": fallback_pattern, "$options": "i"}},
+                    {"recipe_name": {"$regex": fallback_pattern, "$options": "i"}},
+                    {"description": {"$regex": fallback_pattern, "$options": "i"}},
+                    {"notes": {"$regex": fallback_pattern, "$options": "i"}}
+                ]
                 recipes = list(db.recipes.find(fallback_query).limit(50))
 
             return [self._format_recipe_for_response(recipe) for recipe in recipes]

@@ -288,29 +288,30 @@ class RupertAIHelper:
 
         try:
             prompt = f"""
-            Analyze this user message about recipes and extract search criteria as JSON:
-            User message: "{user_message}"
-
-            IMPORTANT: Extract criteria if the user is asking to FIND or SEARCH for recipes, even for general requests.
-
-            Extract any of these criteria if mentioned:
-            - genre: breakfast, lunch, dinner, snack, dessert, appetizer
-            - ingredient: any ingredient name mentioned (be very specific)
-            - name: recipe name if specifically mentioned
-            - max_time: maximum cooking time in minutes if mentioned
-            - dietary_restrictions: gluten_free, dairy_free, egg_free
-
-            For general recipe requests without specific criteria, return a generic search:
-            {{"ingredient": "recipe"}}
-
-            Examples:
-            "find a chocolate chip cookie recipe" -> {{"ingredient": "chocolate chip", "genre": "dessert"}}
-            "show me dinner recipes" -> {{"genre": "dinner"}}
-            "find a new recipe online" -> {{"ingredient": "recipe"}}
-            "look for recipes online" -> {{"ingredient": "recipe"}}
-
-            Return only valid JSON. If asking about capabilities only, return: {{}}
-            """
+                        Analyze this user message about recipes and extract search criteria as JSON:
+                        User message: "{user_message}"
+        
+                        IMPORTANT: Extract specific food items mentioned, even if they say "want to make" or "going to cook".
+        
+                        Extract any of these criteria if mentioned:
+                        - genre: breakfast, lunch, dinner, snack, dessert, appetizer
+                        - ingredient: any specific food item mentioned (cookies, pancakes, bread, etc.)
+                        - name: recipe name if specifically mentioned
+                        - max_time: maximum cooking time in minutes if mentioned
+                        - dietary_restrictions: gluten_free, dairy_free, egg_free
+        
+                        Only use generic "recipe" if NO specific food item is mentioned:
+                        {{"ingredient": "recipe"}}
+        
+                        Examples:
+                        "i want to make some cookies" -> {{"ingredient": "cookies", "genre": "dessert"}}
+                        "find a chocolate chip cookie recipe" -> {{"ingredient": "chocolate chip", "genre": "dessert"}}
+                        "show me dinner recipes" -> {{"genre": "dinner"}}
+                        "find a new recipe online" -> {{"ingredient": "recipe"}}
+                        "i want to bake bread" -> {{"ingredient": "bread", "genre": "snack"}}
+        
+                        Return only valid JSON. If asking about capabilities only, return: {{}}
+                        """
 
             response = self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
