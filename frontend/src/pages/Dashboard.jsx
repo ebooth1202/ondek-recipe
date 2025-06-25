@@ -21,6 +21,7 @@ const Dashboard = () => {
 
   const fetchRecipeStats = async () => {
   try {
+    console.log('window.location.origin is:', window.location.origin);
     // Get total recipes count
     const recipesResponse = await apiClient.get(API_ENDPOINTS.RECIPES);
     const totalRecipes = recipesResponse.data.length;
