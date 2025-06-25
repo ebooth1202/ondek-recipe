@@ -1,31 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
-
-// Dynamic API base URL - detects environment automatically
-const getApiBaseUrl = () => {
-  // If running locally (localhost or 127.0.0.1), use local backend
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    return 'http://127.0.0.1:8000';
-  }
-  // If in production, use your production backend URL
-  // Replace this with your actual production backend URL
-  return 'https://ondek-recipe-testing-2777bc2152f6.herokuapp.com';
-};
-
-const API_BASE_URL = getApiBaseUrl();
+import { API_BASE_URL, API_ENDPOINTS, apiClient } from '../../utils/api';
 
 // Format genre display name
 const formatGenreName = (genre) => {
   if (!genre) return '';
-
   return genre.charAt(0).toUpperCase() + genre.slice(1);
 };
 
 // Format dietary restriction display name
 const formatDietaryRestrictionName = (restriction) => {
   if (!restriction) return '';
-
   switch(restriction) {
     case 'gluten_free': return 'Gluten Free';
     case 'dairy_free': return 'Dairy Free';
@@ -44,7 +29,7 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
   useEffect(() => {
     const checkFavoriteStatus = async () => {
       try {
-        const response = await axios.get(`${API_BASE_URL}/recipes/${recipe.id}/favorite-status`);
+        const response = await apiClient.get(API_ENDPOINTS.RECIPE_FAVORITE_STATUS(recipe.id));
         setIsFavorited(response.data.is_favorited);
       } catch (error) {
         console.error('Error checking favorite status:', error);
@@ -69,10 +54,10 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
     try {
       if (isFavorited) {
         // Remove from favorites
-        await axios.delete(`${API_BASE_URL}/recipes/${recipe.id}/favorite`);
+        await apiClient.delete(API_ENDPOINTS.RECIPE_FAVORITE(recipe.id));
       } else {
         // Add to favorites
-        await axios.post(`${API_BASE_URL}/recipes/${recipe.id}/favorite`);
+        await apiClient.post(API_ENDPOINTS.RECIPE_FAVORITE(recipe.id));
       }
 
       setIsFavorited(!isFavorited);
@@ -111,19 +96,19 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
     return colors[genre] || '#003366';
   };
 
-  // Styles - Made card smaller
+  // Rest of your component styles and JSX remain exactly the same...
   const cardStyle = {
     background: 'white',
     border: '2px solid #003366',
     borderRadius: '15px',
-    padding: '1.25rem', // Reduced from 1.5rem
+    padding: '1.25rem',
     boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)',
     cursor: 'pointer',
     transition: 'all 0.3s ease',
-    minHeight: '180px', // Reduced from 250px
+    minHeight: '180px',
     display: 'flex',
     flexDirection: 'column',
-    position: 'relative' // For absolute positioning of favorite button and dietary tags
+    position: 'relative'
   };
 
   const headerStyle = {
@@ -139,9 +124,9 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
     margin: 0,
     flex: 1,
     lineHeight: '1.3',
-    minHeight: '3.4rem', // Fixed height to accommodate 2 lines consistently
+    minHeight: '3.4rem',
     display: 'flex',
-    alignItems: 'flex-start' // Align text to top of the fixed height area
+    alignItems: 'flex-start'
   };
 
   const badgeContainerStyle = {
@@ -158,29 +143,29 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
     borderRadius: '20px',
     fontSize: '0.8rem',
     fontWeight: '500',
-    marginBottom: '4px' // Add space for dietary restriction tags below
+    marginBottom: '4px'
   };
 
   const dietaryTagsContainerStyle = {
     position: 'absolute',
-    top: '32px', // Position below the genre badge (genre badge height + margin)
+    top: '32px',
     right: '0',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'flex-end',
-    gap: '2px', // Small gap between multiple dietary restriction tags
+    gap: '2px',
     zIndex: 1
   };
 
   const dietaryBadgeStyle = {
-    backgroundColor: '#28a745', // Green color for dietary restrictions
+    backgroundColor: '#28a745',
     color: 'white',
     padding: '2px 6px',
     borderRadius: '12px',
     fontSize: '0.7rem',
     fontWeight: '500',
     whiteSpace: 'nowrap',
-    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.2)' // Subtle shadow to make it stand out
+    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.2)'
   };
 
   const metaStyle = {
@@ -189,7 +174,7 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
     gap: '2rem',
     fontSize: '0.9rem',
     color: '#666',
-    marginBottom: '1rem' // Reduced from 1.5rem
+    marginBottom: '1rem'
   };
 
   return (
@@ -210,9 +195,9 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
         onClick={handleFavoriteClick}
         style={{
           position: 'absolute',
-          top: '-15px',  // Position slightly above the card
+          top: '-15px',
           left: '50%',
-          transform: 'translateX(-50%)', // Center horizontally
+          transform: 'translateX(-50%)',
           width: '36px',
           height: '36px',
           borderRadius: '50%',
@@ -271,25 +256,25 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
       {/* Description Section - Truncated to 4 lines with Total Time Box */}
       <div style={{
         flex: 1,
-        marginBottom: '0.5rem', // Reduced from 1rem
+        marginBottom: '0.5rem',
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.5rem' // Reduced from 0.75rem
+        gap: '0.5rem'
       }}>
         {/* Truncated Description */}
         <div style={{
-          fontSize: '0.85rem', // Slightly smaller font
+          fontSize: '0.85rem',
           color: '#555',
-          lineHeight: '1.3', // Adjusted line height
-          textAlign: 'left', // Changed from center to left for better text flow
-          padding: '0.4rem 0.5rem', // Reduced top/bottom padding
+          lineHeight: '1.3',
+          textAlign: 'left',
+          padding: '0.4rem 0.5rem',
           backgroundColor: '#f8f9fa',
           borderRadius: '8px',
           border: '1px solid #e9ecef',
-          height: '70px', // Increased height slightly
+          height: '70px',
           display: 'flex',
-          alignItems: 'flex-start', // Changed from center to flex-start
-          justifyContent: 'flex-start', // Changed alignment
+          alignItems: 'flex-start',
+          justifyContent: 'flex-start',
           fontStyle: recipe.description ? 'normal' : 'italic',
           overflow: 'hidden',
           position: 'relative'
@@ -301,7 +286,7 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             width: '100%',
-            paddingTop: '2px' // Small padding to prevent top cutoff
+            paddingTop: '2px'
           }}>
             {recipe.description || 'No description available'}
           </div>
@@ -310,24 +295,24 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
         {/* Total Time Box - Made smaller and half width */}
         <div style={{
           backgroundColor: '#e6f0ff',
-          border: '1px solid #003366', // Thinner border
-          borderRadius: '6px', // Smaller border radius
-          padding: '0.25rem 0.5rem', // Reduced padding
+          border: '1px solid #003366',
+          borderRadius: '6px',
+          padding: '0.25rem 0.5rem',
           textAlign: 'center',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: '0.3rem', // Reduced gap
-          minHeight: '35px', // Increased to 35px as requested
-          width: '50%', // Half the width
-          margin: '0 auto' // Center the box
+          gap: '0.3rem',
+          minHeight: '35px',
+          width: '50%',
+          margin: '0 auto'
         }}>
           <span style={{
-            fontSize: '0.9rem' // Smaller emoji
+            fontSize: '0.9rem'
           }}>⏱️</span>
           <div>
             <div style={{
-              fontSize: '0.65rem', // Smaller label
+              fontSize: '0.65rem',
               color: '#666',
               fontWeight: '500',
               lineHeight: '1'
@@ -335,7 +320,7 @@ const RecipeCard = ({ recipe, onFavoriteToggle }) => {
               Total Time
             </div>
             <div style={{
-              fontSize: '0.75rem', // Smaller time text
+              fontSize: '0.75rem',
               color: '#003366',
               fontWeight: '700',
               lineHeight: '1'
