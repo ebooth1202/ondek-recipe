@@ -105,7 +105,7 @@ app.add_middleware(
         settings.frontend_url,  # https://yourdomain.com
         settings.base_url,      # https://api.yourdomain.com
         # Backup Heroku URL
-        f"https://{os.getenv('HEROKU_APP_NAME', 'your-app-name')}.herokuapp.com"
+        f"https://{os.getenv('HEROKU_APP_NAME', 'ondek-recipe-testing-2777bc2152f6')}.herokuapp.com"
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
