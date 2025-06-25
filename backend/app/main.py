@@ -1838,7 +1838,7 @@ async def fix_existing_photo_urls(current_user: dict = Depends(require_role([Use
             if old_url and old_url.startswith("/static/photos/"):
                 # Extract filename and create new URL
                 filename = old_url.replace("/static/photos/", "")
-                new_url = f"http://127.0.0.1:8000/photos/{filename}"
+                new_url = f"{settings.base_url}/photos/{filename}"
 
                 # Update the recipe
                 db.recipes.update_one(
