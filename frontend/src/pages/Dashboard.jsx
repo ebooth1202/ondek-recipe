@@ -21,8 +21,7 @@ const Dashboard = () => {
 
   const fetchRecipeStats = async () => {
   try {
-    console.log('API_BASE_URL is:', API_BASE_URL);
-    console.log('window.location.origin is:', window.location.origin);
+    alert(`API_BASE_URL is: ${API_BASE_URL}`);
     // Get total recipes count
     const recipesResponse = await apiClient.get(API_ENDPOINTS.RECIPES);
     const totalRecipes = recipesResponse.data.length;
