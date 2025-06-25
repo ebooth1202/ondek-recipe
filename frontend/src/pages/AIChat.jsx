@@ -2,10 +2,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import axios from 'axios';
+import { API_BASE_URL, API_ENDPOINTS, apiClient } from '../utils/api';
 
 const AIChat = () => {
-  const { isAuthenticated, user, apiBaseUrl } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -67,7 +67,7 @@ const AIChat = () => {
 
   const checkAiStatus = async () => {
     try {
-      const response = await axios.get(`${apiBaseUrl}/ai/status`);
+      const response = await apiClient.get(API_ENDPOINTS.AI_STATUS);
       setAiStatus(response.data);
 
       if (!response.data.ai_configured) {
@@ -170,7 +170,7 @@ const AIChat = () => {
       formData.append('file', selectedFile);
 
       // Upload and parse file
-      const response = await axios.post(`${apiBaseUrl}/ai/upload-recipe-file`, formData, {
+      const response = await apiClient.post(API_ENDPOINTS.AI_UPLOAD_FILE, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -356,7 +356,7 @@ Please try:
         content: msg.content
       }));
 
-      const response = await axios.post(`${apiBaseUrl}/ai/chat`, {
+      const response = await apiClient.post(API_ENDPOINTS.AI_CHAT, {
         message: '',
         conversation_history: conversationHistory,
         action_type: actionType,
@@ -416,7 +416,7 @@ Please try:
         content: msg.content
       }));
 
-      const response = await axios.post(`${apiBaseUrl}/ai/chat`, {
+      const response = await apiClient.post(API_ENDPOINTS.AI_CHAT, {
         message: '',
         conversation_history: conversationHistory,
         action_type: button.action,
@@ -490,7 +490,7 @@ Please try:
 
       console.log('Sending website search request:', requestData); // Debug logging
 
-      const response = await axios.post(`${apiBaseUrl}/ai/chat`, requestData);
+      const response = await apiClient.post(API_ENDPOINTS.AI_CHAT, requestData);
 
       const rawResponse = response.data.response;
       const actionButtons = parseActionButtons(rawResponse);
@@ -966,7 +966,7 @@ Please try:
         content: msg.content
       }));
 
-      const response = await axios.post(`${apiBaseUrl}/ai/chat`, {
+      const response = await apiClient.post(API_ENDPOINTS.AI_CHAT, {
         message: userMessage,
         conversation_history: conversationHistory
       });

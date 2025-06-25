@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import RecipeForm from '../components/recipe/RecipeForm';
-import axios from 'axios';
 
 const AddRecipe = () => {
   const { isAuthenticated } = useAuth();

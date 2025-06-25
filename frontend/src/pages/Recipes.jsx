@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import RecipeCard from '../components/recipe/RecipeCard';
-import axios from 'axios';
+import { API_BASE_URL, API_ENDPOINTS, apiClient } from '../utils/api';
 
 const Recipes = () => {
-  const { isAuthenticated, apiBaseUrl } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
 
   // State management
@@ -60,8 +60,8 @@ const Recipes = () => {
 
         // Fetch recipes and favorites in parallel
         const [recipesResponse, favoritesResponse] = await Promise.all([
-          axios.get(`${apiBaseUrl}/recipes`),
-          axios.get(`${apiBaseUrl}/users/me/favorites`)
+          apiClient.get(API_ENDPOINTS.RECIPES),
+          apiClient.get(API_ENDPOINTS.USER_FAVORITES)
         ]);
 
         const allRecipes = recipesResponse.data;
@@ -87,7 +87,7 @@ const Recipes = () => {
     };
 
     fetchData();
-  }, [isAuthenticated, apiBaseUrl]);
+  }, [isAuthenticated]);
 
   // Filter and search recipes
   useEffect(() => {

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom'; // Import useNavigate
 import { useAuth } from '../context/AuthContext';
-import axios from 'axios';
 import { API_BASE_URL, API_ENDPOINTS, apiClient } from '../utils/api';
 
 // // Dynamic API base URL - detects environment automatically
