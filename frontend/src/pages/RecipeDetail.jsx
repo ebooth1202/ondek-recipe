@@ -90,8 +90,6 @@ const RecipeDetail = () => {
           apiClient.get(API_ENDPOINTS.RECIPE_FAVORITE_STATUS(id))
         ]);
 
-await apiClient.delete(API_ENDPOINTS.RECIPE_BY_ID(id));
-
         console.log('Recipe received:', recipeResponse.data);
         console.log('Favorite status:', favoriteResponse.data);
 
