@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import axios from 'axios';
+import { API_BASE_URL, API_ENDPOINTS, apiClient } from '../utils/api';
 
 const Users = () => {
   const navigate = useNavigate();
-  const { user, setUser, hasRole, isAuthenticated, apiBaseUrl } = useAuth();
+  const { user, setUser, hasRole, isAuthenticated } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -52,7 +52,7 @@ const Users = () => {
   const fetchUsers = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${apiBaseUrl}/users`);
+      const response = await apiClient.get(API_ENDPOINTS.USERS);
       setUsers(response.data);
       setLoading(false);
     } catch (error) {
@@ -131,7 +131,7 @@ const Users = () => {
 
       console.log('Updating user with data:', updateData);
 
-      const response = await axios.put(`${apiBaseUrl}/users/${editingUser.id}`, updateData);
+      const response = await apiClient.put(API_ENDPOINTS.USER_BY_ID(editingUser.id), updateData);
 
       // Update users list
       setUsers(users.map(u =>
@@ -159,13 +159,13 @@ const Users = () => {
   const handleAddUser = async (e) => {
     e.preventDefault();
     try {
-      await axios.post(`${apiBaseUrl}/auth/register`, {
+      await apiClient.post(API_ENDPOINTS.REGISTER, {
         username: formData.username,
         email: formData.email,
         first_name: formData.first_name,
         last_name: formData.last_name,
         password: formData.password,
-        role: 'user' // Default role for new users
+        role: 'user'
       });
       setShowAddUserModal(false);
       setFormData({ username: '', email: '', first_name: '', last_name: '', password: '' });
@@ -183,7 +183,7 @@ const Users = () => {
     if (!actionUser) return;
 
     try {
-      await axios.delete(`${apiBaseUrl}/users/${actionUser.id}`);
+      await apiClient.delete(API_ENDPOINTS.USER_BY_ID(actionUser.id));
       setShowConfirmDeleteModal(false);
       setActionUser(null);
       setSuccessMessage('User deleted successfully!');
@@ -197,24 +197,26 @@ const Users = () => {
   };
 
   const handleChangeRole = async () => {
-    if (!actionUser) return;
+  if (!actionUser) return;
 
-    try {
-      await axios.put(`${apiBaseUrl}/users/${actionUser.id}/role`, {
-        role: newRole
-      });
-      setShowChangeRoleModal(false);
-      setNewRole('');
-      setActionUser(null);
-      setSuccessMessage('User role updated successfully!');
-      setTimeout(() => setSuccessMessage(''), 3000);
-      fetchUsers();
-    } catch (error) {
-      console.error('Error changing role:', error);
-      setError(error.response?.data?.detail || 'Failed to change user role');
-      setTimeout(() => setError(''), 5000);
-    }
-  };
+  try {
+    // NEW LINE HERE:
+    await apiClient.put(API_ENDPOINTS.USER_ROLE(actionUser.id), {
+      role: newRole
+    });
+
+    setShowChangeRoleModal(false);
+    setNewRole('');
+    setActionUser(null);
+    setSuccessMessage('User role updated successfully!');
+    setTimeout(() => setSuccessMessage(''), 3000);
+    fetchUsers();
+  } catch (error) {
+    console.error('Error changing role:', error);
+    setError(error.response?.data?.detail || 'Failed to change user role');
+    setTimeout(() => setError(''), 5000);
+  }
+};
 
   // Helper function for role badge color
   const getRoleBadgeColor = (role) => {

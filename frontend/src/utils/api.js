@@ -26,6 +26,7 @@ export const API_ENDPOINTS = {
   USERS: '/users',
   USER_BY_ID: (id) => `/users/${id}`,
   USER_FAVORITES: '/users/me/favorites',
+  USER_ROLE: (id) => `/users/${id}/role`,
 
   // AI endpoints
   AI_CHAT: '/ai/chat',

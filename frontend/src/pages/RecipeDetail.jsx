@@ -5,7 +5,6 @@ import { useAuth } from '../context/AuthContext';
 import RatingsAndReviews from '../components/RatingsAndReviews';
 import FavoriteButton from '../components/FavoriteButton';
 import RecipeForm from '../components/recipe/RecipeForm';
-import axios from 'axios';
 import { API_BASE_URL, API_ENDPOINTS, apiClient } from '../utils/api';
 // Remove Fraction.js import - we'll use a simpler approach
 
@@ -216,21 +215,21 @@ const RecipeDetail = () => {
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(`Are you sure you want to delete "${recipe.recipe_name}"? This action cannot be undone.`)) {
-      return;
-    }
+  if (!window.confirm(`Are you sure you want to delete "${recipe.recipe_name}"? This action cannot be undone.`)) {
+    return;
+  }
 
-    try {
-      setDeleting(true);
-      await axios.delete(`${API_BASE_URL}/recipes/${id}`);
-      navigate('/recipes');
-    } catch (error) {
-      console.error('Error deleting recipe:', error);
-      alert('Failed to delete recipe. Please try again.');
-    } finally {
-      setDeleting(false);
-    }
-  };
+  try {
+    setDeleting(true);
+    await apiClient.delete(API_ENDPOINTS.RECIPE_BY_ID(id));
+    navigate('/recipes');
+  } catch (error) {
+    console.error('Error deleting recipe:', error);
+    alert('Failed to delete recipe. Please try again.');
+  } finally {
+    setDeleting(false);
+  }
+};
 
   const handleDuplicate = () => {
     if (!recipe) return;
