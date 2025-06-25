@@ -3,6 +3,19 @@ import { useNavigate } from 'react-router-dom'; // Import useNavigate
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 
+// Dynamic API base URL - detects environment automatically
+const getApiBaseUrl = () => {
+  // If running locally (localhost or 127.0.0.1), use local backend
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return 'http://127.0.0.1:8000';
+  }
+  // If in production, use your production backend URL
+  // Replace this with your actual production backend URL
+  return 'https://your-backend-app.herokuapp.com';
+};
+
+const API_BASE_URL = getApiBaseUrl();
+
 const Dashboard = () => {
   const navigate = useNavigate(); // Initialize useNavigate
   const { user, hasRole } = useAuth();
@@ -20,11 +33,11 @@ const Dashboard = () => {
   const fetchRecipeStats = async () => {
     try {
       // Get total recipes count
-      const recipesResponse = await axios.get('http://127.0.0.1:8000/recipes');
+      const recipesResponse = await axios.get(`${API_BASE_URL}/recipes`);
       const totalRecipes = recipesResponse.data.length;
 
       // Get user's favorite recipes
-      const favoritesResponse = await axios.get('http://127.0.0.1:8000/users/me/favorites');
+      const favoritesResponse = await axios.get(`${API_BASE_URL}/users/me/favorites`);
       const favoriteRecipes = favoritesResponse.data.length;
 
       setStats({
@@ -316,7 +329,7 @@ const Dashboard = () => {
                 border: '1px solid #0c5460',
                 cursor: 'pointer'
               }}
-              onClick={() => window.open('http://localhost:8000/docs', '_blank')}>
+              onClick={() => window.open(`${API_BASE_URL.replace(':8000', ':8000/docs')}`, '_blank')}>
                 <h4 style={{ color: '#0c5460', marginBottom: '0.5rem' }}>
                   📖 API Documentation
                 </h4>
