@@ -8,6 +8,19 @@ import RecipeForm from '../components/recipe/RecipeForm';
 import axios from 'axios';
 // Remove Fraction.js import - we'll use a simpler approach
 
+// Dynamic API base URL - detects environment automatically
+const getApiBaseUrl = () => {
+  // If running locally (localhost or 127.0.0.1), use local backend
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return 'http://127.0.0.1:8000';
+  }
+  // If in production, use your production backend URL
+  // Replace this with your actual production backend URL
+  return 'https://ondek-recipe-testing-2777bc2152f6.herokuapp.com/';
+};
+
+const API_BASE_URL = getApiBaseUrl();
+
 // Format genre display name
 const formatGenreName = (genre) => {
   if (!genre) return '';
@@ -72,8 +85,8 @@ const RecipeDetail = () => {
 
         // Fetch recipe and favorite status in parallel
         const [recipeResponse, favoriteResponse] = await Promise.all([
-          axios.get(`http://127.0.0.1:8000/recipes/${id}`),
-          axios.get(`http://127.0.0.1:8000/recipes/${id}/favorite-status`)
+          axios.get(`${API_BASE_URL}/recipes/${id}`),
+          axios.get(`${API_BASE_URL}/recipes/${id}/favorite-status`)
         ]);
 
         console.log('Recipe received:', recipeResponse.data);
@@ -208,7 +221,7 @@ const RecipeDetail = () => {
 
     try {
       setDeleting(true);
-      await axios.delete(`http://127.0.0.1:8000/recipes/${id}`);
+      await axios.delete(`${API_BASE_URL}/recipes/${id}`);
       navigate('/recipes');
     } catch (error) {
       console.error('Error deleting recipe:', error);
