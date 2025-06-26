@@ -48,41 +48,56 @@ const Dashboard = () => {
 
   // Bug reporting functions
   const submitReport = async (type, title, description, severity = 'medium') => {
-    setReportSubmitting(true);
-    setReportError('');
+  setReportSubmitting(true);
+  setReportError('');
 
-    try {
-      const reportData = {
-        type,
-        title,
-        description,
-        severity,
-        context: {
-          page: '/dashboard',
-          actions: ['opened_dashboard', 'clicked_report_button']
-        },
-        tags: []
-      };
+  try {
+    const reportData = {
+      type,
+      title,
+      description,
+      severity,
+      context: {
+        page: '/dashboard',
+        actions: ['opened_dashboard', 'clicked_report_button']
+      },
+      tags: []
+    };
 
-      const response = await apiClient.post('/issues/report', reportData);
+    const response = await apiClient.post('/issues/report', reportData);
 
-      setReportMessage('Thank you! Your report has been submitted successfully. We\'ll review it soon.');
+    setReportMessage('Thank you! Your report has been submitted successfully. We\'ll review it soon.');
 
-      // Close all modals
-      setShowBugReportModal(false);
-      setShowFeatureRequestModal(false);
-      setShowImprovementModal(false);
+    // Close all modals
+    setShowBugReportModal(false);
+    setShowFeatureRequestModal(false);
+    setShowImprovementModal(false);
 
-      // Clear message after 5 seconds
-      setTimeout(() => setReportMessage(''), 5000);
+    // Clear message after 5 seconds
+    setTimeout(() => setReportMessage(''), 5000);
 
-    } catch (error) {
-      console.error('Error submitting report:', error);
-      setReportError(error.response?.data?.detail || 'Failed to submit report. Please try again.');
-    } finally {
-      setReportSubmitting(false);
+  } catch (error) {
+    console.error('Error submitting report:', error);
+
+    // Handle validation errors properly
+    let errorMessage = 'Failed to submit report. Please try again.';
+
+    if (error.response?.data?.detail) {
+      if (Array.isArray(error.response.data.detail)) {
+        // Handle Pydantic validation errors
+        errorMessage = error.response.data.detail
+          .map(err => err.msg || 'Validation error')
+          .join(', ');
+      } else if (typeof error.response.data.detail === 'string') {
+        errorMessage = error.response.data.detail;
+      }
     }
-  };
+
+    setReportError(errorMessage);
+  } finally {
+    setReportSubmitting(false);
+  }
+};
 
   const handleBugReport = (formData) => {
     submitReport('bug_report', formData.title, formData.description, formData.severity);
