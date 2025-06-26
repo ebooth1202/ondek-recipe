@@ -254,10 +254,10 @@ const Home = () => {
                 🚧 Coming Next
               </h4>
               <ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
-                <li>Recipe browsing and management</li>
-                <li>Dynamic recipe creation forms</li>
-                <li>Search and filtering</li>
-                <li>AI assistant integration</li>
+                <li>Continual AI enhancements</li>
+                <li>Community additions</li>
+                <li>Uploading files/pictures to create recipes</li>
+                <li>Pull recipes from your own accounts (like Pinterest)</li>
               </ul>
             </div>
           </div>
