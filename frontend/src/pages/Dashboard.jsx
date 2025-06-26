@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom'; // Import useNavigate
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { API_BASE_URL, API_ENDPOINTS, apiClient } from '../utils/api';
 
-
-
 const Dashboard = () => {
-  const navigate = useNavigate(); // Initialize useNavigate
+  const navigate = useNavigate();
   const { user, hasRole } = useAuth();
   const [stats, setStats] = useState({
     totalRecipes: 0,
@@ -14,31 +12,89 @@ const Dashboard = () => {
   });
   const [loading, setLoading] = useState(true);
 
+  // Bug reporting state
+  const [showBugReportModal, setShowBugReportModal] = useState(false);
+  const [showFeatureRequestModal, setShowFeatureRequestModal] = useState(false);
+  const [showImprovementModal, setShowImprovementModal] = useState(false);
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [reportMessage, setReportMessage] = useState('');
+  const [reportError, setReportError] = useState('');
+
   // Fetch recipe stats when component mounts
   useEffect(() => {
     fetchRecipeStats();
   }, []);
 
   const fetchRecipeStats = async () => {
-  try {
-    // Get total recipes count
-    const recipesResponse = await apiClient.get(API_ENDPOINTS.RECIPES);
-    const totalRecipes = recipesResponse.data.length;
+    try {
+      // Get total recipes count
+      const recipesResponse = await apiClient.get(API_ENDPOINTS.RECIPES);
+      const totalRecipes = recipesResponse.data.length;
 
-    // Get user's favorite recipes
-    const favoritesResponse = await apiClient.get(API_ENDPOINTS.USER_FAVORITES);
-    const favoriteRecipes = favoritesResponse.data.length;
+      // Get user's favorite recipes
+      const favoritesResponse = await apiClient.get(API_ENDPOINTS.USER_FAVORITES);
+      const favoriteRecipes = favoritesResponse.data.length;
 
-    setStats({
-      totalRecipes,
-      favoriteRecipes
-    });
-  } catch (error) {
-    console.error('Error fetching recipe stats:', error);
-  } finally {
-    setLoading(false);
-  }
-};
+      setStats({
+        totalRecipes,
+        favoriteRecipes
+      });
+    } catch (error) {
+      console.error('Error fetching recipe stats:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Bug reporting functions
+  const submitReport = async (type, title, description, severity = 'medium') => {
+    setReportSubmitting(true);
+    setReportError('');
+
+    try {
+      const reportData = {
+        type,
+        title,
+        description,
+        severity,
+        context: {
+          page: '/dashboard',
+          actions: ['opened_dashboard', 'clicked_report_button']
+        },
+        tags: []
+      };
+
+      const response = await apiClient.post('/issues/report', reportData);
+
+      setReportMessage('Thank you! Your report has been submitted successfully. We\'ll review it soon.');
+
+      // Close all modals
+      setShowBugReportModal(false);
+      setShowFeatureRequestModal(false);
+      setShowImprovementModal(false);
+
+      // Clear message after 5 seconds
+      setTimeout(() => setReportMessage(''), 5000);
+
+    } catch (error) {
+      console.error('Error submitting report:', error);
+      setReportError(error.response?.data?.detail || 'Failed to submit report. Please try again.');
+    } finally {
+      setReportSubmitting(false);
+    }
+  };
+
+  const handleBugReport = (formData) => {
+    submitReport('bug_report', formData.title, formData.description, formData.severity);
+  };
+
+  const handleFeatureRequest = (formData) => {
+    submitReport('feature_request', formData.title, formData.description, 'medium');
+  };
+
+  const handleImprovement = (formData) => {
+    submitReport('improvement', formData.title, formData.description, 'low');
+  };
 
   return (
     <div style={{
@@ -73,19 +129,7 @@ const Dashboard = () => {
             marginBottom: '1rem'
           }}>
             Hello, <strong style={{ color: '#003366' }}>{user?.username}</strong>!
-            {/*You're logged in as <span style={{*/}
-            {/*  background: '#0066cc',*/}
-            {/*  color: 'white',*/}
-            {/*  padding: '4px 8px',*/}
-            {/*  borderRadius: '6px',*/}
-            {/*  fontSize: '0.9rem',*/}
-            {/*  textTransform: 'uppercase',*/}
-            {/*  fontWeight: 'bold'*/}
-            {/*}}>{user?.role}</span>*/}
           </p>
-          {/*<p style={{ color: '#666' }}>*/}
-          {/*  Email: {user?.email}*/}
-          {/*</p>*/}
         </div>
 
         {/* Quick Actions */}
@@ -271,6 +315,90 @@ const Dashboard = () => {
           </div>
         </div>
 
+        {/* Help & Feedback Section */}
+        <div style={{
+          background: 'white',
+          border: '2px solid #003366',
+          borderRadius: '15px',
+          padding: '2rem',
+          marginBottom: '2rem',
+          boxShadow: '0 4px 12px rgba(0, 51, 102, 0.1)'
+        }}>
+          <h2 style={{
+            color: '#003366',
+            marginBottom: '1.5rem',
+            textAlign: 'center'
+          }}>
+            💬 Help & Feedback
+          </h2>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+            gap: '1.5rem'
+          }}>
+            <div style={{
+              background: '#f8d7da',
+              padding: '1.5rem',
+              borderRadius: '10px',
+              textAlign: 'center',
+              border: '1px solid #dc3545',
+              cursor: 'pointer',
+              transition: 'transform 0.2s ease'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-3px)'}
+            onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+            onClick={() => setShowBugReportModal(true)}>
+              <h4 style={{ color: '#dc3545', marginBottom: '0.5rem' }}>
+                🐛 Report a Bug
+              </h4>
+              <p style={{ color: '#dc3545', fontSize: '0.9rem', margin: 0 }}>
+                Found something broken? Let us know!
+              </p>
+            </div>
+
+            <div style={{
+              background: '#d4edda',
+              padding: '1.5rem',
+              borderRadius: '10px',
+              textAlign: 'center',
+              border: '1px solid #28a745',
+              cursor: 'pointer',
+              transition: 'transform 0.2s ease'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-3px)'}
+            onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+            onClick={() => setShowFeatureRequestModal(true)}>
+              <h4 style={{ color: '#28a745', marginBottom: '0.5rem' }}>
+                💡 Request Feature
+              </h4>
+              <p style={{ color: '#28a745', fontSize: '0.9rem', margin: 0 }}>
+                Have an idea? We'd love to hear it!
+              </p>
+            </div>
+
+            <div style={{
+              background: '#fff3cd',
+              padding: '1.5rem',
+              borderRadius: '10px',
+              textAlign: 'center',
+              border: '1px solid #ffc107',
+              cursor: 'pointer',
+              transition: 'transform 0.2s ease'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-3px)'}
+            onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+            onClick={() => setShowImprovementModal(true)}>
+              <h4 style={{ color: '#856404', marginBottom: '0.5rem' }}>
+                ⚡ Suggest Improvement
+              </h4>
+              <p style={{ color: '#856404', fontSize: '0.9rem', margin: 0 }}>
+                How can we make it better?
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* Admin Section */}
         {hasRole(['admin', 'owner']) && (
           <div style={{
@@ -301,7 +429,7 @@ const Dashboard = () => {
                 border: '1px solid #856404',
                 cursor: 'pointer'
               }}
-              onClick={() => navigate('/user-management')}> {/* Update this line to navigate to user-management */}
+              onClick={() => navigate('/user-management')}>
                 <h4 style={{ color: '#856404', marginBottom: '0.5rem' }}>
                   👥 Manage Users
                 </h4>
@@ -327,6 +455,23 @@ const Dashboard = () => {
                 </p>
               </div>
 
+              <div style={{
+                background: '#f8d7da',
+                padding: '1.5rem',
+                borderRadius: '10px',
+                textAlign: 'center',
+                border: '1px solid #dc3545',
+                cursor: 'pointer'
+              }}
+              onClick={() => navigate('/admin/issues')}>
+                <h4 style={{ color: '#dc3545', marginBottom: '0.5rem' }}>
+                  🎯 Issue Tracker
+                </h4>
+                <p style={{ color: '#dc3545', fontSize: '0.9rem', margin: 0 }}>
+                  View and manage reported issues
+                </p>
+              </div>
+
               {hasRole('owner') && (
                 <div style={{
                   background: '#d4edda',
@@ -348,6 +493,272 @@ const Dashboard = () => {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Success/Error Messages */}
+      {reportMessage && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          background: '#d4edda',
+          color: '#155724',
+          padding: '1rem',
+          borderRadius: '8px',
+          border: '1px solid #c3e6cb',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          zIndex: 1001,
+          maxWidth: '400px'
+        }}>
+          <strong>Success!</strong> {reportMessage}
+        </div>
+      )}
+
+      {reportError && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          background: '#f8d7da',
+          color: '#721c24',
+          padding: '1rem',
+          borderRadius: '8px',
+          border: '1px solid #f5c6cb',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          zIndex: 1001,
+          maxWidth: '400px'
+        }}>
+          <strong>Error:</strong> {reportError}
+        </div>
+      )}
+
+      {/* Bug Report Modal */}
+      {showBugReportModal && (
+        <ReportModal
+          type="bug_report"
+          title="Report a Bug"
+          description="Found something that's not working correctly? Help us fix it!"
+          onSubmit={handleBugReport}
+          onClose={() => setShowBugReportModal(false)}
+          isSubmitting={reportSubmitting}
+          showSeverity={true}
+        />
+      )}
+
+      {/* Feature Request Modal */}
+      {showFeatureRequestModal && (
+        <ReportModal
+          type="feature_request"
+          title="Request a Feature"
+          description="Have an idea for a new feature? We'd love to hear about it!"
+          onSubmit={handleFeatureRequest}
+          onClose={() => setShowFeatureRequestModal(false)}
+          isSubmitting={reportSubmitting}
+          showSeverity={false}
+        />
+      )}
+
+      {/* Improvement Modal */}
+      {showImprovementModal && (
+        <ReportModal
+          type="improvement"
+          title="Suggest an Improvement"
+          description="How can we make the existing features better?"
+          onSubmit={handleImprovement}
+          onClose={() => setShowImprovementModal(false)}
+          isSubmitting={reportSubmitting}
+          showSeverity={false}
+        />
+      )}
+    </div>
+  );
+};
+
+// Report Modal Component
+const ReportModal = ({ type, title, description, onSubmit, onClose, isSubmitting, showSeverity }) => {
+  const [formData, setFormData] = useState({
+    title: '',
+    description: '',
+    severity: 'medium'
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (formData.title.trim() && formData.description.trim()) {
+      onSubmit(formData);
+    }
+  };
+
+  const handleChange = (e) => {
+    setFormData({
+      ...formData,
+      [e.target.name]: e.target.value
+    });
+  };
+
+  const modalBackdropStyle = {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000
+  };
+
+  const modalContentStyle = {
+    backgroundColor: 'white',
+    borderRadius: '15px',
+    padding: '2rem',
+    width: '100%',
+    maxWidth: '600px',
+    maxHeight: '90vh',
+    overflow: 'auto',
+    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)',
+    position: 'relative'
+  };
+
+  const formGroupStyle = {
+    marginBottom: '1.5rem'
+  };
+
+  const labelStyle = {
+    display: 'block',
+    color: '#003366',
+    marginBottom: '0.5rem',
+    fontWeight: '500'
+  };
+
+  const inputStyle = {
+    width: '100%',
+    padding: '0.75rem',
+    borderRadius: '8px',
+    border: '1px solid #ccc',
+    fontSize: '1rem',
+    boxSizing: 'border-box'
+  };
+
+  const textareaStyle = {
+    ...inputStyle,
+    minHeight: '120px',
+    resize: 'vertical'
+  };
+
+  const buttonStyle = {
+    backgroundColor: '#003366',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '0.75rem 1.5rem',
+    cursor: 'pointer',
+    fontSize: '1rem',
+    marginRight: '1rem'
+  };
+
+  const cancelButtonStyle = {
+    backgroundColor: '#6c757d',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '0.75rem 1.5rem',
+    cursor: 'pointer',
+    fontSize: '1rem'
+  };
+
+  return (
+    <div style={modalBackdropStyle} onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div style={modalContentStyle}>
+        <h2 style={{ color: '#003366', marginBottom: '0.5rem' }}>{title}</h2>
+        <p style={{ color: '#666', marginBottom: '2rem' }}>{description}</p>
+
+        <form onSubmit={handleSubmit}>
+          <div style={formGroupStyle}>
+            <label style={labelStyle} htmlFor="title">
+              Title <span style={{ color: '#dc3545' }}>*</span>
+            </label>
+            <input
+              id="title"
+              name="title"
+              type="text"
+              style={inputStyle}
+              value={formData.title}
+              onChange={handleChange}
+              placeholder="Brief description of the issue/request"
+              required
+              maxLength={200}
+            />
+          </div>
+
+          <div style={formGroupStyle}>
+            <label style={labelStyle} htmlFor="description">
+              Description <span style={{ color: '#dc3545' }}>*</span>
+            </label>
+            <textarea
+              id="description"
+              name="description"
+              style={textareaStyle}
+              value={formData.description}
+              onChange={handleChange}
+              placeholder={
+                type === 'bug_report'
+                  ? "Please describe what happened, what you expected to happen, and steps to reproduce the issue..."
+                  : type === 'feature_request'
+                  ? "Describe the feature you'd like to see, how it would work, and why it would be useful..."
+                  : "Describe what could be improved and how you think it should work..."
+              }
+              required
+              maxLength={2000}
+            />
+            <small style={{ color: '#666' }}>
+              {formData.description.length}/2000 characters
+            </small>
+          </div>
+
+          {showSeverity && (
+            <div style={formGroupStyle}>
+              <label style={labelStyle} htmlFor="severity">
+                How severe is this issue?
+              </label>
+              <select
+                id="severity"
+                name="severity"
+                style={inputStyle}
+                value={formData.severity}
+                onChange={handleChange}
+              >
+                <option value="low">Low - Minor inconvenience</option>
+                <option value="medium">Medium - Affects normal use</option>
+                <option value="high">High - Blocks important functionality</option>
+                <option value="critical">Critical - App is unusable</option>
+              </select>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '2rem' }}>
+            <button
+              type="button"
+              style={cancelButtonStyle}
+              onClick={onClose}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              style={{
+                ...buttonStyle,
+                opacity: isSubmitting ? 0.6 : 1,
+                cursor: isSubmitting ? 'not-allowed' : 'pointer'
+              }}
+              disabled={isSubmitting || !formData.title.trim() || !formData.description.trim()}
+            >
+              {isSubmitting ? 'Submitting...' : 'Submit Report'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

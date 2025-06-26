@@ -89,6 +89,14 @@ class Database:
             cls.database.favorites.create_index([("recipe_id", 1), ("user_id", 1)], unique=True)
             cls.database.favorites.create_index("created_at")
 
+            # Issue tracking indexes
+            cls.database.issues.create_index("type")
+            cls.database.issues.create_index("severity")
+            cls.database.issues.create_index("status")
+            cls.database.issues.create_index("user_info.user_id")
+            cls.database.issues.create_index("created_at")
+            cls.database.issues.create_index([("type", 1), ("status", 1)])
+
             logger.info("Database indexes created successfully")
         except Exception as e:
             logger.warning(f"Error creating indexes: {e}")

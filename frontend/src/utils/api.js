@@ -42,7 +42,11 @@ export const API_ENDPOINTS = {
   // Utility endpoints
   MEASURING_UNITS: '/measuring-units',
   GENRES: '/genres',
-  HEALTH: '/health'
+  HEALTH: '/health',
+  ISSUES: '/issues/',
+  REPORT_ISSUE: '/issues/report',
+  MY_REPORTS: '/issues/my-reports',
+  ISSUE_STATS: '/issues/stats/summary',
 };
 
 // Helper function to build full URL
@@ -85,7 +89,7 @@ apiClient.interceptors.response.use(
     return Promise.reject(error);
   }
 );
-
+//Test
 // Connection test helper
 export const testConnection = async () => {
   console.log('🔍 Testing backend connection...');

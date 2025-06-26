@@ -30,6 +30,9 @@ from .config import settings  # Make sure you import your settings
 from .database import db, Database
 from .utils.ai_helper import ai_helper
 from fastapi.staticfiles import StaticFiles
+from .routes.issues import router as issues_router
+from .middleware.error_tracking import ErrorTrackingMiddleware
+from .middleware.auth import get_current_user, require_role, create_access_token
 
 # Load environment variables first
 # load_dotenv()
@@ -114,9 +117,18 @@ app.add_middleware(
     max_age=600,
 )
 
+
+# Include issue tracking router
+app.include_router(issues_router)
+
+# Add error tracking middleware (ADD THIS HERE)
+app.add_middleware(ErrorTrackingMiddleware, track_performance=True)
+
 # Configuration
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key")
 security = HTTPBearer()
+
+
 
 @app.get("/test")
 async def test_route():
@@ -273,23 +285,23 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     return encoded_jwt
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    if not db_available:
-        raise HTTPException(status_code=503, detail="Database not available")
-
-    try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=["HS256"])
-        username: str = payload.get("sub")
-        if username is None:
-            raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-
-    user = db.users.find_one({"username": username})
-    if user is None:
-        raise HTTPException(status_code=401, detail="User not found")
-
-    return user
+# def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+#     if not db_available:
+#         raise HTTPException(status_code=503, detail="Database not available")
+#
+#     try:
+#         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=["HS256"])
+#         username: str = payload.get("sub")
+#         if username is None:
+#             raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+#     except jwt.PyJWTError:
+#         raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+#
+#     user = db.users.find_one({"username": username})
+#     if user is None:
+#         raise HTTPException(status_code=401, detail="User not found")
+#
+#     return user
 
 
 def require_role(allowed_roles: List[UserRole]):
@@ -1936,7 +1948,7 @@ if os.path.exists("frontend/build"):
 async def serve_react_spa(full_path: str):
     """Serve React SPA for all other routes"""
     # Block API routes
-    if full_path.startswith(("api", "docs", "redoc", "health", "photos", "test")):
+    if full_path.startswith(("api", "docs", "redoc", "health", "photos", "test", "issues")):
         raise HTTPException(status_code=404, detail="Not found")
 
     # Try to serve static file first (CSS, JS, images, etc.)
