@@ -54,52 +54,49 @@ const AdminIssues = () => {
     }
   }, [filters]);
 
-  // const fetchIssues = async () => {
-  //   try {
-  //     setLoading(true);
-  //     // DEBUG: Check authentication
-  //   const token = localStorage.getItem('token');
-  //   console.log('Token exists:', !!token);
-  //   console.log('Token preview:', token ? token.substring(0, 20) + '...' : 'none');
-  //   console.log('User role:', user?.role);
-  //
-  //   const params = new URLSearchParams();
-  //
-  //
-  //
-  //     if (filters.type) params.append('type', filters.type);
-  //     if (filters.severity) params.append('severity', filters.severity);
-  //     if (filters.status) params.append('status', filters.status);
-  //     if (filters.priority) params.append('priority', filters.priority);
-  //
-  //     const response = await apiClient.get(`${API_ENDPOINTS.ISSUES}?${params.toString()}`);
-  //     setIssues(response.data);
-  //   } catch (error) {
-  //     console.error('Error fetching issues:', error);
-  //     setError('Failed to load issues. Please try again.');
-  //   } finally {
-  //     setLoading(false);
-  //   }
-  // };
+
 
   const fetchIssues = async () => {
   try {
     setLoading(true);
 
-    // Test with a working endpoint first
-    console.log('Testing auth with /auth/me endpoint...');
-    const authTest = await apiClient.get(API_ENDPOINTS.ME);
-    console.log('Auth test successful:', authTest.data);
-
-    // If that works, try the issues endpoint
-    console.log('Testing issues endpoint...');
+    // Keep the working API call exactly as it was
+    console.log('Fetching all issues...');
     const response = await apiClient.get(API_ENDPOINTS.ISSUES);
     console.log('Issues response:', response.data);
-    setIssues(response.data);
+
+    // Now filter the results CLIENT-SIDE instead of server-side
+    let filteredIssues = response.data;
+
+    // Apply filters if they exist
+    if (filters.type) {
+      filteredIssues = filteredIssues.filter(issue => issue.type === filters.type);
+    }
+
+    if (filters.severity) {
+      filteredIssues = filteredIssues.filter(issue => issue.severity === filters.severity);
+    }
+
+    if (filters.status) {
+      filteredIssues = filteredIssues.filter(issue => issue.status === filters.status);
+    }
+
+    if (filters.priority) {
+      filteredIssues = filteredIssues.filter(issue => issue.priority === filters.priority);
+    }
+
+    // Hide resolved/closed by default (unless specifically filtered)
+    if (!filters.status) {
+      filteredIssues = filteredIssues.filter(issue =>
+        issue.status !== 'resolved' && issue.status !== 'closed'
+      );
+    }
+
+    setIssues(filteredIssues);
 
   } catch (error) {
-    console.error('Debug error:', error.response || error);
-    setError(`Debug: ${error.response?.status} - ${error.response?.data?.detail || error.message}`);
+    console.error('Error fetching issues:', error.response || error);
+    setError(`Error: ${error.response?.status} - ${error.response?.data?.detail || error.message}`);
   } finally {
     setLoading(false);
   }
@@ -380,11 +377,11 @@ const AdminIssues = () => {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
             <div>
               <label style={{ display: 'block', marginBottom: '0.5rem', color: '#003366', fontWeight: '500' }}>
-                Type
+                Status
               </label>
               <select
-                value={filters.type}
-                onChange={(e) => handleFilterChange('type', e.target.value)}
+                value={filters.status}
+                onChange={(e) => handleFilterChange('status', e.target.value)}
                 style={{
                   width: '100%',
                   padding: '0.5rem',
@@ -392,12 +389,12 @@ const AdminIssues = () => {
                   border: '1px solid #ccc'
                 }}
               >
-                <option value="">All Types</option>
-                <option value="bug_report">Bug Report</option>
-                <option value="feature_request">Feature Request</option>
-                <option value="improvement">Improvement</option>
-                <option value="auto_error">Auto Error</option>
-                <option value="performance">Performance</option>
+                <option value="">Active Issues</option>
+                <option value="open">Open Only</option>
+                <option value="in_progress">In Progress Only</option>
+                <option value="resolved">Resolved Only</option>
+                <option value="closed">Closed Only</option>
+                <option value="all">All Issues</option>
               </select>
             </div>
 
@@ -420,28 +417,6 @@ const AdminIssues = () => {
                 <option value="high">High</option>
                 <option value="medium">Medium</option>
                 <option value="low">Low</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={{ display: 'block', marginBottom: '0.5rem', color: '#003366', fontWeight: '500' }}>
-                Status
-              </label>
-              <select
-                value={filters.status}
-                onChange={(e) => handleFilterChange('status', e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '0.5rem',
-                  borderRadius: '5px',
-                  border: '1px solid #ccc'
-                }}
-              >
-                <option value="">All Statuses</option>
-                <option value="open">Open</option>
-                <option value="in_progress">In Progress</option>
-                <option value="resolved">Resolved</option>
-                <option value="closed">Closed</option>
               </select>
             </div>
 
