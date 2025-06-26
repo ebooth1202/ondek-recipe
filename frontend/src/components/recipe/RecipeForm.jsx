@@ -214,14 +214,14 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
               setNotes([...tempRecipeData.notes]);
             }
 
-            setSuccess('✨ Recipe from Ralph loaded successfully! Review and modify as needed.');
+            setSuccess('✨ Recipe from Rupert loaded successfully! Review and modify as needed.');
           }
         } catch (error) {
           console.error('Error loading temp recipe:', error);
           if (error.response?.status === 404) {
-            setError('The recipe link has expired. Please ask Ralph for a new recipe suggestion.');
+            setError('The recipe link has expired. Please ask Rupert for a new recipe suggestion.');
           } else {
-            setError('Failed to load recipe data. Please try asking Ralph again.');
+            setError('Failed to load recipe data. Please try asking Rupert again.');
           }
         } finally {
           setIsLoadingTempRecipe(false);
@@ -1050,7 +1050,7 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
       response = await axios.post(`${apiBaseUrl}/recipes`, formDataToSend);
 
       if (tempId) {
-        setSuccess('✨ Recipe from Ralph saved successfully! 🎉');
+        setSuccess('✨ Recipe from Rupert saved successfully! 🎉');
       } else {
         setSuccess('Recipe created successfully! 🎉');
       }
@@ -1262,7 +1262,7 @@ const RecipeForm = ({ editMode = false, existingRecipe = null, onSubmitSuccess }
               marginBottom: '1rem'
             }}></div>
             <h2 style={{ color: '#003366', marginBottom: '1rem' }}>
-              ✨ Loading Recipe from Ralph...
+              ✨ Loading Recipe from Rupert...
             </h2>
             <p style={{ color: '#666' }}>
               Preparing your recipe data for the form! 🍳

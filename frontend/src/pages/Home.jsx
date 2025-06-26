@@ -188,7 +188,7 @@ const Home = () => {
 
           <div className="card">
             <h3 style={{ color: '#003366', marginBottom: '1rem' }}>🤖 AI Assistant</h3>
-            <p>Get cooking help, recipe suggestions, and ingredient substitutions from RALPH, our AI assistant.</p>
+            <p>Get cooking help, recipe suggestions, and ingredient substitutions from RUPERT, our AI assistant.</p>
           </div>
 
           <div className="card">
