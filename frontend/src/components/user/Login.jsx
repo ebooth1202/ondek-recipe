@@ -184,52 +184,52 @@ const Login = () => {
             </Link>
           </p>
 
-          <div style={{
-            marginTop: '2rem',
-            padding: '1rem',
-            background: '#f0f8ff',
-            borderRadius: '10px',
-            border: '1px solid #003366'
-          }}>
-            <h3 style={{
-              color: '#003366',
-              marginBottom: '1rem',
-              fontSize: '1.1rem'
-            }}>
-              🧪 Demo Account
-            </h3>
-            <p style={{ margin: '0.5rem 0' }}>
-              <strong>Username:</strong> owner
-            </p>
-            <p style={{ margin: '0.5rem 0' }}>
-              <strong>Password:</strong> admin123
-            </p>
-            <button
-              type="button"
-              onClick={handleDemoLogin}
-              style={{
-                marginTop: '1rem',
-                padding: '8px 16px',
-                border: '2px solid #003366',
-                borderRadius: '8px',
-                backgroundColor: 'white',
-                color: '#003366',
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: '500'
-              }}
-            >
-              Fill Demo Credentials
-            </button>
-            <p style={{
-              fontSize: '0.9rem',
-              color: '#666',
-              marginTop: '1rem',
-              margin: '1rem 0 0 0'
-            }}>
-              Use this account to test all application features
-            </p>
-          </div>
+          {/*<div style={{*/}
+          {/*  marginTop: '2rem',*/}
+          {/*  padding: '1rem',*/}
+          {/*  background: '#f0f8ff',*/}
+          {/*  borderRadius: '10px',*/}
+          {/*  border: '1px solid #003366'*/}
+          {/*}}>*/}
+          {/*  <h3 style={{*/}
+          {/*    color: '#003366',*/}
+          {/*    marginBottom: '1rem',*/}
+          {/*    fontSize: '1.1rem'*/}
+          {/*  }}>*/}
+          {/*    🧪 Demo Account*/}
+          {/*  </h3>*/}
+          {/*  <p style={{ margin: '0.5rem 0' }}>*/}
+          {/*    <strong>Username:</strong> owner*/}
+          {/*  </p>*/}
+          {/*  <p style={{ margin: '0.5rem 0' }}>*/}
+          {/*    <strong>Password:</strong> admin123*/}
+          {/*  </p>*/}
+          {/*  <button*/}
+          {/*    type="button"*/}
+          {/*    onClick={handleDemoLogin}*/}
+          {/*    style={{*/}
+          {/*      marginTop: '1rem',*/}
+          {/*      padding: '8px 16px',*/}
+          {/*      border: '2px solid #003366',*/}
+          {/*      borderRadius: '8px',*/}
+          {/*      backgroundColor: 'white',*/}
+          {/*      color: '#003366',*/}
+          {/*      cursor: 'pointer',*/}
+          {/*      fontSize: '14px',*/}
+          {/*      fontWeight: '500'*/}
+          {/*    }}*/}
+          {/*  >*/}
+          {/*    Fill Demo Credentials*/}
+          {/*  </button>*/}
+          {/*  <p style={{*/}
+          {/*    fontSize: '0.9rem',*/}
+          {/*    color: '#666',*/}
+          {/*    marginTop: '1rem',*/}
+          {/*    margin: '1rem 0 0 0'*/}
+          {/*  }}>*/}
+          {/*    Use this account to test all application features*/}
+          {/*  </p>*/}
+          {/*</div>*/}
         </div>
       </div>
     </div>
