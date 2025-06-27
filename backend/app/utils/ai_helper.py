@@ -167,6 +167,43 @@ class RupertAIHelper:
 
     # === ENHANCED UNDERSTANDING DETECTION ===
 
+    def _is_personal_question(self, user_message: str) -> bool:
+        """Detect personal questions about Rupert himself"""
+        user_lower = user_message.lower().strip()
+
+        # Personal question patterns - broad enough to catch variations
+        personal_patterns = [
+            r'\bhow old are you\b',
+            r'\bwhat.*your.*age\b',
+            r'\bdo you have.*name\b',
+            r'\bwhat.*your.*name\b',
+            r'\bhow are you\b',
+            r'\bhow.*you.*doing\b',
+            r'\bwhere.*you.*from\b',
+            r'\bwho.*you\b',
+            r'\bwhat.*you.*like\b',
+            r'\bdo you.*family\b',
+            r'\bwhere.*you.*live\b',
+            r'\bwhat.*your.*story\b',
+            r'\btell me about yourself\b',
+            r'\bwho.*made you\b',
+            r'\bwho.*created you\b',
+            r'\bwhat.*you.*made\b'
+        ]
+
+        for pattern in personal_patterns:
+            if re.search(pattern, user_lower):
+                return True
+
+        # Simple personal question starters
+        if any(user_lower.startswith(phrase) for phrase in [
+            "who are you", "what are you", "how are you", "where are you",
+            "do you have", "are you a", "tell me about"
+        ]):
+            return True
+
+        return False
+
     def _detect_unclear_or_nonsensical_request(self, user_message: str) -> bool:
         """Detect if the user's message is unclear, nonsensical, or gibberish"""
         user_lower = user_message.lower().strip()
@@ -1036,6 +1073,32 @@ class RupertAIHelper:
                 ]
                 import random
                 return random.choice(validation_responses)
+
+            # Check for personal questions about Rupert
+            if self._is_personal_question(user_message):
+                personal_system_message = """You are Rupert, a cheerful and goofy cooking assistant AI for the Ondek Recipe app. 
+
+                The user is asking you a personal question about yourself. Respond with Rupert's fun, quirky personality! Be creative, humorous, and endearing while staying in character as a cooking-obsessed AI assistant. Feel free to make up amusing details about your "life" as an AI who loves food and cooking.
+
+                After answering their personal question in a fun way, gently redirect the conversation back to cooking and recipes.
+
+                Keep it lighthearted, goofy, and food-themed when possible!"""
+
+                messages = [{"role": "system", "content": personal_system_message}]
+
+                if conversation_history:
+                    messages.extend(conversation_history[-2:])  # Less history for personal questions
+
+                messages.append({"role": "user", "content": user_message})
+
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    max_tokens=400,
+                    temperature=0.8  # Higher temperature for more creative responses
+                )
+
+                return response.choices[0].message.content.strip()
 
             # First check if this is a confused/unclear request
             if (self._detect_unclear_or_nonsensical_request(user_message) or
