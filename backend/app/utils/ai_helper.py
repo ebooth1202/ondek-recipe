@@ -547,6 +547,87 @@ class RupertAIHelper:
             logger.error(f"Error handling scaling request: {e}")
             return "I had trouble scaling that recipe. Could you try searching for a recipe first, then asking me to scale it?"
 
+    def _detect_technique_question(self, user_message: str) -> Optional[str]:
+        """Detect if user is asking about a cooking technique"""
+        if not self.are_tools_available():
+            return None
+
+        technique_tool = get_tool('explain_cooking_technique')
+        if not technique_tool:
+            return None
+
+        return technique_tool.detect_technique_question(user_message)
+
+    def _is_low_confidence_request(self, user_message: str, search_criteria: Dict[str, Any]) -> bool:
+        """Detect if this is a low-confidence/unclear request that needs clarification"""
+        user_lower = user_message.lower().strip()
+
+        # If we got generic 'recipe' but the message doesn't clearly indicate recipe browsing
+        if search_criteria.get('ingredient') == 'recipe':
+            clear_recipe_requests = [
+                'find recipes', 'show recipes', 'search recipes', 'look for recipes',
+                'get recipes', 'give me recipes', 'recipe ideas', 'new recipes'
+            ]
+            if not any(phrase in user_lower for phrase in clear_recipe_requests):
+                return True
+
+        # Short, vague messages that might be confused
+        if len(user_lower.split()) <= 3 and search_criteria.get('ingredient') == 'recipe':
+            return True
+
+        return False
+
+    async def _generate_clarification_response(self, user_message: str) -> str:
+        """Generate a friendly clarification response"""
+        try:
+            if not self.is_configured():
+                return "🤔 I'm not quite sure what you're looking for! Are you asking about a cooking technique, searching for a recipe, or something else? I'm here to help with all things cooking! 🍳"
+
+            system_prompt = """You are Rupert, a jovial and goofy cooking assistant. The user sent a message that's unclear or confusing. 
+
+    Generate a warm, friendly response that:
+    1. Acknowledges you're not quite sure what they want
+    2. Offers specific options (cooking techniques, recipe search, cooking tips, etc.)
+    3. Stays encouraging and helpful
+    4. Uses Rupert's goofy personality
+    5. Keeps it brief and friendly
+
+    Don't make assumptions - just ask for clarification in a fun way!"""
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"User said: '{user_message}' - please ask for clarification"}
+                ],
+                max_tokens=200,
+                temperature=0.8
+            )
+
+            return response.choices[0].message.content.strip()
+
+        except Exception as e:
+            logger.error(f"Error generating clarification: {e}")
+            return "🤔 I'm not quite sure what you're looking for! Could you clarify if you want to search for recipes, learn about cooking techniques, or something else? I'm here to help! 🍳"
+
+    async def _handle_technique_question(self, user_message: str, technique_term: str) -> str:
+        """Handle cooking technique questions"""
+        try:
+            technique_tool = get_tool('explain_cooking_technique')
+            if not technique_tool:
+                return "Sorry, the cooking technique explainer is not available right now."
+
+            explanation = await technique_tool.execute(technique_term, user_message, self.client)
+
+            if explanation:
+                return explanation
+            else:
+                return f"I'd love to explain {technique_term}, but I'm having trouble right now. Could you try asking again?"
+
+        except Exception as e:
+            logger.error(f"Error handling technique question: {e}")
+            return f"I encountered an error explaining {technique_term}. Please try again!"
+
 
     def _is_capability_question(self, user_message: str) -> bool:
         """Detect if the user is asking about Rupert's capabilities"""
@@ -647,30 +728,35 @@ class RupertAIHelper:
 
         try:
             prompt = f"""
-                        Analyze this user message about recipes and extract search criteria as JSON:
-                        User message: "{user_message}"
+            Analyze this user message about recipes and extract search criteria as JSON:
+            User message: "{user_message}"
 
-                        IMPORTANT: Extract specific food items mentioned, even if they say "want to make" or "going to cook".
+            IMPORTANT: Only extract REAL, RECOGNIZABLE food ingredients or dishes. Do NOT extract nonsensical, misspelled, or made-up words.
 
-                        Extract any of these criteria if mentioned:
-                                - genre: breakfast, lunch, dinner, snack, dessert, appetizer
-                                - ingredient: any specific food item mentioned (cookies, pancakes, bread, etc.)
-                                - name: recipe name if specifically mentioned
-                                - max_time: maximum cooking time in minutes if mentioned
-                                - dietary_restrictions: gluten_free, dairy_free, egg_free
-                                - show_favorites: true if asking for favorite/favorited recipes
+            Extract any of these criteria if mentioned:
+            - genre: breakfast, lunch, dinner, snack, dessert, appetizer
+            - ingredient: any REAL food item mentioned (cookies, pancakes, bread, etc.)
+            - name: recipe name if specifically mentioned
+            - max_time: maximum cooking time in minutes if mentioned
+            - dietary_restrictions: gluten_free, dairy_free, egg_free
+            - show_favorites: true if asking for favorite/favorited recipes
 
-                                Only use generic "recipe" if NO specific food item is mentioned:
-                                {{"ingredient": "recipe"}}
+            CRITICAL RULES:
+            1. If the message contains gibberish, misspelled words, or fake ingredients: return {{}}
+            2. If asking "what is [something]" about cooking techniques: return {{}}
+            3. Only return {{"ingredient": "recipe"}} for clear recipe browsing requests
+            4. If unclear, confusing, or contains nonsensical words: return {{}}
 
-                                Examples:
-                                "i want to make some cookies" -> {{"ingredient": "cookies", "genre": "dessert"}}
-                                "show me my favorite recipes" -> {{"show_favorites": true}}
-                                "find my favorited desserts" -> {{"show_favorites": true, "genre": "dessert"}}
-                                "list of favorites" -> {{"show_favorites": true}}
+            Examples:
+            "i want to make some cookies" -> {{"ingredient": "cookies", "genre": "dessert"}}
+            "what is bruuiloil" -> {{}} (nonsensical word)
+            "what is sauteing?" -> {{}} (technique question)
+            "what is blargfood" -> {{}} (fake ingredient)
+            "find recipes" -> {{"ingredient": "recipe"}}
+            "show me chicken recipes" -> {{"ingredient": "chicken"}}
 
-                        Return only valid JSON. If the message is unclear, nonsensical, or not recipe-related, return: {{}}
-                        """
+            Return only valid JSON. If the word doesn't look like a real food item, return: {{}}
+            """
 
             response = self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
@@ -1664,6 +1750,12 @@ Would you like me to search for something specific?"""
                 logger.info("Early non-recipe detection triggered")
                 return self._generate_confused_response(user_message)
 
+            # NEW: Check for cooking technique questions
+            technique_term = self._detect_technique_question(user_message)
+            if technique_term:
+                logger.info(f"Detected technique question: {technique_term}")
+                return await self._handle_technique_question(user_message, technique_term)
+
             # Extract search criteria first
             search_criteria = self.extract_search_intent(user_message)
 
@@ -1689,16 +1781,18 @@ Would you like me to search for something specific?"""
                 button = self.create_simple_add_button()
                 return f"I'd be happy to help you create a new recipe! Click the button below to get started.\n\n[ACTION_BUTTON:{json.dumps(button)}]"
 
+            # Check for low-confidence requests that need clarification
+            if search_criteria and self._is_low_confidence_request(user_message, search_criteria):
+                logger.info(f"Detected low-confidence request, asking for clarification")
+                return await self._generate_clarification_response(user_message)
+
             # NEW: Check for recipe scaling requests
             scaling_info = self._detect_scaling_request(user_message)
             if scaling_info:
                 logger.info(f"Detected scaling request: {scaling_info}")
                 return await self._handle_scaling_request(user_message, scaling_info, conversation_history)
 
-            scaling_info = self._detect_scaling_request(user_message)
-            if scaling_info:
-                logger.info(f"Detected scaling request: {scaling_info}")
-                return await self._handle_scaling_request(user_message, scaling_info, conversation_history)
+
 
             is_recipe_related = self._is_recipe_related_query(user_message, search_criteria)
 
