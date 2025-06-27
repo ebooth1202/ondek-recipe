@@ -106,8 +106,8 @@ class RecipeFormatterTool:
             if isinstance(instructions, str):
                 instructions = self._split_instructions(instructions)
 
-            prep_time = recipe_data.get('prep_time', 0)
-            cook_time = recipe_data.get('cook_time', 0)
+            prep_time = recipe_data.get('prep_time', 0) or 0
+            cook_time = recipe_data.get('cook_time', 0) or 0
             total_time = prep_time + cook_time
 
             preview_data = {
@@ -116,7 +116,7 @@ class RecipeFormatterTool:
                 "ingredients": ingredients,
                 "instructions": instructions,
                 "serving_size": recipe_data.get('serving_size', 4),
-                "genre": recipe_data.get('genre', '').title(),
+                "genre": recipe_data.get('genre', '').title() if recipe_data.get('genre') else 'Recipe',
                 "prep_time": prep_time,
                 "cook_time": cook_time,
                 "total_time": total_time,

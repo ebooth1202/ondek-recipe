@@ -1,4 +1,5 @@
 from .base_imports import *
+from .recipe_cache import recipe_cache
 
 
 class RecipeSearchTool:
@@ -9,11 +10,22 @@ class RecipeSearchTool:
         self.description = "Search the internet for recipes from various cooking websites"
 
     def execute(self, criteria: Dict[str, Any], search_params: Dict[str, Any] = None) -> List[Dict]:
-        """Search for recipes from external sources"""
+        """Search for recipes from external sources with enhanced error handling"""
         try:
+            import time
+            start_time = time.time()
+
             logger.info(f"RecipeSearchTool.execute called with criteria: {criteria}")
 
-            ingredient = criteria.get('ingredient', 'chocolate chip cookies') if criteria else 'chocolate chip cookies'
+            # Validate criteria input
+            if not criteria:
+                logger.warning("No criteria provided, using default")
+                criteria = {'ingredient': 'recipe'}
+
+            ingredient = criteria.get('ingredient', 'recipe')
+            if not ingredient or not isinstance(ingredient, str):
+                ingredient = 'recipe'
+
             logger.info(f"Searching for ingredient: {ingredient}")
 
             selected_website = None
@@ -23,30 +35,109 @@ class RecipeSearchTool:
                     selected_website = websites[0]
                     logger.info(f"Specific website requested: {selected_website}")
 
-            if selected_website:
-                return self._search_website_for_recipes(ingredient, selected_website, criteria)
-            else:
-                return self._search_multiple_sites(ingredient, criteria)
+            recipes = []
+
+            try:
+                if selected_website:
+                    recipes = self._search_website_for_recipes(ingredient, selected_website, criteria)
+                else:
+                    recipes = self._search_multiple_sites(ingredient, criteria)
+            except Exception as search_error:
+                logger.error(f"Error during recipe search: {search_error}")
+                recipes = []
+
+            # Ensure recipes is always a list
+            if recipes is None:
+                logger.warning("Recipe search returned None, using empty list")
+                recipes = []
+            elif not isinstance(recipes, list):
+                logger.warning(f"Recipe search returned {type(recipes)}, converting to list")
+                recipes = [recipes] if recipes else []
+
+            # Add performance metadata to recipes
+            total_time = time.time() - start_time
+            for recipe in recipes:
+                if isinstance(recipe, dict):
+                    recipe['search_time'] = total_time
+                    recipe['search_timestamp'] = int(time.time())
+
+                    # Add quality indicators based on extraction method
+                    extraction_method = recipe.get('extraction_method', 'unknown')
+                    if extraction_method == 'structured_data':
+                        recipe['data_quality'] = 'excellent'
+                        recipe['confidence_score'] = 0.95
+                    elif extraction_method == 'enhanced_parsing':
+                        recipe['data_quality'] = 'good'
+                        recipe['confidence_score'] = 0.80
+                    elif extraction_method == 'ai_parsing':
+                        recipe['data_quality'] = 'fair'
+                        recipe['confidence_score'] = 0.70
+                    else:
+                        recipe['data_quality'] = 'basic'
+                        recipe['confidence_score'] = 0.50
+
+            # Ensure we always return a valid list
+            if not recipes:
+                logger.info("No recipes found, generating fallback")
+                recipes = self._generate_fallback_recipe(ingredient)
+
+            logger.info(f"Recipe search completed in {total_time:.2f} seconds with {len(recipes)} results")
+            return recipes
 
         except Exception as e:
             logger.error(f"Error in external recipe search: {e}")
-            return self._generate_fallback_recipe(criteria.get('ingredient', 'recipe'))
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+            # Always return a valid list, never None
+            try:
+                ingredient = criteria.get('ingredient', 'recipe') if criteria else 'recipe'
+                return self._generate_fallback_recipe(ingredient)
+            except:
+                # Ultimate fallback
+                return [{
+                    "name": "Recipe Search Error",
+                    "source": "error",
+                    "description": "An error occurred during recipe search.",
+                    "url": "https://example.com/error",
+                    "ingredients": [{"name": "error", "quantity": 1, "unit": "error"}],
+                    "instructions": ["Recipe search encountered an error"],
+                    "serving_size": 1,
+                    "prep_time": 0,
+                    "cook_time": 0,
+                    "genre": "error",
+                    "notes": ["Error occurred"],
+                    "dietary_restrictions": []
+                }]
 
     def _search_website_for_recipes(self, ingredient: str, website: str, criteria: Dict[str, Any]) -> List[Dict]:
-        """Search a specific website for recipes"""
+        """Search a specific website for recipes with enhanced error handling"""
         try:
             logger.info(f"Searching {website} for recipes about: {ingredient}")
 
             search_urls = self._build_search_urls(ingredient, website)
             all_recipes = []
-            max_recipes = 4
+            max_recipes = 3
+
+            import time
+            start_time = time.time()
+            timeout_seconds = 30
 
             for search_url in search_urls:
                 if len(all_recipes) >= max_recipes:
                     break
 
+                if time.time() - start_time > timeout_seconds:
+                    logger.warning(f"Search timeout reached for {website}")
+                    break
+
                 logger.info(f"Trying to access URL: {search_url}")
-                search_page_content = self._fetch_webpage_content(search_url)
+
+                try:
+                    search_page_content = self._fetch_webpage_content(search_url)
+                except Exception as fetch_error:
+                    logger.error(f"Error fetching {search_url}: {fetch_error}")
+                    continue
 
                 if not search_page_content:
                     logger.warning(f"Failed to get content from {search_url}")
@@ -54,59 +145,82 @@ class RecipeSearchTool:
 
                 logger.info(f"Successfully got {len(search_page_content)} characters from {search_url}")
 
-                # Check if we got a valid page (be more specific about error detection)
+                # Check if we got a valid page
                 content_lower = search_page_content.lower()
                 if (("page not found" in content_lower or
                      "404 error" in content_lower or
-                     "not found" in content_lower[:1000]) and  # Only check first 1000 chars
-                        "recipe" not in content_lower[:5000]):  # If no recipe mentions in first 5000 chars
+                     "not found" in content_lower[:1000]) and
+                        "recipe" not in content_lower[:5000]):
                     logger.warning(f"Got error page from {search_url}")
                     continue
 
-                # Try to extract recipe URLs even if we're not 100% sure
-                recipe_urls = self._extract_recipe_urls_from_search(search_page_content, website)
+                try:
+                    recipe_urls = self._extract_recipe_urls_from_search(search_page_content, website)
+                except Exception as extract_error:
+                    logger.error(f"Error extracting recipe URLs from {search_url}: {extract_error}")
+                    continue
+
                 logger.info(f"Extracted {len(recipe_urls)} recipe URLs from search results")
 
-                # Log some sample URLs for debugging
                 if recipe_urls:
                     logger.info(f"Sample recipe URLs: {recipe_urls[:3]}")
                 else:
-                    # Debug: Let's see what kind of content we got
                     logger.warning(f"No recipe URLs found. Page title area: {search_page_content[:500]}")
-                    # Look for any links at all
-                    if BS4_AVAILABLE:
-                        from bs4 import BeautifulSoup
-                        soup = BeautifulSoup(search_page_content, 'html.parser')
-                        all_links = soup.find_all('a', href=True)
-                        logger.info(f"Found {len(all_links)} total links on page")
-                        sample_links = [link.get('href') for link in all_links[:10]]
-                        logger.info(f"Sample links: {sample_links}")
 
-                for recipe_url in recipe_urls[:3]:
+                recipe_process_start = time.time()
+                recipes_processed = 0
+
+                for recipe_url in recipe_urls[:2]:
                     if len(all_recipes) >= max_recipes:
                         break
 
+                    if time.time() - recipe_process_start > 8 * (recipes_processed + 1):
+                        logger.warning(f"Recipe processing timeout for {recipe_url}")
+                        break
+
+                    if time.time() - start_time > timeout_seconds:
+                        logger.warning(f"Overall timeout reached, stopping recipe processing")
+                        break
+
                     logger.info(f"Attempting to scrape recipe from: {recipe_url}")
-                    recipe_data = self._scrape_and_parse_recipe(recipe_url, ingredient)
-                    if recipe_data:
-                        all_recipes.append(recipe_data)
-                        logger.info(f"Successfully parsed recipe: {recipe_data.get('name', 'Unknown')}")
-                    else:
-                        logger.warning(f"Failed to parse recipe from: {recipe_url}")
+
+                    try:
+                        recipe_data = self._scrape_and_parse_recipe(recipe_url, ingredient)
+                        recipes_processed += 1
+
+                        if recipe_data and isinstance(recipe_data, dict):
+                            all_recipes.append(recipe_data)
+                            logger.info(f"Successfully parsed recipe: {recipe_data.get('name', 'Unknown')}")
+                        else:
+                            logger.warning(f"Failed to parse recipe from: {recipe_url}")
+                    except Exception as recipe_error:
+                        logger.error(f"Error processing recipe {recipe_url}: {recipe_error}")
+                        recipes_processed += 1
+                        continue
+
+            total_time = time.time() - start_time
+            logger.info(f"Search completed in {total_time:.2f} seconds, found {len(all_recipes)} recipes")
 
             if all_recipes:
                 logger.info(f"Found {len(all_recipes)} real recipes from {website}")
                 return all_recipes
             else:
                 logger.warning(f"Could not parse any real recipes from {website}, using fallback")
-                return self._generate_fallback_recipes_for_site(ingredient, website, criteria)
+                fallback_recipes = self._generate_fallback_recipes_for_site(ingredient, website, criteria)
+                return fallback_recipes if fallback_recipes else []
 
         except Exception as e:
             logger.error(f"Error searching {website}: {e}")
-            return self._generate_fallback_recipes_for_site(ingredient, website, criteria)
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            try:
+                fallback_recipes = self._generate_fallback_recipes_for_site(ingredient, website, criteria)
+                return fallback_recipes if fallback_recipes else []
+            except:
+                return []
 
     def _search_multiple_sites(self, ingredient: str, criteria: Dict[str, Any]) -> List[Dict]:
-        """Search multiple sites for recipes"""
+        """Search multiple sites for recipes with enhanced error handling"""
         try:
             popular_sites = ['allrecipes.com', 'foodnetwork.com', 'food.com']
             all_recipes = []
@@ -116,36 +230,70 @@ class RecipeSearchTool:
                 if len(all_recipes) >= max_recipes:
                     break
 
-                site_recipes = self._search_website_for_recipes(ingredient, site, criteria)
-                if site_recipes and site_recipes[0].get('source') != 'fallback':
-                    all_recipes.extend(site_recipes[:1])
+                try:
+                    site_recipes = self._search_website_for_recipes(ingredient, site, criteria)
 
-            return all_recipes if all_recipes else self._generate_fallback_recipes_for_ingredient(ingredient, criteria)
+                    # Ensure site_recipes is always a list
+                    if site_recipes is None:
+                        site_recipes = []
+                    elif not isinstance(site_recipes, list):
+                        site_recipes = [site_recipes] if site_recipes else []
+
+                    # Check if we got real recipes (not fallback)
+                    if site_recipes and len(site_recipes) > 0:
+                        first_recipe = site_recipes[0]
+                        if isinstance(first_recipe, dict) and first_recipe.get('source') != 'fallback':
+                            all_recipes.extend(site_recipes[:1])
+                            logger.info(f"Added recipe from {site}: {first_recipe.get('name', 'Unknown')}")
+
+                except Exception as site_error:
+                    logger.error(f"Error searching {site}: {site_error}")
+                    continue
+
+            if all_recipes:
+                logger.info(f"Multi-site search found {len(all_recipes)} recipes")
+                return all_recipes
+            else:
+                logger.warning("Multi-site search found no recipes, using fallback")
+                fallback_recipes = self._generate_fallback_recipes_for_ingredient(ingredient, criteria)
+                return fallback_recipes if fallback_recipes else []
 
         except Exception as e:
             logger.error(f"Error in multi-site search: {e}")
-            return self._generate_fallback_recipes_for_ingredient(ingredient, criteria)
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            try:
+                fallback_recipes = self._generate_fallback_recipes_for_ingredient(ingredient, criteria)
+                return fallback_recipes if fallback_recipes else []
+            except:
+                return []
 
     def _build_search_urls(self, ingredient: str, website: str) -> List[str]:
         """Build search URLs for different recipe websites"""
         search_urls = []
-        clean_ingredient = ingredient.replace(' ', '%20')
+        import urllib.parse
+        encoded_ingredient = urllib.parse.quote_plus(ingredient)
 
         if 'allrecipes.com' in website:
-            # Updated AllRecipes search URL format
-            search_urls.append(f"https://www.allrecipes.com/search?q={clean_ingredient}")
+            search_urls.append(f"https://www.allrecipes.com/search?q={encoded_ingredient}")
         elif 'foodnetwork.com' in website:
-            # Updated Food Network search URL format
-            search_urls.append(f"https://www.foodnetwork.com/search/{clean_ingredient}")
+            search_urls.append(f"https://www.foodnetwork.com/search/{encoded_ingredient}")
         elif 'food.com' in website:
-            search_urls.append(f"https://www.food.com/search/{clean_ingredient}")
+            search_urls.append(f"https://www.food.com/search?q={encoded_ingredient}")
+            search_urls.append(f"https://www.food.com/ideas/{encoded_ingredient}")
         elif 'epicurious.com' in website:
-            search_urls.append(f"https://www.epicurious.com/search?q={clean_ingredient}")
+            search_urls.append(f"https://www.epicurious.com/search?q={encoded_ingredient}")
         elif 'pinterest.com' in website:
-            search_urls.append(f"https://www.pinterest.com/search/pins/?q={clean_ingredient}%20recipe")
+            search_urls.append(f"https://www.pinterest.com/search/pins/?q={encoded_ingredient}%20recipe")
+        elif 'google.com' in website:
+            search_urls.append(f"https://www.google.com/search?q={encoded_ingredient}+recipe+site:allrecipes.com")
         else:
-            # Generic fallback
-            search_urls.append(f"https://{website}/search?q={clean_ingredient}+recipe")
+            search_urls.extend([
+                f"https://{website}/search?q={encoded_ingredient}+recipe",
+                f"https://{website}/search/{encoded_ingredient}",
+                f"https://www.{website}/search?q={encoded_ingredient}+recipe",
+                f"https://www.{website}/search/{encoded_ingredient}"
+            ])
 
         return search_urls
 
@@ -158,16 +306,15 @@ class RecipeSearchTool:
                 soup = BeautifulSoup(html_content, 'html.parser')
                 links = soup.find_all('a', href=True)
 
-                # Website-specific URL extraction patterns
                 if 'allrecipes.com' in website:
                     for link in links:
                         href = link.get('href', '')
-                        # AllRecipes recipe URLs follow pattern: /recipe/[id]/recipe-name/
                         if '/recipe/' in href and href.count('/') >= 3:
                             if href.startswith('http'):
                                 recipe_urls.append(href)
                             elif href.startswith('/'):
                                 recipe_urls.append(f"https://www.allrecipes.com{href}")
+
                 elif 'foodnetwork.com' in website:
                     for link in links:
                         href = link.get('href', '')
@@ -176,34 +323,41 @@ class RecipeSearchTool:
                                 recipe_urls.append(href)
                             elif href.startswith('/'):
                                 recipe_urls.append(f"https://www.foodnetwork.com{href}")
-                else:
-                    # Generic extraction for other sites
+
+                elif 'food.com' in website:
                     for link in links:
                         href = link.get('href', '')
-                        if '/recipe' in href.lower():
+                        if ('/recipe/' in href or '/recipe-' in href or '/recipes/' in href or
+                                re.search(r'/\d+/', href)):
+                            if href.startswith('http'):
+                                recipe_urls.append(href)
+                            elif href.startswith('/'):
+                                recipe_urls.append(f"https://www.food.com{href}")
+
+                else:
+                    # Generic extraction
+                    for link in links:
+                        href = link.get('href', '')
+                        recipe_indicators = [
+                            '/recipe/', '/recipes/', '/recipe-', '/food/', '/cooking/',
+                            '/dish/', '/meal/', '/baking/', '/dessert/'
+                        ]
+                        if any(indicator in href.lower() for indicator in recipe_indicators):
                             if href.startswith('http'):
                                 recipe_urls.append(href)
                             elif href.startswith('/'):
                                 recipe_urls.append(f"https://{website}{href}")
-            else:
-                # Fallback regex extraction
-                if 'allrecipes.com' in website:
-                    pattern = r'https?://(?:www\.)?allrecipes\.com/recipe/\d+/[^"\s<>]+'
-                else:
-                    pattern = rf'https?://{re.escape(website)}/[^"\s<>]*recipe[^"\s<>]*'
-
-                matches = re.findall(pattern, html_content)
-                recipe_urls.extend(matches)
 
             # Remove duplicates and filter valid URLs
             unique_urls = []
             seen = set()
             for url in recipe_urls:
-                if url not in seen and len(url) > 20:  # Basic URL validation
+                url = url.split('?')[0].split('#')[0]  # Remove query params and fragments
+                if (url not in seen and len(url) > 20 and
+                        not url.endswith(('.css', '.js', '.png', '.jpg'))):
                     seen.add(url)
                     unique_urls.append(url)
 
-            # Limit results
             unique_urls = unique_urls[:10]
             logger.info(f"Extracted {len(unique_urls)} unique recipe URLs from {website}")
             return unique_urls
@@ -213,19 +367,17 @@ class RecipeSearchTool:
             return []
 
     def _fetch_webpage_content(self, url: str) -> Optional[str]:
-        """Fetch webpage content with proper headers and retry logic"""
+        """Fetch webpage content with optimized size limits and timeout controls"""
         try:
-            # Rotate through different User-Agent strings to avoid blocking
             user_agents = [
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15'
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0'
             ]
 
             import random
 
-            for attempt in range(3):  # Try up to 3 times
+            for attempt in range(2):
                 try:
                     headers = {
                         'User-Agent': random.choice(user_agents),
@@ -234,37 +386,89 @@ class RecipeSearchTool:
                         'Accept-Encoding': 'gzip, deflate, br',
                         'Connection': 'keep-alive',
                         'Upgrade-Insecure-Requests': '1',
-                        'Sec-Fetch-Dest': 'document',
-                        'Sec-Fetch-Mode': 'navigate',
-                        'Sec-Fetch-Site': 'none',
                         'Cache-Control': 'max-age=0',
                     }
 
-                    # Add a small delay between attempts to avoid rate limiting
                     if attempt > 0:
                         import time
-                        time.sleep(1)
+                        time.sleep(0.5)
 
                     response = requests.get(
                         url,
                         headers=headers,
-                        timeout=20,
+                        timeout=15,
                         allow_redirects=True,
-                        verify=True
+                        verify=True,
+                        stream=True
                     )
 
+                    response.raw.decode_content = True
+
                     if response.status_code == 200:
-                        logger.info(f"Successfully fetched content from {url} (attempt {attempt + 1})")
-                        return response.text
+                        content = ""
+                        max_size = 300000
+                        current_size = 0
+
+                        try:
+                            encoding = response.encoding or 'utf-8'
+                            if encoding.lower() in ['iso-8859-1', 'ascii'] and 'charset=' not in response.headers.get(
+                                    'content-type', '').lower():
+                                encoding = 'utf-8'
+
+                            for chunk in response.iter_content(chunk_size=8192, decode_unicode=False):
+                                if chunk:
+                                    try:
+                                        chunk_str = chunk.decode(encoding, errors='ignore')
+                                        chunk_size = len(chunk_str.encode('utf-8'))
+
+                                        if current_size + chunk_size > max_size:
+                                            logger.info(
+                                                f"Content size limit reached for {url}, truncating at {current_size} bytes")
+                                            break
+
+                                        content += chunk_str
+                                        current_size += chunk_size
+                                    except UnicodeDecodeError:
+                                        try:
+                                            chunk_str = chunk.decode('utf-8', errors='ignore')
+                                            content += chunk_str
+                                            current_size += len(chunk_str.encode('utf-8'))
+                                        except:
+                                            continue
+
+                        except Exception as e:
+                            logger.warning(f"Error reading content chunks from {url}: {e}")
+                            try:
+                                full_text = response.text
+                                if len(full_text.encode('utf-8')) <= max_size:
+                                    content = full_text
+                                else:
+                                    content = full_text[:max_size // 2]
+                                    logger.info(f"Content truncated to ~{max_size // 2} chars for {url}")
+                            except Exception as e2:
+                                logger.error(f"Failed to read response text: {e2}")
+                                return None
+                        finally:
+                            response.close()
+
+                        logger.info(f"Successfully fetched {len(content)} chars from {url} (attempt {attempt + 1})")
+                        return content
+
                     elif response.status_code == 403:
                         logger.warning(f"Access forbidden (403) for {url} - trying different User-Agent")
+                        response.close()
                         continue
                     elif response.status_code == 404:
                         logger.warning(f"Page not found (404) for {url}")
+                        response.close()
                         return None
                     else:
                         logger.warning(f"HTTP {response.status_code} for {url} (attempt {attempt + 1})")
+                        response.close()
 
+                except requests.exceptions.Timeout as e:
+                    logger.warning(f"Timeout for {url} (attempt {attempt + 1}): {e}")
+                    continue
                 except requests.exceptions.RequestException as e:
                     logger.warning(f"Request failed for {url} (attempt {attempt + 1}): {e}")
                     continue
@@ -277,33 +481,757 @@ class RecipeSearchTool:
             return None
 
     def _scrape_and_parse_recipe(self, url: str, ingredient: str) -> Optional[Dict]:
-        """Scrape a recipe URL and parse it"""
+        """Scrape a recipe URL and parse it with improved AllRecipes handling"""
         try:
             logger.info(f"Scraping recipe from: {url}")
+
+            # Check cache first
+            cached_recipe = recipe_cache.get(url)
+            if cached_recipe:
+                logger.info(f"Retrieved recipe from cache: {cached_recipe.get('name', 'Unknown')}")
+                return cached_recipe
 
             page_content = self._fetch_webpage_content(url)
             if not page_content:
                 return None
 
-            structured_data = self._extract_structured_recipe_data(page_content)
+            # PRIORITY 1: Try structured data extraction (JSON-LD) with AllRecipes focus
+            structured_data = self._extract_structured_recipe_data(page_content, url)
             if structured_data:
+                logger.info(f"Successfully extracted structured data from {url}")
                 structured_data['url'] = url
                 structured_data['source'] = self._extract_domain_name(url)
+                structured_data['extraction_method'] = 'structured_data'
+                recipe_cache.set(url, structured_data)
                 return structured_data
 
-            # Try AI parsing if available (lazy import to avoid circular dependency)
+            # PRIORITY 2: Try enhanced HTML parsing
+            enhanced_data = self._extract_recipe_with_enhanced_parsing(page_content, url, ingredient)
+            if enhanced_data:
+                logger.info(f"Successfully extracted recipe with enhanced parsing from {url}")
+                enhanced_data['extraction_method'] = 'enhanced_parsing'
+                recipe_cache.set(url, enhanced_data)
+                return enhanced_data
+
+            # PRIORITY 3: AI parsing as last resort
+            ai_parsed_data = self._try_ai_parsing_with_limits(page_content, url, ingredient)
+            if ai_parsed_data:
+                logger.info(f"Successfully extracted recipe with AI from {url}")
+                ai_parsed_data['extraction_method'] = 'ai_parsing'
+                recipe_cache.set(url, ai_parsed_data)
+                return ai_parsed_data
+
+            # FALLBACK: Basic recipe creation
+            logger.warning(f"All parsing methods failed for {url}, creating basic recipe")
+            fallback_recipe = self._create_basic_recipe_from_page(page_content, url, ingredient)
+            return fallback_recipe
+
+        except Exception as e:
+            logger.error(f"Error scraping recipe from {url}: {e}")
+            return None
+
+    def _extract_structured_recipe_data(self, html_content: str, url: str = "") -> Optional[Dict]:
+        """Extract recipe data from JSON-LD structured data with comprehensive debugging"""
+        try:
+            if not BS4_AVAILABLE:
+                logger.debug("BeautifulSoup not available for structured data extraction")
+                return None
+
+            soup = BeautifulSoup(html_content, 'html.parser')
+
+            # Look for JSON-LD scripts
+            json_scripts = []
+            json_scripts.extend(soup.find_all('script', type='application/ld+json'))
+            json_scripts.extend(soup.find_all('script', type='application/json+ld'))
+            json_scripts.extend(soup.find_all('script', {'type': re.compile(r'ld\+json', re.I)}))
+
+            # Also check for scripts that might not have proper type but contain recipe data
+            all_scripts = soup.find_all('script')
+            for script in all_scripts:
+                if script.string and ('"@type"' in script.string and
+                                      ('"Recipe"' in script.string or '"recipe"' in script.string)):
+                    if script not in json_scripts:
+                        json_scripts.append(script)
+
+            logger.info(f"Found {len(json_scripts)} potential JSON-LD scripts for {url}")
+
+            for i, script in enumerate(json_scripts):
+                try:
+                    if not script.string:
+                        logger.debug(f"Script {i}: No content")
+                        continue
+
+                    json_str = script.string.strip()
+
+                    # Clean up JSON string more aggressively
+                    if json_str.startswith('<!--'):
+                        json_str = json_str[4:]
+                    if json_str.endswith('-->'):
+                        json_str = json_str[:-3]
+
+                    json_str = json_str.strip()
+
+                    # Fix common JSON issues
+                    json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+                    json_str = ''.join(char for char in json_str if ord(char) >= 32 or char in '\n\r\t')
+
+                    if not json_str or not (json_str.startswith('{') or json_str.startswith('[')):
+                        logger.debug(f"Script {i}: Invalid JSON format")
+                        continue
+
+                    try:
+                        data = json.loads(json_str)
+                        logger.info(f"Script {i}: Successfully parsed JSON")
+                    except json.JSONDecodeError as e:
+                        logger.debug(f"Script {i}: JSON parse error: {e}")
+                        continue
+
+                    # Comprehensive debugging for AllRecipes
+                    if 'allrecipes.com' in url:
+                        logger.info(f"AllRecipes Script {i} analysis:")
+                        logger.info(f"  Type: {type(data).__name__}")
+                        if isinstance(data, dict):
+                            logger.info(f"  Root keys: {list(data.keys())}")
+                            logger.info(f"  @type: {data.get('@type', 'MISSING')}")
+                            logger.info(f"  @context: {data.get('@context', 'MISSING')}")
+                        elif isinstance(data, list):
+                            logger.info(f"  Array length: {len(data)}")
+                            if data and isinstance(data[0], dict):
+                                logger.info(f"  First item keys: {list(data[0].keys())}")
+                                logger.info(f"  First item @type: {data[0].get('@type', 'MISSING')}")
+
+                    # Enhanced recipe search
+                    recipe_data = self._find_recipe_in_data_enhanced(data, url)
+
+                    if recipe_data:
+                        logger.info(f"Script {i}: Found recipe data with keys: {list(recipe_data.keys())}")
+
+                        # Debug key fields for AllRecipes
+                        if 'allrecipes.com' in url:
+                            logger.info(f"AllRecipes recipe name: {recipe_data.get('name', 'NOT_FOUND')}")
+                            logger.info(f"AllRecipes ingredients count: {len(recipe_data.get('recipeIngredient', []))}")
+                            logger.info(
+                                f"AllRecipes instructions count: {len(recipe_data.get('recipeInstructions', []))}")
+
+                        parsed = self._parse_recipe_schema(recipe_data)
+                        if parsed:
+                            logger.info(f"Script {i}: Successfully extracted and parsed recipe from JSON-LD")
+                            return parsed
+                        else:
+                            logger.warning(f"Script {i}: Recipe data found but parsing failed")
+                            # Log why parsing failed
+                            if 'allrecipes.com' in url:
+                                logger.info(f"AllRecipes parsing failure details:")
+                                logger.info(f"  Raw recipe data keys: {list(recipe_data.keys())}")
+                                logger.info(f"  Name field: {recipe_data.get('name', 'MISSING')}")
+                                logger.info(f"  Ingredients field: {recipe_data.get('recipeIngredient', 'MISSING')}")
+                                logger.info(f"  Instructions field: {recipe_data.get('recipeInstructions', 'MISSING')}")
+
+                except Exception as e:
+                    logger.warning(f"Script {i}: Unexpected error: {e}")
+                    continue
+
+            # If JSON-LD fails, try microdata
+            logger.debug("JSON-LD extraction failed, trying microdata")
+            return self._extract_microdata_recipe(soup)
+
+        except Exception as e:
+            logger.error(f"Error extracting structured data: {e}")
+            return None
+
+    def _debug_json_structure(self, data) -> str:
+        """Debug helper to understand JSON structure"""
+        if isinstance(data, dict):
+            keys = list(data.keys())
+            type_info = data.get('@type', 'no_type')
+            return f"dict with keys: {keys[:5]}... @type: {type_info}"
+        elif isinstance(data, list):
+            return f"list with {len(data)} items, first item type: {type(data[0]).__name__ if data else 'empty'}"
+        else:
+            return f"type: {type(data).__name__}"
+
+    def _find_recipe_in_data_enhanced(self, data, url="", depth=0) -> Optional[Dict]:
+        """Enhanced recursive search for Recipe objects with comprehensive debugging"""
+        if depth > 5:  # Prevent infinite recursion
+            logger.debug(f"Max recursion depth reached at level {depth}")
+            return None
+
+        debug_prefix = "  " * depth
+        logger.debug(f"{debug_prefix}Searching at depth {depth}, type: {type(data).__name__}")
+
+        if isinstance(data, dict):
+            # Check @type field with case-insensitive matching
+            type_field = data.get('@type', '')
+            if isinstance(type_field, str):
+                if type_field.lower() in ['recipe', 'Recipe']:
+                    logger.info(f"{debug_prefix}Found Recipe object with @type: {type_field}")
+                    return data
+            elif isinstance(type_field, list):
+                for t in type_field:
+                    if isinstance(t, str) and t.lower() in ['recipe', 'Recipe']:
+                        logger.info(f"{debug_prefix}Found Recipe object in @type array: {t}")
+                        return data
+
+            # Log structure for AllRecipes debugging
+            if 'allrecipes.com' in url and depth == 0:
+                logger.info(f"{debug_prefix}AllRecipes root structure:")
+                logger.info(f"{debug_prefix}  Keys: {list(data.keys())}")
+                logger.info(f"{debug_prefix}  @type: {data.get('@type', 'MISSING')}")
+                logger.info(f"{debug_prefix}  @context: {data.get('@context', 'MISSING')}")
+
+            # Check common nested locations first
+            priority_keys = ['mainEntity', 'mainEntityOfPage', '@graph', 'itemListElement', 'about']
+            for key in priority_keys:
+                if key in data:
+                    logger.debug(f"{debug_prefix}Checking priority key: {key}")
+                    result = self._find_recipe_in_data_enhanced(data[key], url, depth + 1)
+                    if result:
+                        logger.info(f"{debug_prefix}Found Recipe in priority key: {key}")
+                        return result
+
+            # Check for Recipe-like content indicators
+            recipe_indicators = ['recipeIngredient', 'recipeInstructions', 'recipeName', 'cookTime', 'prepTime']
+            has_recipe_content = any(key in data for key in recipe_indicators)
+
+            if has_recipe_content and not data.get('@type'):
+                logger.info(f"{debug_prefix}Found object with recipe content but no @type, treating as Recipe")
+                logger.info(
+                    f"{debug_prefix}  Recipe indicators found: {[key for key in recipe_indicators if key in data]}")
+                return data
+
+            # Deep search in all remaining values
+            for key, value in data.items():
+                if key not in priority_keys:  # Skip already checked priority keys
+                    logger.debug(f"{debug_prefix}Checking key: {key}")
+                    result = self._find_recipe_in_data_enhanced(value, url, depth + 1)
+                    if result:
+                        logger.info(f"{debug_prefix}Found Recipe in key: {key}")
+                        return result
+
+        elif isinstance(data, list):
+            logger.debug(f"{debug_prefix}Searching list with {len(data)} items")
+            for i, item in enumerate(data):
+                logger.debug(f"{debug_prefix}Checking list item {i}")
+                result = self._find_recipe_in_data_enhanced(item, url, depth + 1)
+                if result:
+                    logger.info(f"{debug_prefix}Found Recipe in list item {i}")
+                    return result
+
+        logger.debug(f"{debug_prefix}No Recipe found at this level")
+        return None
+
+    def _find_recipe_in_data(self, data, depth=0) -> Optional[Dict]:
+        """Legacy method - kept for compatibility, delegates to enhanced version"""
+        return self._find_recipe_in_data_enhanced(data, "", depth)
+
+    def _parse_recipe_schema(self, schema_data: Dict) -> Optional[Dict]:
+        """Parse Recipe schema data with enhanced AllRecipes support and better error handling"""
+        try:
+            recipe = {
+                'name': '',
+                'description': '',
+                'ingredients': [],
+                'instructions': [],
+                'serving_size': 4,
+                'prep_time': 0,
+                'cook_time': 0,
+                'genre': 'dinner',
+                'notes': [],
+                'dietary_restrictions': []
+            }
+
+            # Extract name with multiple fallbacks
+            name_candidates = [
+                schema_data.get('name', ''),
+                schema_data.get('headline', ''),
+                schema_data.get('title', ''),
+                schema_data.get('recipeName', '')
+            ]
+
+            for name_candidate in name_candidates:
+                name = self._extract_text_value(name_candidate)
+                if name and len(name.strip()) > 2:
+                    recipe['name'] = name.strip()
+                    break
+
+            logger.debug(f"Extracted recipe name: '{recipe['name']}'")
+
+            # Extract description with multiple fallbacks
+            desc_candidates = [
+                schema_data.get('description', ''),
+                schema_data.get('summary', ''),
+                schema_data.get('recipeDescription', '')
+            ]
+
+            for desc_candidate in desc_candidates:
+                desc = self._extract_text_value(desc_candidate)
+                if desc and len(desc.strip()) > 5:
+                    recipe['description'] = desc.strip()
+                    break
+
+            # Extract ingredients with enhanced handling
+            ingredient_candidates = [
+                schema_data.get('recipeIngredient', []),
+                schema_data.get('ingredients', []),
+                schema_data.get('ingredient', [])
+            ]
+
+            for ingredients_data in ingredient_candidates:
+                if not ingredients_data:
+                    continue
+
+                # Handle different ingredient formats
+                if isinstance(ingredients_data, dict):
+                    ingredients_data = ingredients_data.get('ingredients', [])
+
+                if isinstance(ingredients_data, list) and len(ingredients_data) > 0:
+                    logger.debug(f"Processing {len(ingredients_data)} ingredients")
+
+                    for i, ing_item in enumerate(ingredients_data):
+                        ing_text = self._extract_text_value(ing_item)
+                        if ing_text and len(ing_text.strip()) > 1:
+                            parsed_ing = self._parse_ingredient_text(ing_text.strip())
+                            if parsed_ing:
+                                recipe['ingredients'].append(parsed_ing)
+
+                    if recipe['ingredients']:  # Found valid ingredients, stop searching
+                        break
+
+            logger.debug(f"Total ingredients extracted: {len(recipe['ingredients'])}")
+
+            # Extract instructions with enhanced handling
+            instruction_candidates = [
+                schema_data.get('recipeInstructions', []),
+                schema_data.get('instructions', []),
+                schema_data.get('instruction', []),
+                schema_data.get('recipeDirection', []),
+                schema_data.get('directions', [])
+            ]
+
+            for instructions_data in instruction_candidates:
+                if not instructions_data:
+                    continue
+
+                # Handle different instruction formats
+                if isinstance(instructions_data, dict):
+                    instructions_data = instructions_data.get('instructions', [])
+
+                if isinstance(instructions_data, list) and len(instructions_data) > 0:
+                    logger.debug(f"Processing {len(instructions_data)} instructions")
+
+                    for i, inst_item in enumerate(instructions_data):
+                        inst_text = self._extract_instruction_text(inst_item)
+                        if inst_text and len(inst_text.strip()) > 5:
+                            cleaned_text = re.sub(r'^\d+\.\s*', '', inst_text.strip())
+                            recipe['instructions'].append(cleaned_text)
+
+                    if recipe['instructions']:  # Found valid instructions, stop searching
+                        break
+
+                elif isinstance(instructions_data, str) and len(instructions_data.strip()) > 5:
+                    recipe['instructions'].append(instructions_data.strip())
+                    break
+
+            logger.debug(f"Total instructions extracted: {len(recipe['instructions'])}")
+
+            # Extract times with multiple candidates
+            time_candidates = [
+                ('prepTime', 'preparationTime', 'prep_time'),
+                ('cookTime', 'cookingTime', 'cooking_time'),
+                ('totalTime', 'total_time')
+            ]
+
+            for primary, secondary, result_key in time_candidates:
+                time_value = schema_data.get(primary, '') or schema_data.get(secondary, '')
+                if time_value:
+                    if result_key == 'prep_time':
+                        recipe['prep_time'] = self._parse_iso_duration(time_value)
+                    elif result_key == 'cook_time':
+                        recipe['cook_time'] = self._parse_iso_duration(time_value)
+                    elif result_key == 'total_time' and not recipe['prep_time'] and not recipe['cook_time']:
+                        # Split total time if individual times aren't available
+                        total_minutes = self._parse_iso_duration(time_value)
+                        recipe['prep_time'] = max(1, total_minutes // 3)
+                        recipe['cook_time'] = max(1, (total_minutes * 2) // 3)
+
+            # Extract yield/serving size with multiple candidates
+            yield_candidates = [
+                schema_data.get('recipeYield'),
+                schema_data.get('yield'),
+                schema_data.get('servings'),
+                schema_data.get('numberOfServings'),
+                schema_data.get('serves')
+            ]
+
+            for recipe_yield in yield_candidates:
+                if recipe_yield:
+                    serving_size = self._extract_serving_size(recipe_yield)
+                    if serving_size:
+                        recipe['serving_size'] = serving_size
+                        break
+
+            # Extract category/genre with multiple candidates
+            category_candidates = [
+                schema_data.get('recipeCategory'),
+                schema_data.get('category'),
+                schema_data.get('cuisine'),
+                schema_data.get('recipeCuisine'),
+                schema_data.get('courseType')
+            ]
+
+            for category in category_candidates:
+                if category:
+                    recipe['genre'] = self._determine_genre(category)
+                    break
+
+            # Validate recipe with detailed logging
+            has_name = bool(recipe['name'] and len(recipe['name']) > 2)
+            has_ingredients = len(recipe['ingredients']) >= 1
+            has_instructions = len(recipe['instructions']) >= 1
+
+            logger.info(f"Recipe validation:")
+            logger.info(f"  Name: {has_name} ('{recipe['name']}')")
+            logger.info(f"  Ingredients: {has_ingredients} ({len(recipe['ingredients'])} found)")
+            logger.info(f"  Instructions: {has_instructions} ({len(recipe['instructions'])} found)")
+
+            if has_name and has_ingredients and has_instructions:
+                logger.info(f"Successfully parsed recipe: {recipe['name']}")
+                return recipe
+            else:
+                logger.warning("Incomplete recipe data - rejecting")
+                logger.info(f"Missing fields:")
+                if not has_name:
+                    logger.info(f"  - Name (found: '{recipe['name']}')")
+                if not has_ingredients:
+                    logger.info(f"  - Ingredients (found: {len(recipe['ingredients'])})")
+                if not has_instructions:
+                    logger.info(f"  - Instructions (found: {len(recipe['instructions'])})")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error parsing recipe schema: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return None
+
+    def _extract_text_value(self, value) -> str:
+        """Extract text from various JSON-LD value formats with enhanced error handling"""
+        try:
+            if value is None:
+                return ''
+            elif isinstance(value, str):
+                return value.strip()
+            elif isinstance(value, dict):
+                # Try multiple common text fields
+                text_candidates = [
+                    value.get('@value', ''),
+                    value.get('text', ''),
+                    value.get('#text', ''),
+                    value.get('name', ''),
+                    value.get('value', '')
+                ]
+
+                for candidate in text_candidates:
+                    if candidate and isinstance(candidate, str):
+                        return candidate.strip()
+
+                # If no text fields found, convert dict to string as fallback
+                return str(value).strip()
+
+            elif isinstance(value, list) and len(value) > 0:
+                # Recursively extract from first non-empty item
+                for item in value:
+                    result = self._extract_text_value(item)
+                    if result:
+                        return result
+                return ''
+            else:
+                return str(value).strip() if value else ''
+        except Exception as e:
+            logger.debug(f"Error extracting text value from {type(value)}: {e}")
+            return ''
+
+    def _extract_instruction_text(self, inst_item) -> str:
+        """Extract instruction text from HowToStep or other formats with enhanced error handling"""
+        try:
+            if inst_item is None:
+                return ''
+            elif isinstance(inst_item, str):
+                return inst_item.strip()
+            elif isinstance(inst_item, dict):
+                # Try multiple common instruction text fields
+                text_candidates = [
+                    inst_item.get('text', ''),
+                    inst_item.get('name', ''),
+                    inst_item.get('@value', ''),
+                    inst_item.get('description', ''),
+                    inst_item.get('#text', ''),
+                    inst_item.get('instruction', ''),
+                    inst_item.get('step', ''),
+                    inst_item.get('direction', '')
+                ]
+
+                for candidate in text_candidates:
+                    if candidate and isinstance(candidate, str):
+                        return candidate.strip()
+
+                # Convert to string as fallback
+                return str(inst_item).strip()
+            else:
+                return str(inst_item).strip() if inst_item else ''
+        except Exception as e:
+            logger.debug(f"Error extracting instruction text from {type(inst_item)}: {e}")
+            return ''
+
+    def _extract_serving_size(self, recipe_yield) -> Optional[int]:
+        """Extract serving size from various formats"""
+        try:
+            if isinstance(recipe_yield, (list, tuple)) and len(recipe_yield) > 0:
+                recipe_yield = recipe_yield[0]
+
+            if isinstance(recipe_yield, str):
+                match = re.search(r'\d+', recipe_yield)
+                if match:
+                    serving_size = int(match.group())
+                    if 1 <= serving_size <= 50:
+                        return serving_size
+            elif isinstance(recipe_yield, (int, float)):
+                serving_size = int(recipe_yield)
+                if 1 <= serving_size <= 50:
+                    return serving_size
+        except:
+            pass
+        return None
+
+    def _determine_genre(self, category) -> str:
+        """Determine recipe genre from category"""
+        if isinstance(category, list) and len(category) > 0:
+            category = category[0]
+
+        category_str = str(category).lower()
+
+        if 'dessert' in category_str or 'sweet' in category_str:
+            return 'dessert'
+        elif 'breakfast' in category_str:
+            return 'breakfast'
+        elif 'lunch' in category_str:
+            return 'lunch'
+        elif any(word in category_str for word in ['dinner', 'main', 'entree', 'supper']):
+            return 'dinner'
+        elif 'snack' in category_str:
+            return 'snack'
+        elif 'appetizer' in category_str or 'starter' in category_str:
+            return 'appetizer'
+        else:
+            return 'dinner'
+
+    def _extract_recipe_with_enhanced_parsing(self, html_content: str, url: str, ingredient: str) -> Optional[Dict]:
+        """Enhanced HTML parsing to extract recipe data without AI"""
+        try:
+            if not BS4_AVAILABLE:
+                return None
+
+            soup = BeautifulSoup(html_content, 'html.parser')
+
+            # Look for common recipe container patterns
+            recipe_containers = soup.find_all(['div', 'section', 'article'],
+                                              class_=re.compile(r'recipe|Recipe|RECIPE', re.I))
+
+            if not recipe_containers:
+                recipe_containers = soup.find_all(['div', 'section', 'article'],
+                                                  attrs={'itemtype': re.compile(r'Recipe', re.I)})
+
+            if not recipe_containers:
+                return None
+
+            recipe_data = {
+                'name': '',
+                'description': '',
+                'ingredients': [],
+                'instructions': [],
+                'serving_size': 4,
+                'prep_time': 0,
+                'cook_time': 0,
+                'genre': 'dinner',
+                'notes': [],
+                'dietary_restrictions': [],
+                'url': url,
+                'source': self._extract_domain_name(url)
+            }
+
+            # Extract title
+            title_selectors = [
+                'h1.recipe-title', 'h1[itemprop="name"]', 'h1.recipe-name',
+                '.recipe-title', '.recipe-name', 'h1', 'title'
+            ]
+
+            for selector in title_selectors:
+                title_elem = soup.select_one(selector)
+                if title_elem and title_elem.get_text().strip():
+                    recipe_data['name'] = title_elem.get_text().strip()
+                    break
+
+            # Extract ingredients
+            ingredient_selectors = [
+                '[itemprop="recipeIngredient"]',
+                '.recipe-ingredient', '.ingredient', '.ingredients li',
+                'ul.ingredients li', '.ingredient-list li'
+            ]
+
+            for selector in ingredient_selectors:
+                ingredients = soup.select(selector)
+                if ingredients:
+                    for ing in ingredients:
+                        ingredient_text = ing.get_text().strip()
+                        if ingredient_text and len(ingredient_text) > 2:
+                            parsed_ing = self._parse_ingredient_text(ingredient_text)
+                            if parsed_ing:
+                                recipe_data['ingredients'].append(parsed_ing)
+                    if recipe_data['ingredients']:
+                        break
+
+            # Extract instructions
+            instruction_selectors = [
+                '[itemprop="recipeInstructions"]',
+                '.recipe-instruction', '.instruction', '.instructions li',
+                'ol.instructions li', '.instruction-list li', '.directions li'
+            ]
+
+            for selector in instruction_selectors:
+                instructions = soup.select(selector)
+                if instructions:
+                    for inst in instructions:
+                        instruction_text = inst.get_text().strip()
+                        if instruction_text and len(instruction_text) > 5:
+                            recipe_data['instructions'].append(instruction_text)
+                    if recipe_data['instructions']:
+                        break
+
+            # Only return if we got meaningful data
+            if (recipe_data['name'] and
+                    len(recipe_data['ingredients']) >= 2 and
+                    len(recipe_data['instructions']) >= 1):
+                return recipe_data
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error in enhanced parsing: {e}")
+            return None
+
+    def _extract_microdata_recipe(self, soup) -> Optional[Dict]:
+        """Extract recipe data from microdata attributes"""
+        try:
+            recipe_containers = soup.find_all(attrs={'itemtype': re.compile(r'Recipe', re.I)})
+
+            if not recipe_containers:
+                return None
+
+            container = recipe_containers[0]
+
+            recipe = {
+                'name': '',
+                'description': '',
+                'ingredients': [],
+                'instructions': [],
+                'serving_size': 4,
+                'prep_time': 0,
+                'cook_time': 0,
+                'genre': 'dinner',
+                'notes': [],
+                'dietary_restrictions': []
+            }
+
+            # Extract name
+            name_elem = container.find(attrs={'itemprop': 'name'})
+            if name_elem:
+                recipe['name'] = name_elem.get_text().strip()
+
+            # Extract description
+            desc_elem = container.find(attrs={'itemprop': 'description'})
+            if desc_elem:
+                recipe['description'] = desc_elem.get_text().strip()
+
+            # Extract ingredients
+            ingredient_elems = container.find_all(attrs={'itemprop': 'recipeIngredient'})
+            for ing_elem in ingredient_elems:
+                ingredient_text = ing_elem.get_text().strip()
+                if ingredient_text:
+                    parsed_ing = self._parse_ingredient_text(ingredient_text)
+                    if parsed_ing:
+                        recipe['ingredients'].append(parsed_ing)
+
+            # Extract instructions
+            instruction_elems = container.find_all(attrs={'itemprop': 'recipeInstructions'})
+            for inst_elem in instruction_elems:
+                instruction_text = inst_elem.get_text().strip()
+                if instruction_text:
+                    recipe['instructions'].append(instruction_text)
+
+            # Extract times
+            prep_elem = container.find(attrs={'itemprop': 'prepTime'})
+            if prep_elem:
+                prep_time = prep_elem.get('datetime') or prep_elem.get_text()
+                recipe['prep_time'] = self._parse_iso_duration(prep_time)
+
+            cook_elem = container.find(attrs={'itemprop': 'cookTime'})
+            if cook_elem:
+                cook_time = cook_elem.get('datetime') or cook_elem.get_text()
+                recipe['cook_time'] = self._parse_iso_duration(cook_time)
+
+            # Extract yield/serving size
+            yield_elem = container.find(attrs={'itemprop': re.compile(r'recipeYield|yield', re.I)})
+            if yield_elem:
+                yield_text = yield_elem.get_text().strip()
+                serving_size = self._extract_serving_size(yield_text)
+                if serving_size:
+                    recipe['serving_size'] = serving_size
+
+            # Only return if we got meaningful data
+            if (recipe['name'] and
+                    len(recipe['ingredients']) >= 2 and
+                    len(recipe['instructions']) >= 1):
+                logger.info("Successfully extracted recipe from microdata")
+                return recipe
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error extracting microdata: {e}")
+            return None
+
+    def _try_ai_parsing_with_limits(self, page_content: str, url: str, ingredient: str) -> Optional[Dict]:
+        """Try AI parsing with strict limits - LAST RESORT ONLY"""
+        try:
+            import time
+            start_time = time.time()
+
+            logger.warning(f"Falling back to AI parsing for {url} - structured data extraction failed!")
+
+            from ..utils.ai_helper import ai_helper
+
+            if not ai_helper or not ai_helper.is_configured():
+                logger.info("AI helper not configured, skipping AI parsing")
+                return None
+
+            clean_text = self._extract_clean_recipe_text(page_content)
+            if not clean_text or len(clean_text) < 100:
+                logger.debug("Insufficient clean text for AI parsing")
+                return None
+
+            max_ai_content = 2500
+            if len(clean_text) > max_ai_content:
+                clean_text = clean_text[:max_ai_content] + "..."
+
+            if time.time() - start_time > 3:
+                logger.warning(f"Skipping AI parsing for {url} due to timeout")
+                return None
+
             try:
-                from ..utils.ai_helper import ai_helper
-
-                if ai_helper and ai_helper.is_configured():
-                    clean_text = self._extract_clean_recipe_text(page_content)
-
-                    if clean_text and len(clean_text) > 100:
-                        try:
-                            response = ai_helper.client.chat.completions.create(
-                                model=ai_helper.model,
-                                messages=[
-                                    {"role": "system", "content": """Extract recipe information from webpage content and return as JSON.
+                response = ai_helper.client.chat.completions.create(
+                    model=ai_helper.model,
+                    messages=[
+                        {"role": "system", "content": """Extract recipe information from webpage content and return as JSON.
 Extract these fields (return null if recipe not found):
 {
   "name": "recipe title",
@@ -318,122 +1246,39 @@ Extract these fields (return null if recipe not found):
   "dietary_restrictions": ["gluten_free", "dairy_free", "egg_free"]
 }
 Return ONLY the JSON object."""},
-                                    {"role": "user", "content": f"Extract recipe from: {clean_text[:4000]}"}
-                                ],
-                                max_tokens=1200,
-                                temperature=0.0
-                            )
+                        {"role": "user", "content": f"Extract recipe from: {clean_text}"}
+                    ],
+                    max_tokens=600,
+                    temperature=0.0,
+                    timeout=8
+                )
 
-                            result_text = response.choices[0].message.content.strip()
-                            if result_text.startswith("```json"):
-                                result_text = result_text[7:-3]
-                            elif result_text.startswith("```"):
-                                result_text = result_text[3:-3]
+                result_text = response.choices[0].message.content.strip()
+                if result_text.startswith("```json"):
+                    result_text = result_text[7:-3]
+                elif result_text.startswith("```"):
+                    result_text = result_text[3:-3]
 
-                            parsed_recipe = json.loads(result_text)
+                parsed_recipe = json.loads(result_text)
 
-                            if parsed_recipe and parsed_recipe.get('name'):
-                                parsed_recipe['url'] = url
-                                parsed_recipe['source'] = self._extract_domain_name(url)
-                                return parsed_recipe
+                if parsed_recipe and parsed_recipe.get('name'):
+                    parsed_recipe['url'] = url
+                    parsed_recipe['source'] = self._extract_domain_name(url)
+                    logger.info(f"AI parsing successful for {url}: {parsed_recipe.get('name')}")
+                    return parsed_recipe
 
-                        except (json.JSONDecodeError, KeyError) as e:
-                            logger.error(f"Error parsing AI response: {e}")
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.error(f"Error parsing AI response for {url}: {e}")
+            except Exception as e:
+                logger.warning(f"AI parsing timeout or error for {url}: {e}")
 
-            except ImportError:
-                logger.warning("AI Helper not available for recipe parsing")
+            return None
 
-            # Fallback to basic recipe creation
-            return self._create_basic_recipe_from_page(page_content, url, ingredient)
-
+        except ImportError:
+            logger.info("AI Helper not available for recipe parsing")
+            return None
         except Exception as e:
-            logger.error(f"Error scraping recipe from {url}: {e}")
-            return None
-
-    def _extract_structured_recipe_data(self, html_content: str) -> Optional[Dict]:
-        """Extract recipe data from JSON-LD structured data"""
-        try:
-            if BS4_AVAILABLE:
-                soup = BeautifulSoup(html_content, 'html.parser')
-                json_scripts = soup.find_all('script', type='application/ld+json')
-
-                for script in json_scripts:
-                    try:
-                        data = json.loads(script.string)
-                        if isinstance(data, list):
-                            data = data[0] if data else {}
-
-                        if data.get('@type') == 'Recipe':
-                            return self._parse_recipe_schema(data)
-
-                        if 'graph' in data:
-                            for item in data['graph']:
-                                if item.get('@type') == 'Recipe':
-                                    return self._parse_recipe_schema(item)
-
-                    except (json.JSONDecodeError, KeyError):
-                        continue
-
-            return None
-
-        except Exception as e:
-            logger.error(f"Error extracting structured data: {e}")
-            return None
-
-    def _parse_recipe_schema(self, schema_data: Dict) -> Optional[Dict]:
-        """Parse Recipe schema data into our format"""
-        try:
-            recipe = {
-                'name': schema_data.get('name', ''),
-                'description': schema_data.get('description', ''),
-                'ingredients': [],
-                'instructions': [],
-                'serving_size': 4,
-                'prep_time': 0,
-                'cook_time': 0,
-                'genre': 'dinner',
-                'notes': [],
-                'dietary_restrictions': []
-            }
-
-            recipe_ingredients = schema_data.get('recipeIngredient', [])
-            if isinstance(recipe_ingredients, list):
-                for ing_text in recipe_ingredients:
-                    parsed_ing = self._parse_ingredient_text(str(ing_text))
-                    if parsed_ing:
-                        recipe['ingredients'].append(parsed_ing)
-
-            instructions = schema_data.get('recipeInstructions', [])
-            if isinstance(instructions, list):
-                for inst in instructions:
-                    if isinstance(inst, str):
-                        recipe['instructions'].append(inst)
-                    elif isinstance(inst, dict):
-                        text = inst.get('text', inst.get('name', ''))
-                        if text:
-                            recipe['instructions'].append(text)
-
-            prep_time = schema_data.get('prepTime', '')
-            cook_time = schema_data.get('cookTime', '')
-            recipe['prep_time'] = self._parse_iso_duration(prep_time)
-            recipe['cook_time'] = self._parse_iso_duration(cook_time)
-
-            recipe_yield = schema_data.get('recipeYield', schema_data.get('yield', ''))
-            if recipe_yield:
-                try:
-                    match = re.search(r'\d+', str(recipe_yield))
-                    if match:
-                        recipe['serving_size'] = int(match.group())
-                except:
-                    pass
-
-            if recipe['name'] and len(recipe['ingredients']) > 0 and len(recipe['instructions']) > 0:
-                return recipe
-
-            return None
-
-        except Exception as e:
-            logger.error(f"Error parsing recipe schema: {e}")
+            logger.error(f"Error in AI parsing attempt: {e}")
             return None
 
     def _extract_clean_recipe_text(self, html_content: str) -> str:
@@ -484,26 +1329,54 @@ Return ONLY the JSON object."""},
                     title = re.sub(r'\s*\|\s*.*$', '', title)
                     title = re.sub(r'\s*-\s*.*$', '', title)
 
+            domain_name = self._extract_domain_name(url)
+
+            genre = 'dinner'
+            if any(word in title.lower() for word in ['cookie', 'cake', 'dessert', 'sweet']):
+                genre = 'dessert'
+            elif any(word in title.lower() for word in ['breakfast', 'pancake', 'cereal']):
+                genre = 'breakfast'
+            elif any(word in title.lower() for word in ['lunch', 'sandwich', 'salad']):
+                genre = 'lunch'
+
             return {
-                'name': title,
-                'description': f'Recipe found on {self._extract_domain_name(url)}',
+                'name': title if title != "Recipe" else f"{ingredient.title()} Recipe",
+                'description': f'Recipe found on {domain_name}. Visit the original page for complete details.',
                 'ingredients': [
-                    {'name': f'{ingredient} (see website for details)', 'quantity': 1, 'unit': 'recipe'}
+                    {'name': f'{ingredient} (see original recipe for details)', 'quantity': 1, 'unit': 'recipe'}
                 ],
                 'instructions': [
-                    f'Visit the original recipe at {url} for complete instructions'
+                    f'This recipe requires visiting the original page at {url} for complete instructions.',
+                    'The structured data could not be extracted automatically.'
                 ],
                 'serving_size': 4,
-                'prep_time': 30,
+                'prep_time': 15,
                 'cook_time': 30,
-                'genre': 'dinner',
-                'notes': [f'Original recipe from {self._extract_domain_name(url)}'],
-                'dietary_restrictions': []
+                'genre': genre,
+                'notes': [f'Original recipe from {domain_name}', 'Automatic extraction failed - manual review needed'],
+                'dietary_restrictions': [],
+                'url': url,
+                'source': domain_name,
+                'extraction_method': 'basic_fallback'
             }
 
         except Exception as e:
             logger.error(f"Error creating basic recipe: {e}")
-            return self._generate_fallback_recipe(ingredient)[0]
+            return {
+                'name': f"{ingredient.title()} Recipe",
+                'description': 'Recipe extraction failed',
+                'ingredients': [{'name': ingredient, 'quantity': 1, 'unit': 'recipe'}],
+                'instructions': [f'Visit {url} for the complete recipe'],
+                'serving_size': 4,
+                'prep_time': 0,
+                'cook_time': 0,
+                'genre': 'dinner',
+                'notes': ['Extraction failed'],
+                'dietary_restrictions': [],
+                'url': url,
+                'source': self._extract_domain_name(url),
+                'extraction_method': 'minimal_fallback'
+            }
 
     def _parse_ingredient_text(self, text: str) -> Optional[Dict]:
         """Parse ingredient text into quantity, unit, name"""
@@ -605,7 +1478,8 @@ Return ONLY the JSON object."""},
             "cuisine_type": "general"
         }]
 
-    def _generate_fallback_recipes_for_site(self, ingredient: str, website: str, criteria: Dict[str, Any]) -> List[Dict]:
+    def _generate_fallback_recipes_for_site(self, ingredient: str, website: str, criteria: Dict[str, Any]) -> List[
+        Dict]:
         """Generate fallback recipes when site-specific search fails"""
         website_name = website.replace('.com', '').title()
 
@@ -656,36 +1530,61 @@ Return ONLY the JSON object."""},
             "cuisine_type": "popular"
         }]
 
-    def test_search_url(self, ingredient: str, website: str) -> Dict[str, Any]:
-        """Test function to debug search URLs"""
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get recipe cache statistics for monitoring"""
+        return recipe_cache.get_stats()
+
+    def clear_cache(self) -> str:
+        """Clear the recipe cache"""
+        recipe_cache.clear()
+        return "Recipe cache cleared successfully"
+
+    def debug_json_ld_extraction(self, url: str) -> Dict[str, Any]:
+        """Debug function to inspect JSON-LD data from a specific URL"""
         try:
-            search_urls = self._build_search_urls(ingredient, website)
-            results = {}
+            page_content = self._fetch_webpage_content(url)
+            if not page_content:
+                return {"error": "Could not fetch page content"}
 
-            for i, url in enumerate(search_urls):
-                logger.info(f"Testing URL {i + 1}: {url}")
-                content = self._fetch_webpage_content(url)
+            if not BS4_AVAILABLE:
+                return {"error": "BeautifulSoup not available"}
 
-                results[f"url_{i + 1}"] = {
-                    "url": url,
-                    "success": content is not None,
-                    "content_length": len(content) if content else 0,
-                    "has_recipe_links": False
+            soup = BeautifulSoup(page_content, 'html.parser')
+            json_scripts = soup.find_all('script', type='application/ld+json')
+
+            debug_info = {
+                "url": url,
+                "total_scripts": len(json_scripts),
+                "scripts": []
+            }
+
+            for i, script in enumerate(json_scripts):
+                script_info = {
+                    "index": i,
+                    "has_content": bool(script.string),
+                    "content_length": len(script.string) if script.string else 0,
+                    "content_preview": script.string[:500] if script.string else None,
+                    "parse_success": False,
+                    "parse_error": None,
+                    "structure": None
                 }
 
-                if content:
-                    # Quick check for recipe-related content
-                    content_lower = content.lower()
-                    recipe_indicators = ['recipe', 'ingredient', 'instruction', 'cooking', 'baking']
-                    results[f"url_{i + 1}"]["has_recipe_content"] = any(
-                        word in content_lower for word in recipe_indicators)
+                if script.string:
+                    try:
+                        data = json.loads(script.string)
+                        script_info["parse_success"] = True
+                        script_info["structure"] = {
+                            "type": str(type(data).__name__),
+                            "keys": list(data.keys()) if isinstance(data, dict) else None,
+                            "length": len(data) if isinstance(data, list) else None,
+                            "has_recipe": self._find_recipe_in_data(data) is not None
+                        }
+                    except Exception as e:
+                        script_info["parse_error"] = str(e)
 
-                    # Try to extract some URLs
-                    recipe_urls = self._extract_recipe_urls_from_search(content, website)
-                    results[f"url_{i + 1}"]["recipe_urls_found"] = len(recipe_urls)
-                    results[f"url_{i + 1}"]["sample_urls"] = recipe_urls[:3]
+                debug_info["scripts"].append(script_info)
 
-            return results
+            return debug_info
 
         except Exception as e:
             return {"error": str(e)}
