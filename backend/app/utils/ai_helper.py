@@ -366,45 +366,25 @@ class RupertAIHelper:
 
         return False
 
-    def _generate_confused_response(self, user_message: str) -> str:
-        """Generate a fun 'I don't understand' response with Rupert's personality"""
-        # For gibberish/nonsensical input
-        if self._detect_unclear_or_nonsensical_request(user_message):
-            gibberish_responses = [
-                "🤨 Umm... I'm a recipe guru, not a decoder ring! That looked like someone sneezed on their keyboard. Could you try that again in human? 😅",
-                "😵‍💫 Whoa there! I speak fluent Recipe, basic English, and a little Kitchen Spanish, but whatever language that was just broke my circuits! Try again? 🍳",
-                "🤖 *Error 404: Comprehension not found* - Hey, I'm a cooking assistant, not a cryptographer! Mind giving that another shot in plain English? 😄",
-                "🙃 I'd love to help, but I think you just spoke in ancient keyboard! I'm more of a 'flour and sugar' guy than a 'djfhsdjfhsd' expert. What did you need help with? 🍽️",
-                "😂 Did your cat walk across the keyboard? Because I understand recipes better than... whatever that was! Try me again with some actual words! 🐱‍👤",
-                "🧐 I'm Rupert the Recipe Assistant, not Rupert the Mind Reader! That message looked like alphabet soup that exploded. Care to try again? 🍲"
-            ]
-            import random
-            return random.choice(gibberish_responses)
+    async def _generate_confused_response(self, user_message: str) -> str:
+        """Generate a fun 'I don't understand' response with Rupert's personality using ChatGPT"""
+        try:
+            # For gibberish/nonsensical input
+            if self._detect_unclear_or_nonsensical_request(user_message):
+                return await self._generate_contextual_response("gibberish", user_message)
 
-        # For clear requests outside his expertise
-        elif self._detect_non_recipe_but_clear_request(user_message):
-            out_of_scope_responses = [
-                "🍳 Hey, I'm a recipe guru, not a circus monkey! I stick to what I know best - delicious food and cooking tips. Got any culinary questions for me? 😄",
-                "😅 I'd love to help, but I'm more of a 'what's for dinner' expert than a 'how to fix your life' expert! Try me with something cooking-related? 🍽️",
-                "🤷‍♂️ That's way outside my kitchen expertise! I'm like a really smart cookbook that can chat - great with recipes, not so much with... well, everything else! Got any food questions? 🍳",
-                "😊 Ooh, that's beyond my culinary superpowers! I'm basically a food-focused AI who gets really excited about ingredients and cooking techniques. What's cooking? (Literally!) 👨‍🍳",
-                "🍴 I'm flattered you think I can do everything, but I'm strictly a kitchen assistant! Think of me as your personal sous chef, not your personal Google. What are we cooking up today? 😉",
-                "🥄 Sorry, but that's outside my recipe repertoire! I'm like a really enthusiastic cookbook that learned to text. Got any delicious questions for me instead? 🍰"
-            ]
-            import random
-            return random.choice(out_of_scope_responses)
+            # For clear requests outside his expertise
+            elif self._detect_non_recipe_but_clear_request(user_message):
+                return await self._generate_contextual_response("out_of_scope", user_message)
 
-        # For vague but potentially recipe-related requests
-        else:
-            vague_responses = [
-                "🤔 I think I know what you're getting at, but could you be a bit more specific? Are you looking for a recipe, cooking tips, or something else food-related? I'm all ears! 👂",
-                "😊 I'm picking up some cooking vibes from your message, but I'm not quite sure what you need! Are you looking for recipes, cooking advice, or help with ingredients? Give me a bit more to work with! 🍳",
-                "🍽️ I sense some culinary curiosity in there, but I'm not totally sure what you're after! Are you hunting for a specific recipe, need cooking help, or something else? Fill me in! 😄",
-                "🧐 My recipe-sense is tingling, but I need a few more details! Are you looking to cook something specific, need ingredient suggestions, or have a cooking question? Help me help you! 👨‍🍳",
-                "😅 I think we're in the same kitchen, but maybe different recipes! Could you give me a bit more detail about what you're looking for? I'm here to help with all things food! 🍴"
-            ]
-            import random
-            return random.choice(vague_responses)
+            # For vague but potentially recipe-related requests
+            else:
+                return await self._generate_contextual_response("vague", user_message)
+
+        except Exception as e:
+            logger.error(f"Error generating confused response: {e}")
+            # Simple fallback if ChatGPT fails
+            return "🤔 I'm a bit confused, but that's okay! I'm Rupert, your cooking assistant, and I'm here to help with recipes and cooking. What delicious creation can I help you with today? 🍳"
 
     # === INTENT DETECTION ===
 
@@ -427,6 +407,146 @@ class RupertAIHelper:
         except Exception as e:
             logger.error(f"Error extracting previous search criteria: {e}")
             return None
+
+    def _extract_recent_recipes(self, conversation_history: Optional[List[Dict]]) -> List[Dict[str, Any]]:
+        """Extract recipes that were recently shown to the user"""
+        if not conversation_history:
+            return []
+
+        try:
+            recent_recipes = []
+            # Look through recent assistant messages for recipe data
+            for message in reversed(conversation_history[-5:]):  # Check last 5 messages
+                if message.get('role') == 'assistant':
+                    content = message.get('content', '')
+                    # Look for action buttons that contain recipe data
+                    if '[ACTION_BUTTON:' in content:
+                        # This is a simplified extraction - in a real implementation,
+                        # you might want to parse the JSON more carefully
+                        continue
+
+            # For now, return empty list - we'll rely on temp storage and context
+            # In future iterations, this could parse recent recipe presentations
+            return recent_recipes
+
+        except Exception as e:
+            logger.error(f"Error extracting recent recipes: {e}")
+            return []
+
+    def _detect_scaling_request(self, user_message: str) -> Optional[Dict[str, Any]]:
+        """Detect if user is requesting recipe scaling"""
+        if not self.are_tools_available():
+            return None
+
+        scaling_tool = get_tool('scale_recipe')
+        if not scaling_tool:
+            return None
+
+        return scaling_tool.detect_scaling_request(user_message)
+
+    async def _handle_scaling_request(self, user_message: str, scaling_info: Dict[str, Any],
+                                      conversation_history: Optional[List[Dict]]) -> str:
+        """Handle recipe scaling requests"""
+        try:
+            # IMPROVED: Check if this is a context-dependent request ("scale this to 4")
+            if scaling_info.get('context_dependent', False):
+                # User said "scale this" - use previous search criteria
+                current_criteria = self._extract_previous_search_criteria(conversation_history)
+
+                if not current_criteria:
+                    return await self._generate_contextual_response(
+                        "vague",
+                        "I'd love to scale a recipe for you, but I need to know which recipe you're referring to. Could you search for a recipe first, then ask me to scale it?",
+                        conversation_history
+                    )
+            else:
+                # Extract search criteria from the CURRENT scaling request message
+                current_criteria = self.extract_search_intent(user_message)
+
+                if not current_criteria:
+                    # Fallback to previous criteria if current message doesn't contain recipe info
+                    current_criteria = self._extract_previous_search_criteria(conversation_history)
+
+            if not current_criteria:
+                return await self._generate_contextual_response(
+                    "vague",
+                    "I'd love to scale a recipe for you, but I need to know which recipe you're referring to. Could you search for a recipe first, then ask me to scale it?",
+                    conversation_history
+                )
+
+            # Search for recipes using the current criteria
+            internal_recipes = []
+            if current_criteria.get('ingredient') != 'recipe':
+                internal_recipes = self._enhanced_database_search(current_criteria)
+
+            if not internal_recipes:
+                return await self._generate_contextual_response(
+                    "vague",
+                    "I don't see any recipes matching that description to scale. Could you search for the recipe first, then ask me to scale it?",
+                    conversation_history
+                )
+
+            # Use the first recipe found (should now be the most relevant)
+            recipe_to_scale = internal_recipes[0]
+
+            # Calculate new serving size
+            new_serving_size = None
+            original_serving_size = recipe_to_scale.get('serving_size', 4)
+
+            if scaling_info['action'] == 'double':
+                new_serving_size = original_serving_size * 2
+            elif scaling_info['action'] == 'half':
+                new_serving_size = max(1, original_serving_size // 2)
+            elif scaling_info['action'] == 'triple':
+                new_serving_size = original_serving_size * 3
+            elif scaling_info['action'] == 'scale' and scaling_info.get('new_serving_size'):
+                new_serving_size = scaling_info['new_serving_size']
+
+            if not new_serving_size or new_serving_size <= 0:
+                return await self._generate_contextual_response(
+                    "vague",
+                    "I couldn't figure out what serving size you want. Could you try asking like 'scale this recipe for 8 people' or 'double this recipe'?",
+                    conversation_history
+                )
+
+            # Scale the recipe
+            scaling_tool = get_tool('scale_recipe')
+            scaled_recipe = scaling_tool.execute(recipe_to_scale, new_serving_size)
+
+            if not scaled_recipe:
+                return "I had trouble scaling that recipe. Please try again!"
+
+            # Store the scaled recipe temporarily like external recipes
+            formatter_tool = get_tool('format_recipe_data')
+            if formatter_tool:
+                formatted_scaled_recipe = formatter_tool.execute(scaled_recipe)
+                if formatted_scaled_recipe:
+                    temp_id = self.store_temp_recipe(formatted_scaled_recipe)
+                    scaled_recipe['temp_id'] = temp_id
+                    scaled_recipe['url'] = f"/add-recipe?temp_id={temp_id}"
+
+            # Create response with scaled recipe
+            recipe_name = recipe_to_scale.get('name', 'Recipe')
+            action_text = {
+                'double': 'doubled',
+                'half': 'halved',
+                'triple': 'tripled',
+                'scale': f'scaled to {new_serving_size} servings'
+            }.get(scaling_info['action'], f'scaled to {new_serving_size} servings')
+
+            response = f"Perfect! I've {action_text} the {recipe_name} recipe. Here's your scaled version:"
+
+            # Create buttons for the scaled recipe
+            buttons = self.create_recipe_buttons(scaled_recipe, "external")
+            for button in buttons:
+                response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error handling scaling request: {e}")
+            return "I had trouble scaling that recipe. Could you try searching for a recipe first, then asking me to scale it?"
+
 
     def _is_capability_question(self, user_message: str) -> bool:
         """Detect if the user is asking about Rupert's capabilities"""
@@ -1153,7 +1273,11 @@ class RupertAIHelper:
             if (self._detect_unclear_or_nonsensical_request(user_message) or
                     self._detect_non_recipe_but_clear_request(user_message) or
                     not self._is_recipe_related_query(user_message, {})):
-                return await self._generate_confused_response(user_message)
+                try:
+                    return await self._generate_confused_response(user_message)
+                except Exception as e:
+                    logger.error(f"Error in confused response: {e}")
+                    return await self._generate_contextual_response("vague", user_message, conversation_history)
 
             if self._is_capability_question(user_message):
                 return self._generate_capability_response(user_message)
@@ -1564,6 +1688,17 @@ Would you like me to search for something specific?"""
             if creation_intent == "help_create":
                 button = self.create_simple_add_button()
                 return f"I'd be happy to help you create a new recipe! Click the button below to get started.\n\n[ACTION_BUTTON:{json.dumps(button)}]"
+
+            # NEW: Check for recipe scaling requests
+            scaling_info = self._detect_scaling_request(user_message)
+            if scaling_info:
+                logger.info(f"Detected scaling request: {scaling_info}")
+                return await self._handle_scaling_request(user_message, scaling_info, conversation_history)
+
+            scaling_info = self._detect_scaling_request(user_message)
+            if scaling_info:
+                logger.info(f"Detected scaling request: {scaling_info}")
+                return await self._handle_scaling_request(user_message, scaling_info, conversation_history)
 
             is_recipe_related = self._is_recipe_related_query(user_message, search_criteria)
 
