@@ -171,6 +171,10 @@ class RupertAIHelper:
         """Detect if the user's message is unclear, nonsensical, or gibberish"""
         user_lower = user_message.lower().strip()
 
+        # EARLY CHECK: Don't flag conversational validation phrases as gibberish
+        if self._is_conversational_validation(user_message):
+            return False
+
         # Very short messages that aren't clear
         if len(user_lower) < 3:
             return True
@@ -206,32 +210,75 @@ class RupertAIHelper:
             meaningful_word_count = 0
 
             for word in words:
+                # Strip punctuation for better word recognition
+                clean_word = re.sub(r'[^\w]', '', word)
+
                 # Skip very common words but count meaningful words
-                if word in ['i', 'a', 'an', 'the', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'and', 'or', 'but']:
+                if clean_word in ['i', 'a', 'an', 'the', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'and', 'or',
+                                  'but']:
                     continue
 
                 meaningful_word_count += 1
 
                 # Count suspicious patterns:
                 # 1. Words with unusual consonant clusters (like "jhst", "globbla")
-                if re.search(r'[bcdfghjklmnpqrstvwxyz]{3,}', word):
+                if re.search(r'[bcdfghjklmnpqrstvwxyz]{3,}', clean_word):
                     suspicious_count += 1
                 # 2. Words with doubled letters at end (like "listt", "helpp")
-                elif re.search(r'(.)\1$', word) and len(word) > 3:
+                elif re.search(r'(.)\1$', clean_word) and len(clean_word) > 3:
                     suspicious_count += 1
                 # 3. Very short "words" that aren't real (2-3 chars, not common abbreviations)
-                elif len(word) <= 3 and word not in ['hi', 'ok', 'yes', 'no', 'can', 'get', 'eat', 'add', 'try', 'mix']:
-                    common_short_words = ['is', 'am', 'it', 'me', 'we', 'he', 'be', 'do', 'go', 'up', 'so', 'my', 'us']
-                    if word not in common_short_words:
+                elif len(clean_word) <= 3 and clean_word not in ['hi', 'ok', 'yes', 'no', 'can', 'get', 'eat', 'add',
+                                                                 'try', 'mix']:
+                    # EXPANDED: Add more common short words including conversational ones
+                    common_short_words = ['is', 'am', 'it', 'me', 'we', 'he', 'be', 'do', 'go', 'up', 'so', 'my', 'us',
+                                          'you', 'now', 'see', 'her', 'him', 'she', 'how', 'why', 'who', 'did', 'had',
+                                          'has', 'was', 'are', 'not', 'out', 'new', 'old', 'one', 'two', 'all', 'any']
+                    if clean_word not in common_short_words:
                         suspicious_count += 1
                 # 4. Medium length words with no vowels (but be more careful here)
-                elif len(word) >= 4 and not re.search(r'[aeiou]', word):
+                elif len(clean_word) >= 4 and not re.search(r'[aeiou]', clean_word):
                     real_consonant_words = ['gym', 'fly', 'try', 'dry', 'fry', 'shy', 'sky', 'why']
-                    if word not in real_consonant_words:
+                    if clean_word not in real_consonant_words:
                         suspicious_count += 1
 
-            # If more than half the meaningful words are suspicious, it's probably gibberish
-            if meaningful_word_count > 0 and suspicious_count >= max(2, meaningful_word_count // 2):
+            # IMPROVED THRESHOLD: Be more lenient with normal conversational English
+            # If more than 60% of meaningful words are suspicious, it's probably gibberish
+            if meaningful_word_count > 0 and suspicious_count >= max(3, int(meaningful_word_count * 0.6)):
+                return True
+
+        return False
+
+    def _is_conversational_validation(self, user_message: str) -> bool:
+        """Detect conversational validation phrases that should get normal responses"""
+        user_lower = user_message.lower().strip()
+
+        # Common conversational validation phrases
+        validation_phrases = [
+            "can you understand me", "do you understand me", "can you hear me",
+            "are you there", "are you listening", "can you see this",
+            "does this make sense", "is this working", "can you help me",
+            "do you get it", "are you following", "can you comprehend",
+            "are you understanding", "can you process this"
+        ]
+
+        # Check for exact or partial matches
+        for phrase in validation_phrases:
+            if phrase in user_lower:
+                return True
+
+        # Check for simple yes/no questions about understanding
+        understanding_patterns = [
+            r'\bcan you understand\b',
+            r'\bdo you understand\b',
+            r'\bcan you help\b',
+            r'\bare you able to\b',
+            r'\bcan you see\b',
+            r'\bcan you hear\b'
+        ]
+
+        for pattern in understanding_patterns:
+            if re.search(pattern, user_lower):
                 return True
 
         return False
@@ -978,6 +1025,18 @@ class RupertAIHelper:
                                                       conversation_history: Optional[List[Dict]]) -> str:
         """Generate response for general, non-recipe conversation"""
         try:
+            # Check for conversational validation first
+            if self._is_conversational_validation(user_message):
+                validation_responses = [
+                    "Yes, I can understand you perfectly! 😊 I'm Rupert, your friendly cooking assistant. What delicious recipe adventure can I help you with today?",
+                    "Absolutely! I understand you just fine! 🍳 I'm here and ready to help with all your cooking and recipe needs. What would you like to cook?",
+                    "Of course I can understand you! 👨‍🍳 I'm Rupert, and I'm here to help make your kitchen adventures amazing. What recipe can I help you find today?",
+                    "Yes indeed! I hear you loud and clear! 🍽️ I'm your culinary companion Rupert, ready to help with recipes, cooking tips, or anything food-related. What's cooking?",
+                    "Perfectly clear! 😄 I'm Rupert, your recipe guru, and I'm all ears for your cooking questions. What delicious creation are you thinking about making?"
+                ]
+                import random
+                return random.choice(validation_responses)
+
             # First check if this is a confused/unclear request
             if (self._detect_unclear_or_nonsensical_request(user_message) or
                     self._detect_non_recipe_but_clear_request(user_message) or
