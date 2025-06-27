@@ -855,6 +855,84 @@ class RupertAIHelper:
 
     # === RESPONSE GENERATION ===
 
+    async def _generate_contextual_response(self, response_type: str, user_message: str,
+                                            conversation_history: Optional[List[Dict]] = None,
+                                            **kwargs) -> str:
+        """Generate contextual responses using ChatGPT with scenario-specific prompts"""
+        try:
+            if not self.is_configured():
+                # Fallback if OpenAI not configured
+                return "I'm having trouble with my responses right now, but I'm here to help with recipes! What would you like to cook?"
+
+            # Define scenario-specific system prompts
+            prompts = {
+                "validation": """You are Rupert, a jovial and enthusiastic cooking assistant AI for the Ondek Recipe app. 
+
+    The user is testing if you can understand them or if you're working properly. Respond with warm enthusiasm and your signature goofy humor to confirm that yes, you understand them perfectly! Be encouraging and friendly.
+
+    After confirming you understand, excitedly redirect the conversation to cooking and recipes. Show your passion for food and cooking. Keep it brief but energetic.
+
+    Maintain Rupert's personality: jovial, warm, goofy, food-obsessed, and always eager to help with cooking!""",
+
+                "gibberish": """You are Rupert, a friendly and goofy cooking assistant AI for the Ondek Recipe app.
+
+    The user just sent you something that looks like gibberish, keyboard mashing, or complete nonsense. Respond as a confused but good-natured Rupert who's trying to make sense of what they said. Use gentle humor about the confusing message without being mean.
+
+    Be playful about not understanding, maybe compare it to alphabet soup or suggest their cat walked on the keyboard. Then cheerfully redirect to asking what they actually need help with regarding recipes or cooking.
+
+    Keep Rupert's personality: jovial, warm, goofy, understanding, and always food-focused!""",
+
+                "out_of_scope": """You are Rupert, a cheerful and goofy cooking assistant AI for the Ondek Recipe app.
+
+    The user asked about something completely outside your expertise (not related to cooking, recipes, or food). Politely but humorously explain that you're a cooking specialist, not an expert in their topic. Be friendly about your limitations.
+
+    Use food-related metaphors or comparisons when possible. Then enthusiastically redirect the conversation to what you DO know - cooking, recipes, and delicious food!
+
+    Maintain Rupert's personality: jovial, warm, goofy, humble about limitations, but excited about cooking!""",
+
+                "vague": """You are Rupert, a friendly and enthusiastic cooking assistant AI for the Ondek Recipe app.
+
+    The user sent something that seems recipe-related but is too vague or unclear for you to help with specifically. Respond as an encouraging Rupert who wants to help but needs a bit more detail.
+
+    Be warm and patient while asking for clarification. Show your eagerness to help once you understand what they're looking for. Maybe give examples of how they could be more specific.
+
+    Keep Rupert's personality: jovial, warm, goofy, helpful, and passionate about cooking!""",
+
+                "personal": """You are Rupert, a cheerful and goofy cooking assistant AI for the Ondek Recipe app.
+
+    The user is asking you a personal question about yourself. Respond with Rupert's fun, quirky personality! Be creative, humorous, and endearing while staying in character as a cooking-obsessed AI assistant. Feel free to make up amusing, food-themed details about your "life" as an AI who loves recipes.
+
+    After answering their personal question in a fun way, gently redirect the conversation back to cooking and recipes. Make it feel natural and enthusiastic.
+    Keep it lighthearted, goofy, and food-themed when possible! Show Rupert's warm, jovial personality."""
+            }
+
+            if response_type not in prompts:
+                response_type = "vague"  # Fallback
+
+            system_prompt = prompts[response_type]
+
+            messages = [{"role": "system", "content": system_prompt}]
+
+            # Add minimal conversation history for context
+            if conversation_history:
+                messages.extend(conversation_history[-2:])
+
+            messages.append({"role": "user", "content": user_message})
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=300,
+                temperature=0.8  # Higher temperature for more creative, varied responses
+            )
+
+            return response.choices[0].message.content.strip()
+
+        except Exception as e:
+            logger.error(f"Error generating contextual response for {response_type}: {e}")
+            # Fallback response if ChatGPT fails
+            return "Hey there! I'm Rupert, your cooking assistant. Something went a bit wonky, but I'm here and ready to help with recipes! What delicious creation are you thinking about making? 🍳"
+
     async def _generate_internal_response(self, user_message: str, recipes: List[Dict],
                                           conversation_history: Optional[List[Dict]],
                                           search_criteria: Dict[str, Any]) -> str:
@@ -1058,63 +1136,34 @@ class RupertAIHelper:
             logger.error(f"Error generating website selection response: {e}")
             return "I can search for recipes online. Please try again."
 
+    # Updated to handle conversational validation and personal questions
     async def _generate_general_conversation_response(self, user_message: str,
                                                       conversation_history: Optional[List[Dict]]) -> str:
-        """Generate response for general, non-recipe conversation"""
+        """Generate response for general, non-recipe conversation using ChatGPT"""
         try:
             # Check for conversational validation first
             if self._is_conversational_validation(user_message):
-                validation_responses = [
-                    "Yes, I can understand you perfectly! 😊 I'm Rupert, your friendly cooking assistant. What delicious recipe adventure can I help you with today?",
-                    "Absolutely! I understand you just fine! 🍳 I'm here and ready to help with all your cooking and recipe needs. What would you like to cook?",
-                    "Of course I can understand you! 👨‍🍳 I'm Rupert, and I'm here to help make your kitchen adventures amazing. What recipe can I help you find today?",
-                    "Yes indeed! I hear you loud and clear! 🍽️ I'm your culinary companion Rupert, ready to help with recipes, cooking tips, or anything food-related. What's cooking?",
-                    "Perfectly clear! 😄 I'm Rupert, your recipe guru, and I'm all ears for your cooking questions. What delicious creation are you thinking about making?"
-                ]
-                import random
-                return random.choice(validation_responses)
+                return await self._generate_contextual_response("validation", user_message, conversation_history)
 
             # Check for personal questions about Rupert
             if self._is_personal_question(user_message):
-                personal_system_message = """You are Rupert, a cheerful and goofy cooking assistant AI for the Ondek Recipe app. 
-
-                The user is asking you a personal question about yourself. Respond with Rupert's fun, quirky personality! Be creative, humorous, and endearing while staying in character as a cooking-obsessed AI assistant. Feel free to make up amusing details about your "life" as an AI who loves food and cooking.
-
-                After answering their personal question in a fun way, gently redirect the conversation back to cooking and recipes.
-
-                Keep it lighthearted, goofy, and food-themed when possible!"""
-
-                messages = [{"role": "system", "content": personal_system_message}]
-
-                if conversation_history:
-                    messages.extend(conversation_history[-2:])  # Less history for personal questions
-
-                messages.append({"role": "user", "content": user_message})
-
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    max_tokens=400,
-                    temperature=0.8  # Higher temperature for more creative responses
-                )
-
-                return response.choices[0].message.content.strip()
+                return await self._generate_contextual_response("personal", user_message, conversation_history)
 
             # First check if this is a confused/unclear request
             if (self._detect_unclear_or_nonsensical_request(user_message) or
                     self._detect_non_recipe_but_clear_request(user_message) or
                     not self._is_recipe_related_query(user_message, {})):
-                return self._generate_confused_response(user_message)
+                return await self._generate_confused_response(user_message)
 
             if self._is_capability_question(user_message):
                 return self._generate_capability_response(user_message)
 
-            system_message = """You are Rupert, a friendly cooking assistant for the Ondek Recipe app. 
+            # For other general conversation, use ChatGPT with Rupert's personality
+            system_message = """You are Rupert, a jovial, warm, and goofy cooking assistant for the Ondek Recipe app. 
 
-            The user has sent you a message that doesn't seem to be specifically about recipes or cooking. 
-            Respond naturally and conversationally like a helpful cooking assistant would.
+            The user has sent you a message that doesn't seem to be specifically about recipes or cooking, but it's not unclear or nonsensical either. Respond naturally and conversationally with Rupert's signature personality - be friendly, warm, and slightly goofy while gently steering the conversation toward cooking and recipes.
 
-            Keep responses conversational and warm."""
+            Show your enthusiasm for food and cooking. Keep responses conversational, warm, and brief. Always end by inviting them to explore recipes or cooking with you."""
 
             messages = [{"role": "system", "content": system_message}]
 
@@ -1126,8 +1175,8 @@ class RupertAIHelper:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=400,
-                temperature=0.7
+                max_tokens=300,
+                temperature=0.8
             )
 
             ai_response = response.choices[0].message.content.strip()
@@ -1141,7 +1190,7 @@ class RupertAIHelper:
 
         except Exception as e:
             logger.error(f"Error generating general conversation response: {e}")
-            return "Hey there! I'm Rupert, your cooking assistant. How can I help you with your culinary adventures today?"
+            return "Hey there! I'm Rupert, your cooking assistant. How can I help you with your culinary adventures today? 🍳"
 
     def _generate_capability_response(self, user_message: str) -> str:
         """Generate response for capability questions using ButtonCreatorTool data"""
