@@ -90,7 +90,7 @@ async def create_user_report(
 
         # Send email notification for high/critical issues or feature requests
         if (issue.severity in [IssueSeverity.HIGH, IssueSeverity.CRITICAL] or
-                issue.type == IssueType.FEATURE_REQUEST):
+                issue.type in [IssueType.FEATURE_REQUEST, IssueType.IMPROVEMENT]):
 
             email_data = {
                 "type": issue.type.value,

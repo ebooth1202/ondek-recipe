@@ -1,4 +1,4 @@
-# backend/app/utils/ai_helper.py - Complete file with Rupert name correction feature
+# backend/app/utils/ai_helper.py - Fully validated version with syntax fixes
 
 import os
 from openai import OpenAI
@@ -154,15 +154,10 @@ class RupertAIHelper:
                     # Fun correction responses
                     corrections = [
                         f"😄 Ahem! It's *Rupert* (R-U-P-E-R-T), not {name.title()}! I'm a distinguished cooking assistant, not your neighbor {name.title()}! 😉",
-
                         f"🧐 Close, but it's actually *Rupert*! {name.title()} is probably off somewhere NOT helping with recipes. Lucky you got me instead! 🍳",
-
                         f"😂 Haha, {name.title()}? I think you've got me confused with someone else! I'm *Rupert* - the one and only culinary AI assistant around here!",
-
                         f"🤔 {name.title()}? Nope, that's not me! I'm *Rupert* - think 'Recipe + Expert' = Rupert! (Okay, that's not really how it works, but close enough!) 🍽️",
-
                         f"✨ Plot twist: I'm actually *Rupert*, not {name.title()}! Easy mistake though - we distinguished cooking assistants all look alike, right? 😄",
-
                         f"🍳 *Rupert* here! Though I appreciate the {name.title()} comparison - I'm sure they're lovely, but I'm the one with all the recipe knowledge! 😉",
                     ]
 
@@ -170,6 +165,154 @@ class RupertAIHelper:
                     return random.choice(corrections)
 
         return None
+
+    # === ENHANCED UNDERSTANDING DETECTION ===
+
+    def _detect_unclear_or_nonsensical_request(self, user_message: str) -> bool:
+        """Detect if the user's message is unclear, nonsensical, or gibberish"""
+        user_lower = user_message.lower().strip()
+
+        # Very short messages that aren't clear
+        if len(user_lower) < 3:
+            return True
+
+        # Random character sequences or keyboard mashing
+        if re.search(r'[a-z]{8,}', user_lower) and not re.search(r'\s', user_lower):
+            return True
+
+        # Too many repeated characters
+        if re.search(r'(.)\1{4,}', user_lower):
+            return True
+
+        # Check for mostly special characters (simplified approach)
+        alpha_count = sum(1 for c in user_message if c.isalpha())
+        total_chars = len(user_message.replace(' ', ''))
+        if total_chars > 3 and alpha_count < total_chars * 0.4:
+            return True
+
+        # Single random words that aren't food/recipe related
+        words = user_lower.split()
+        if len(words) == 1:
+            # Check if it's a reasonable single word
+            recipe_related_single_words = [
+                'recipe', 'recipes', 'cook', 'cooking', 'bake', 'baking', 'food', 'eat',
+                'dinner', 'lunch', 'breakfast', 'snack', 'dessert', 'help', 'hi', 'hello',
+                'hey', 'thanks', 'thank', 'ok', 'okay', 'yes', 'no', 'maybe', 'sure'
+            ]
+            if user_lower not in recipe_related_single_words and len(user_lower) > 15:
+                return True
+
+        # Check for multiple suspicious/nonsensical words in sequence
+        if len(words) >= 2:
+            suspicious_count = 0
+            for word in words:
+                # Skip very common words
+                if word in ['i', 'a', 'an', 'the', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'and', 'or', 'but']:
+                    continue
+
+                # Count suspicious patterns:
+                # 1. Words with unusual consonant clusters (like "jhst", "globbla")
+                if re.search(r'[bcdfghjklmnpqrstvwxyz]{3,}', word):
+                    suspicious_count += 1
+                # 2. Words with doubled letters at end (like "listt", "helpp")
+                elif re.search(r'(.)\1$', word) and len(word) > 3:
+                    suspicious_count += 1
+                # 3. Very short "words" that aren't real (2-3 chars, not common abbreviations)
+                elif len(word) <= 3 and word not in ['hi', 'ok', 'yes', 'no', 'can', 'get', 'eat', 'add', 'try', 'mix']:
+                    suspicious_count += 1
+                # 4. Medium length words with no vowels or weird patterns
+                elif len(word) >= 4 and not re.search(r'[aeiou]', word):
+                    suspicious_count += 1
+
+            # If more than half the meaningful words are suspicious, it's probably gibberish
+            meaningful_words = len([w for w in words if
+                                    w not in ['i', 'a', 'an', 'the', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'and',
+                                              'or', 'but']])
+            if meaningful_words > 0 and suspicious_count >= max(2, meaningful_words // 2):
+                return True
+
+        return False
+
+    def _detect_non_recipe_but_clear_request(self, user_message: str) -> bool:
+        """Detect clear requests that are just outside Rupert's expertise"""
+        user_lower = user_message.lower()
+
+        # Weather requests
+        weather_keywords = ['weather', 'temperature', 'rain', 'snow', 'sunny', 'cloudy', 'forecast']
+        if any(keyword in user_lower for keyword in weather_keywords):
+            return True
+
+        # Math/calculation requests (that aren't cooking related)
+        math_keywords = ['calculate', 'math', 'equation', 'solve', 'algebra', 'geometry']
+        cooking_math_keywords = ['conversion', 'convert', 'cups', 'ounces', 'grams', 'tablespoons', 'teaspoons']
+        if (any(keyword in user_lower for keyword in math_keywords) and
+                not any(keyword in user_lower for keyword in cooking_math_keywords)):
+            return True
+
+        # Technology/computer help
+        tech_keywords = ['computer', 'software', 'install', 'download', 'wifi', 'internet', 'password', 'email setup']
+        if any(keyword in user_lower for keyword in tech_keywords):
+            return True
+
+        # Travel/directions
+        travel_keywords = ['directions', 'how to get to', 'traffic', 'map', 'navigation', 'flight', 'hotel']
+        if any(keyword in user_lower for keyword in travel_keywords):
+            return True
+
+        # Shopping/grocery lists (not recipe creation)
+        shopping_keywords = ['grocery list', 'shopping list', 'grocery store', 'make a list', 'create a list',
+                             'generate a list', 'list of ingredients to buy', 'what to buy', 'shopping cart']
+        if any(keyword in user_lower for keyword in shopping_keywords):
+            return True
+
+        return False
+
+    def _generate_confused_response(self, user_message: str) -> str:
+        """Generate a fun 'I don't understand' response with Rupert's personality"""
+        user_lower = user_message.lower().strip()
+
+        # For gibberish/nonsensical input
+        if self._detect_unclear_or_nonsensical_request(user_message):
+            gibberish_responses = [
+                "🤨 Umm... I'm a recipe guru, not a decoder ring! That looked like someone sneezed on their keyboard. Could you try that again in human? 😅",
+                "😵‍💫 Whoa there! I speak fluent Recipe, basic English, and a little Kitchen Spanish, but whatever language that was just broke my circuits! Try again? 🍳",
+                "🤖 *Error 404: Comprehension not found* - Hey, I'm a cooking assistant, not a cryptographer! Mind giving that another shot in plain English? 😄",
+                "🙃 I'd love to help, but I think you just spoke in ancient keyboard! I'm more of a 'flour and sugar' guy than a 'djfhsdjfhsd' expert. What did you need help with? 🍽️",
+                "😂 Did your cat walk across the keyboard? Because I understand recipes better than... whatever that was! Try me again with some actual words! 🐱‍👤",
+                "🧐 I'm Rupert the Recipe Assistant, not Rupert the Mind Reader! That message looked like alphabet soup that exploded. Care to try again? 🍲"
+            ]
+
+        # For clear requests outside his expertise
+        elif self._detect_non_recipe_but_clear_request(user_message):
+            out_of_scope_responses = [
+                "🍳 Hey, I'm a recipe guru, not a circus monkey! I stick to what I know best - delicious food and cooking tips. Got any culinary questions for me? 😄",
+                "😅 I'd love to help, but I'm more of a 'what's for dinner' expert than a 'how to fix your life' expert! Try me with something cooking-related? 🍽️",
+                "🤷‍♂️ That's way outside my kitchen expertise! I'm like a really smart cookbook that can chat - great with recipes, not so much with... well, everything else! Got any food questions? 🍳",
+                "😊 Ooh, that's beyond my culinary superpowers! I'm basically a food-focused AI who gets really excited about ingredients and cooking techniques. What's cooking? (Literally!) 👨‍🍳",
+                "🍴 I'm flattered you think I can do everything, but I'm strictly a kitchen assistant! Think of me as your personal sous chef, not your personal Google. What are we cooking up today? 😉",
+                "🥄 Sorry, but that's outside my recipe repertoire! I'm like a really enthusiastic cookbook that learned to text. Got any delicious questions for me instead? 🍰"
+            ]
+
+        # For vague but potentially recipe-related requests
+        else:
+            vague_responses = [
+                "🤔 I think I know what you're getting at, but could you be a bit more specific? Are you looking for a recipe, cooking tips, or something else food-related? I'm all ears! 👂",
+                "😊 I'm picking up some cooking vibes from your message, but I'm not quite sure what you need! Are you looking for recipes, cooking advice, or help with ingredients? Give me a bit more to work with! 🍳",
+                "🍽️ I sense some culinary curiosity in there, but I'm not totally sure what you're after! Are you hunting for a specific recipe, need cooking help, or something else? Fill me in! 😄",
+                "🧐 My recipe-sense is tingling, but I need a few more details! Are you looking to cook something specific, need ingredient suggestions, or have a cooking question? Help me help you! 👨‍🍳",
+                "😅 I think we're in the same kitchen, but maybe different recipes! Could you give me a bit more detail about what you're looking for? I'm here to help with all things food! 🍴"
+            ]
+
+        # Choose appropriate response category
+        if self._detect_unclear_or_nonsensical_request(user_message):
+            responses = gibberish_responses
+        elif self._detect_non_recipe_but_clear_request(user_message):
+            responses = out_of_scope_responses
+        else:
+            responses = vague_responses
+
+        import random
+        return random.choice(responses)
 
     # === INTENT DETECTION ===
 
@@ -286,13 +429,17 @@ class RupertAIHelper:
         if not self.is_configured() or self._is_capability_question(user_message):
             return {}
 
+        # First check if it's clearly nonsensical
+        if self._detect_unclear_or_nonsensical_request(user_message):
+            return {}
+
         try:
             prompt = f"""
                         Analyze this user message about recipes and extract search criteria as JSON:
                         User message: "{user_message}"
-        
+
                         IMPORTANT: Extract specific food items mentioned, even if they say "want to make" or "going to cook".
-        
+
                         Extract any of these criteria if mentioned:
                                 - genre: breakfast, lunch, dinner, snack, dessert, appetizer
                                 - ingredient: any specific food item mentioned (cookies, pancakes, bread, etc.)
@@ -300,17 +447,17 @@ class RupertAIHelper:
                                 - max_time: maximum cooking time in minutes if mentioned
                                 - dietary_restrictions: gluten_free, dairy_free, egg_free
                                 - show_favorites: true if asking for favorite/favorited recipes
-                    
+
                                 Only use generic "recipe" if NO specific food item is mentioned:
                                 {{"ingredient": "recipe"}}
-                    
+
                                 Examples:
                                 "i want to make some cookies" -> {{"ingredient": "cookies", "genre": "dessert"}}
                                 "show me my favorite recipes" -> {{"show_favorites": true}}
                                 "find my favorited desserts" -> {{"show_favorites": true, "genre": "dessert"}}
                                 "list of favorites" -> {{"show_favorites": true}}
-        
-                        Return only valid JSON. If asking about capabilities only, return: {{}}
+
+                        Return only valid JSON. If the message is unclear, nonsensical, or not recipe-related, return: {{}}
                         """
 
             response = self.client.chat.completions.create(
@@ -544,6 +691,7 @@ class RupertAIHelper:
         except Exception as e:
             logger.error(f"Error in enhanced database search: {e}")
             return []
+
     # === BUTTON CREATION (using ButtonCreatorTool) ===
 
     def create_recipe_buttons(self, recipe: Dict[str, Any], recipe_type: str = "internal") -> List[Dict[str, Any]]:
@@ -822,6 +970,12 @@ class RupertAIHelper:
                                                       conversation_history: Optional[List[Dict]]) -> str:
         """Generate response for general, non-recipe conversation"""
         try:
+            # First check if this is a confused/unclear request
+            if (self._detect_unclear_or_nonsensical_request(user_message) or
+                    self._detect_non_recipe_but_clear_request(user_message) or
+                    not self._is_recipe_related_query(user_message, {})):
+                return self._generate_confused_response(user_message)
+
             if self._is_capability_question(user_message):
                 return self._generate_capability_response(user_message)
 
@@ -977,15 +1131,10 @@ Would you like me to search for something specific?"""
         """Handle when user says NO to web search"""
         lighthearted_responses = [
             "😄 Ah, playing hard to get with the internet search, I see! Well then, what culinary adventure ARE you in the mood for? Don't leave me hanging here! 🍳",
-
             "😂 Haha, caught me assuming! You're like 'Nope, Rupert, that's not what I want!' Okay, okay, I'll behave. So what delicious creation are you actually craving?",
-
             "🤔 Plot twist! You've got something totally different in mind, don't you? I'm all ears (well, metaphorically) - what recipe should I hunt down for you?",
-
             "😌 Fair enough! I was getting a little ahead of myself there. You know what you want, and I respect that. So, what's the REAL recipe request? Spill the beans! ☕",
-
             "🍳 Oops, my bad for assuming! You're the chef here, I'm just the helpful sous chef. What would you actually like me to search for online?",
-
             "😆 Well, that's what I get for putting words in your mouth! You clearly have something specific in mind. Come on, don't keep me in suspense - what should I search for?"
         ]
 
@@ -1202,8 +1351,20 @@ Would you like me to search for something specific?"""
 
             logger.info("Proceeding with normal search flow")
 
+            # NEW: Check for unclear/nonsensical requests EARLY
+            if self._detect_unclear_or_nonsensical_request(user_message):
+                return self._generate_confused_response(user_message)
+
             # Extract search criteria first
             search_criteria = self.extract_search_intent(user_message)
+
+            # CRITICAL FIX: Even if we found search criteria, double-check for confusion
+            # This prevents OpenAI from being too generous with recipe interpretation
+            if (search_criteria and
+                    (self._detect_unclear_or_nonsensical_request(user_message) or
+                     self._detect_non_recipe_but_clear_request(user_message))):
+                logger.info(f"Overriding search criteria {search_criteria} due to detected confusion")
+                return self._generate_confused_response(user_message)
 
             # Check for external search request
             is_external_search_request = self._detect_external_search_request(user_message)
@@ -1219,6 +1380,10 @@ Would you like me to search for something specific?"""
                 return f"I'd be happy to help you create a new recipe! Click the button below to get started.\n\n[ACTION_BUTTON:{json.dumps(button)}]"
 
             is_recipe_related = self._is_recipe_related_query(user_message, search_criteria)
+
+            # NEW: Check for clear non-recipe requests
+            if self._detect_non_recipe_but_clear_request(user_message):
+                return self._generate_confused_response(user_message)
 
             # Search internal database if we have criteria
             internal_recipes = []
@@ -1255,10 +1420,7 @@ Would you like me to search for something specific?"""
                 return await self._generate_internal_response(user_message, internal_recipes,
                                                               conversation_history, search_criteria)
 
-
-
             elif search_criteria and is_recipe_related:
-
                 # ENHANCED: We searched but found no internal recipes - show intelligent search feedback
                 criteria_description = ""
                 search_feedback = ""
@@ -1292,7 +1454,7 @@ Would you like me to search for something specific?"""
                 return f"{response}{website_selection}"
 
             else:
-                # Handle general conversation
+                # Handle general conversation (this now includes better confusion detection)
                 return await self._generate_general_conversation_response(user_message, conversation_history)
 
         except Exception as e:
