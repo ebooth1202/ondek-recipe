@@ -1,4 +1,4 @@
-# backend/app/utils/ai_helper.py - Fully validated version with syntax fixes
+# backend/app/utils/ai_helper.py - Updated with better "I don't know" responses
 
 import os
 from openai import OpenAI
@@ -160,7 +160,6 @@ class RupertAIHelper:
                         f"✨ Plot twist: I'm actually *Rupert*, not {name.title()}! Easy mistake though - we distinguished cooking assistants all look alike, right? 😄",
                         f"🍳 *Rupert* here! Though I appreciate the {name.title()} comparison - I'm sure they're lovely, but I'm the one with all the recipe knowledge! 😉",
                     ]
-
                     import random
                     return random.choice(corrections)
 
@@ -193,7 +192,6 @@ class RupertAIHelper:
         # Single random words that aren't food/recipe related
         words = user_lower.split()
         if len(words) == 1:
-            # Check if it's a reasonable single word
             recipe_related_single_words = [
                 'recipe', 'recipes', 'cook', 'cooking', 'bake', 'baking', 'food', 'eat',
                 'dinner', 'lunch', 'breakfast', 'snack', 'dessert', 'help', 'hi', 'hello',
@@ -202,13 +200,17 @@ class RupertAIHelper:
             if user_lower not in recipe_related_single_words and len(user_lower) > 15:
                 return True
 
-        # Check for multiple suspicious/nonsensical words in sequence
+        # Enhanced: Check for multiple suspicious/nonsensical words in sequence
         if len(words) >= 2:
             suspicious_count = 0
+            meaningful_word_count = 0
+
             for word in words:
-                # Skip very common words
+                # Skip very common words but count meaningful words
                 if word in ['i', 'a', 'an', 'the', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'and', 'or', 'but']:
                     continue
+
+                meaningful_word_count += 1
 
                 # Count suspicious patterns:
                 # 1. Words with unusual consonant clusters (like "jhst", "globbla")
@@ -219,16 +221,17 @@ class RupertAIHelper:
                     suspicious_count += 1
                 # 3. Very short "words" that aren't real (2-3 chars, not common abbreviations)
                 elif len(word) <= 3 and word not in ['hi', 'ok', 'yes', 'no', 'can', 'get', 'eat', 'add', 'try', 'mix']:
-                    suspicious_count += 1
-                # 4. Medium length words with no vowels or weird patterns
+                    common_short_words = ['is', 'am', 'it', 'me', 'we', 'he', 'be', 'do', 'go', 'up', 'so', 'my', 'us']
+                    if word not in common_short_words:
+                        suspicious_count += 1
+                # 4. Medium length words with no vowels (but be more careful here)
                 elif len(word) >= 4 and not re.search(r'[aeiou]', word):
-                    suspicious_count += 1
+                    real_consonant_words = ['gym', 'fly', 'try', 'dry', 'fry', 'shy', 'sky', 'why']
+                    if word not in real_consonant_words:
+                        suspicious_count += 1
 
             # If more than half the meaningful words are suspicious, it's probably gibberish
-            meaningful_words = len([w for w in words if
-                                    w not in ['i', 'a', 'an', 'the', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'and',
-                                              'or', 'but']])
-            if meaningful_words > 0 and suspicious_count >= max(2, meaningful_words // 2):
+            if meaningful_word_count > 0 and suspicious_count >= max(2, meaningful_word_count // 2):
                 return True
 
         return False
@@ -265,12 +268,22 @@ class RupertAIHelper:
         if any(keyword in user_lower for keyword in shopping_keywords):
             return True
 
+        # Academic subjects and sciences (ENHANCED)
+        academic_keywords = ['astronomy', 'physics', 'chemistry', 'biology', 'history', 'geography',
+                             'mathematics', 'literature', 'philosophy', 'psychology', 'sociology',
+                             'economics', 'politics', 'science', 'scientific', 'academic', 'study',
+                             'learn about', 'explain astronomy', 'explain physics', 'what is astronomy',
+                             'help me understand', 'tell me about']
+        # But exclude food science and cooking chemistry
+        food_science_keywords = ['food science', 'cooking chemistry', 'baking science', 'culinary science']
+        if (any(keyword in user_lower for keyword in academic_keywords) and
+                not any(keyword in user_lower for keyword in food_science_keywords)):
+            return True
+
         return False
 
     def _generate_confused_response(self, user_message: str) -> str:
         """Generate a fun 'I don't understand' response with Rupert's personality"""
-        user_lower = user_message.lower().strip()
-
         # For gibberish/nonsensical input
         if self._detect_unclear_or_nonsensical_request(user_message):
             gibberish_responses = [
@@ -281,6 +294,8 @@ class RupertAIHelper:
                 "😂 Did your cat walk across the keyboard? Because I understand recipes better than... whatever that was! Try me again with some actual words! 🐱‍👤",
                 "🧐 I'm Rupert the Recipe Assistant, not Rupert the Mind Reader! That message looked like alphabet soup that exploded. Care to try again? 🍲"
             ]
+            import random
+            return random.choice(gibberish_responses)
 
         # For clear requests outside his expertise
         elif self._detect_non_recipe_but_clear_request(user_message):
@@ -292,6 +307,8 @@ class RupertAIHelper:
                 "🍴 I'm flattered you think I can do everything, but I'm strictly a kitchen assistant! Think of me as your personal sous chef, not your personal Google. What are we cooking up today? 😉",
                 "🥄 Sorry, but that's outside my recipe repertoire! I'm like a really enthusiastic cookbook that learned to text. Got any delicious questions for me instead? 🍰"
             ]
+            import random
+            return random.choice(out_of_scope_responses)
 
         # For vague but potentially recipe-related requests
         else:
@@ -302,17 +319,8 @@ class RupertAIHelper:
                 "🧐 My recipe-sense is tingling, but I need a few more details! Are you looking to cook something specific, need ingredient suggestions, or have a cooking question? Help me help you! 👨‍🍳",
                 "😅 I think we're in the same kitchen, but maybe different recipes! Could you give me a bit more detail about what you're looking for? I'm here to help with all things food! 🍴"
             ]
-
-        # Choose appropriate response category
-        if self._detect_unclear_or_nonsensical_request(user_message):
-            responses = gibberish_responses
-        elif self._detect_non_recipe_but_clear_request(user_message):
-            responses = out_of_scope_responses
-        else:
-            responses = vague_responses
-
-        import random
-        return random.choice(responses)
+            import random
+            return random.choice(vague_responses)
 
     # === INTENT DETECTION ===
 
@@ -1351,8 +1359,14 @@ Would you like me to search for something specific?"""
 
             logger.info("Proceeding with normal search flow")
 
-            # NEW: Check for unclear/nonsensical requests EARLY
+            # ENHANCED: Check for unclear/nonsensical requests EARLY
             if self._detect_unclear_or_nonsensical_request(user_message):
+                logger.info("Early gibberish detection triggered")
+                return self._generate_confused_response(user_message)
+
+            # ENHANCED: Check for clear non-recipe requests EARLY
+            if self._detect_non_recipe_but_clear_request(user_message):
+                logger.info("Early non-recipe detection triggered")
                 return self._generate_confused_response(user_message)
 
             # Extract search criteria first
@@ -1363,7 +1377,8 @@ Would you like me to search for something specific?"""
             if (search_criteria and
                     (self._detect_unclear_or_nonsensical_request(user_message) or
                      self._detect_non_recipe_but_clear_request(user_message))):
-                logger.info(f"Overriding search criteria {search_criteria} due to detected confusion")
+                logger.info(
+                    f"Post-extraction override: search criteria {search_criteria} overridden due to detected confusion")
                 return self._generate_confused_response(user_message)
 
             # Check for external search request
@@ -1380,10 +1395,6 @@ Would you like me to search for something specific?"""
                 return f"I'd be happy to help you create a new recipe! Click the button below to get started.\n\n[ACTION_BUTTON:{json.dumps(button)}]"
 
             is_recipe_related = self._is_recipe_related_query(user_message, search_criteria)
-
-            # NEW: Check for clear non-recipe requests
-            if self._detect_non_recipe_but_clear_request(user_message):
-                return self._generate_confused_response(user_message)
 
             # Search internal database if we have criteria
             internal_recipes = []
