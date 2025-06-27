@@ -1,4 +1,4 @@
-# backend/app/toolset/tools.py - Updated with Website Selection in ButtonCreatorTool
+# backend/app/toolset/tools.py - Complete corrected version with proper syntax
 
 import os
 import logging
@@ -7,79 +7,80 @@ import re
 import io
 import tempfile
 import csv
+import uuid
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from bson import ObjectId
 import requests
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
+# Set up logger FIRST
 logger = logging.getLogger(__name__)
+
+# Note: AI helper will be imported lazily to avoid circular imports
+AI_HELPER_AVAILABLE = True  # Assume available until proven otherwise
+
+# Try to import BeautifulSoup
+try:
+    from bs4 import BeautifulSoup
+
+    BS4_AVAILABLE = True
+except ImportError:
+    BeautifulSoup = None
+    BS4_AVAILABLE = False
+    logger.warning("BeautifulSoup4 not available - will use basic text extraction")
 
 # Try to import database with error handling
 try:
-    # Since main app can import database successfully, try the same patterns
     try:
-        # Try importing from parent app directory (most likely location)
         from ..database import db
 
         logger.info("Database imported successfully from app.database")
     except ImportError:
         try:
-            # Try the original import pattern
             from app.database import db
 
             logger.info("Database imported successfully from app.database")
         except ImportError:
             try:
-                # Try direct relative import
-                from ...database import db
+                from database import db
 
-                logger.info("Database imported successfully using relative import")
+                logger.info("Database imported successfully using absolute import")
             except ImportError:
-                try:
-                    # Try absolute import
-                    from database import db
+                import sys
 
-                    logger.info("Database imported successfully using absolute import")
-                except ImportError:
-                    # Final attempt: use sys.path manipulation
-                    import sys
-                    import os
+                current_dir = os.path.dirname(os.path.abspath(__file__))
 
-                    # Get current file directory and try to find database.py
-                    current_dir = os.path.dirname(os.path.abspath(__file__))
+                potential_paths = [
+                    os.path.join(current_dir, '..'),
+                    os.path.join(current_dir, '..', '..'),
+                    os.path.join(current_dir, '..', '..', '..'),
+                ]
 
-                    # Try different potential paths
-                    potential_paths = [
-                        os.path.join(current_dir, '..'),  # app directory
-                        os.path.join(current_dir, '..', '..'),  # backend directory
-                        os.path.join(current_dir, '..', '..', '..'),  # project root
-                    ]
+                database_found = False
+                for path in potential_paths:
+                    abs_path = os.path.abspath(path)
+                    if abs_path not in sys.path:
+                        sys.path.insert(0, abs_path)
 
-                    database_found = False
-                    for path in potential_paths:
-                        abs_path = os.path.abspath(path)
-                        if abs_path not in sys.path:
-                            sys.path.insert(0, abs_path)
+                    try:
+                        if os.path.exists(os.path.join(abs_path, 'database.py')):
+                            from database import db
 
-                        try:
-                            if os.path.exists(os.path.join(abs_path, 'database.py')):
-                                from database import db
+                            logger.info(f"Database imported successfully from path: {abs_path}")
+                            database_found = True
+                            break
+                        elif os.path.exists(os.path.join(abs_path, 'app', 'database.py')):
+                            from app.database import db
 
-                                logger.info(f"Database imported successfully from path: {abs_path}")
-                                database_found = True
-                                break
-                            elif os.path.exists(os.path.join(abs_path, 'app', 'database.py')):
-                                from app.database import db
+                            logger.info(f"Database imported successfully from app.database at: {abs_path}")
+                            database_found = True
+                            break
+                    except ImportError:
+                        continue
 
-                                logger.info(f"Database imported successfully from app.database at: {abs_path}")
-                                database_found = True
-                                break
-                        except ImportError:
-                            continue
-
-                    if not database_found:
-                        raise ImportError("Could not locate database module in any expected location")
+                if not database_found:
+                    raise ImportError("Could not locate database module in any expected location")
 
     db_available = True
 except Exception as e:
@@ -87,11 +88,10 @@ except Exception as e:
     logger.warning("Internal recipe search and ingredient suggestions will not work without database access")
 
 
-    # Create a mock database for development/fallback
+    # Creating a mock database for development/fallback
     class MockRecipeCollection:
         @staticmethod
         def find(query=None, *args, **kwargs):
-            # Return an empty cursor-like object
             return MockCursor()
 
         @staticmethod
@@ -112,6 +112,7 @@ except Exception as e:
 
     class MockDatabase:
         recipes = MockRecipeCollection()
+        favorites = MockRecipeCollection()
 
 
     db = MockDatabase()
@@ -122,22 +123,17 @@ class RecipeSearchTool:
     """Tool for searching external recipe sources"""
 
     def __init__(self):
-        self.search_api_key = os.getenv("SEARCH_API_KEY")
         self.name = "search_external_recipes"
         self.description = "Search the internet for recipes from various cooking websites"
 
     def execute(self, criteria: Dict[str, Any], search_params: Dict[str, Any] = None) -> List[Dict]:
         """Search for recipes from external sources"""
         try:
-            logger.info(f"RecipeSearchTool.execute called with criteria: {criteria}, search_params: {search_params}")
+            logger.info(f"RecipeSearchTool.execute called with criteria: {criteria}")
 
-            search_query = self._build_search_query(criteria, search_params)
-
-            # Get ingredient with fallback
             ingredient = criteria.get('ingredient', 'chocolate chip cookies') if criteria else 'chocolate chip cookies'
             logger.info(f"Searching for ingredient: {ingredient}")
 
-            # Check if a specific website is requested
             selected_website = None
             if search_params and search_params.get('specific_websites'):
                 websites = search_params.get('specific_websites', [])
@@ -145,632 +141,705 @@ class RecipeSearchTool:
                     selected_website = websites[0]
                     logger.info(f"Specific website requested: {selected_website}")
 
-            # Handle website-specific search (this takes priority)
             if selected_website:
-                if ingredient == 'recipe':
-                    # For generic searches on a specific website, provide variety
-                    logger.info(f"Generating varied results for {selected_website}")
-                    return self._generate_varied_recipe_results(criteria, search_params)
-                else:
-                    # For specific ingredient searches on a specific website
-                    logger.info(f"Generating website-specific results for {ingredient} on {selected_website}")
-                    return self._generate_website_specific_results(ingredient, selected_website, criteria,
-                                                                   search_params)
-
-            # Handle generic "recipe" search with variety (no specific website)
-            elif ingredient == 'recipe':
-                logger.info("Generating generic varied results")
-                return self._generate_varied_recipe_results(criteria, search_params)
-
-            # Default generic search (fallback)
+                return self._search_website_for_recipes(ingredient, selected_website, criteria)
             else:
-                logger.info("Generating generic results for specific ingredient")
-                return self._generate_generic_results(ingredient, criteria, search_params)
+                return self._search_multiple_sites(ingredient, criteria)
 
         except Exception as e:
             logger.error(f"Error in external recipe search: {e}")
-            # Return a basic fallback instead of empty list
-            return [{
-                "name": "Classic Chocolate Chip Cookies",
-                "source": "fallback",
-                "description": "A reliable fallback recipe when search encounters issues.",
-                "url": "https://example.com/fallback-recipe",
-                "ingredients": ["2 cups flour", "1 cup butter", "1 cup sugar", "2 eggs", "1 tsp vanilla",
-                                "1 cup chocolate chips"],
-                "instructions": ["Mix ingredients", "Bake at 375°F for 10 minutes"],
-                "serving_size": 24,
-                "prep_time": 15,
-                "cook_time": 10,
-                "genre": "dessert",
-                "notes": ["Fallback recipe"],
-                "dietary_restrictions": ["vegetarian"],
-                "cuisine_type": "american"
-            }]
+            return self._generate_fallback_recipe(criteria.get('ingredient', 'recipe'))
 
-    def _generate_website_specific_results(self, ingredient: str, website: str, criteria: Dict[str, Any],
-                                           search_params: Dict[str, Any]) -> List[Dict]:
-        """Generate website-specific search results"""
-        ingredient_clean = ingredient.lower().replace(' ', '-')
+    def _search_website_for_recipes(self, ingredient: str, website: str, criteria: Dict[str, Any]) -> List[Dict]:
+        """Search a specific website for recipes"""
+        try:
+            logger.info(f"Searching {website} for recipes about: {ingredient}")
 
-        if website == "google.com":
-            # Google searches across multiple sites
-            return self._generate_google_results(ingredient, criteria, search_params)
-        elif website == "pinterest.com":
-            return self._generate_pinterest_results(ingredient, criteria, search_params)
-        elif website == "allrecipes.com":
-            return self._generate_allrecipes_results(ingredient, criteria, search_params)
-        elif website == "foodnetwork.com":
-            return self._generate_foodnetwork_results(ingredient, criteria, search_params)
-        elif website == "food.com":
-            return self._generate_food_com_results(ingredient, criteria, search_params)
-        elif website == "epicurious.com":
-            return self._generate_epicurious_results(ingredient, criteria, search_params)
-        else:
-            # Fallback for unknown websites
-            return self._generate_generic_results(ingredient, criteria, search_params)
+            search_urls = self._build_search_urls(ingredient, website)
+            all_recipes = []
+            max_recipes = 4
 
-    def _generate_google_results(self, ingredient: str, criteria: Dict[str, Any], search_params: Dict[str, Any]) -> \
-            List[Dict]:
-        """Generate Google search results (multiple sources)"""
-        sources = ["allrecipes.com", "foodnetwork.com", "epicurious.com", "food.com"]
-        results = []
+            for search_url in search_urls:
+                if len(all_recipes) >= max_recipes:
+                    break
 
-        # Handle generic recipe search with variety
-        if ingredient == "recipe":
-            varied_ingredients = ["chocolate chip cookies", "chicken stir fry", "banana bread", "spaghetti carbonara"]
-            for i, varied_ingredient in enumerate(varied_ingredients):
-                source = sources[i]
-                results.append({
-                    "name": f"Popular {varied_ingredient.title()}",
-                    "source": source,
-                    "description": f"This popular {varied_ingredient} recipe is highly rated across multiple cooking sites. Perfect for any skill level!",
-                    "url": f"https://{source}/recipe/popular-{varied_ingredient.replace(' ', '-')}",
-                    "ingredients": self._get_ingredients_for_style("Popular"),
-                    "instructions": self._get_instructions_for_style("Popular"),
-                    "serving_size": 4 + (i * 2),
-                    "prep_time": 15 + (i * 5),
-                    "cook_time": 20 + (i * 5),
-                    "genre": ["dessert", "dinner", "breakfast", "dinner"][i],
-                    "notes": [f"Top-rated recipe from {source}", "Highly recommended"],
-                    "dietary_restrictions": ["vegetarian"] if "chicken" not in varied_ingredient else [],
-                    "cuisine_type": "popular"
-                })
-        else:
-            # Handle specific ingredient search
-            for i, source in enumerate(sources):
-                recipe_style = ["Classic", "Best Ever", "Perfect", "Ultimate"][i]
-                results.append({
-                    "name": f"{recipe_style} {ingredient.title()}",
-                    "source": source,
-                    "description": f"This {recipe_style.lower()} {ingredient} recipe from {source} delivers amazing results every time. Highly rated by thousands of home cooks!",
-                    "url": f"https://{source}/recipe/{recipe_style.lower()}-{ingredient.replace(' ', '-')}",
-                    "ingredients": self._get_ingredients_for_style(recipe_style),
-                    "instructions": self._get_instructions_for_style(recipe_style),
-                    "serving_size": 24 if i < 2 else 18,
-                    "prep_time": 15 + (i * 5),
-                    "cook_time": 10 + (i * 2),
-                    "genre": criteria.get('genre', 'dessert'),
-                    "notes": [f"Top-rated recipe from {source}", "Thousands of positive reviews"],
-                    "dietary_restrictions": ["vegetarian"] if i % 2 == 0 else [],
-                    "cuisine_type": "american"
-                })
+                logger.info(f"Trying to access URL: {search_url}")
+                search_page_content = self._fetch_webpage_content(search_url)
 
-        return results
+                if not search_page_content:
+                    logger.warning(f"Failed to get content from {search_url}")
+                    continue
 
-    def _generate_varied_recipe_results(self, criteria: Dict[str, Any], search_params: Dict[str, Any]) -> List[Dict]:
-        """Generate varied recipe results for generic searches"""
-        logger.info(f"Generating varied recipe results with search_params: {search_params}")
+                logger.info(f"Successfully got {len(search_page_content)} characters from {search_url}")
 
-        varied_recipes = [
-            {
-                "ingredient": "chocolate chip cookies",
-                "genre": "dessert",
-                "description": "Classic chocolate chip cookies that everyone loves"
-            },
-            {
-                "ingredient": "chicken teriyaki",
-                "genre": "dinner",
-                "description": "Easy weeknight chicken teriyaki with rice"
-            },
-            {
-                "ingredient": "banana bread",
-                "genre": "breakfast",
-                "description": "Moist and delicious homemade banana bread"
-            },
-            {
-                "ingredient": "pasta carbonara",
-                "genre": "dinner",
-                "description": "Creamy Italian pasta carbonara recipe"
-            }
-        ]
+                # Check if we got a valid page (be more specific about error detection)
+                content_lower = search_page_content.lower()
+                if (("page not found" in content_lower or
+                     "404 error" in content_lower or
+                     "not found" in content_lower[:1000]) and  # Only check first 1000 chars
+                        "recipe" not in content_lower[:5000]):  # If no recipe mentions in first 5000 chars
+                    logger.warning(f"Got error page from {search_url}")
+                    continue
 
-        # Get the selected website if specified
-        selected_website = None
-        if search_params and search_params.get('specific_websites'):
-            websites = search_params.get('specific_websites', [])
-            if isinstance(websites, list) and len(websites) > 0:
-                selected_website = websites[0]
-                logger.info(f"Selected website for varied results: {selected_website}")
+                # Try to extract recipe URLs even if we're not 100% sure
+                recipe_urls = self._extract_recipe_urls_from_search(search_page_content, website)
+                logger.info(f"Extracted {len(recipe_urls)} recipe URLs from search results")
 
-        results = []
-        for recipe_info in varied_recipes:
-            if selected_website:
-                logger.info(
-                    f"Generating website-specific results for {recipe_info['ingredient']} on {selected_website}")
-                # Use website-specific generation for each varied recipe
-                recipe_results = self._generate_website_specific_results(
-                    recipe_info["ingredient"],
-                    selected_website,
-                    {"ingredient": recipe_info["ingredient"], "genre": recipe_info["genre"]},
-                    search_params
-                )
-                # Take just the first result from each
-                if recipe_results:
-                    result = recipe_results[0]
-                    result["description"] = recipe_info["description"]
-                    results.append(result)
-                    logger.info(f"Added result: {result['name']}")
+                # Log some sample URLs for debugging
+                if recipe_urls:
+                    logger.info(f"Sample recipe URLs: {recipe_urls[:3]}")
                 else:
-                    logger.warning(f"No results returned for {recipe_info['ingredient']} on {selected_website}")
+                    # Debug: Let's see what kind of content we got
+                    logger.warning(f"No recipe URLs found. Page title area: {search_page_content[:500]}")
+                    # Look for any links at all
+                    if BS4_AVAILABLE:
+                        from bs4 import BeautifulSoup
+                        soup = BeautifulSoup(search_page_content, 'html.parser')
+                        all_links = soup.find_all('a', href=True)
+                        logger.info(f"Found {len(all_links)} total links on page")
+                        sample_links = [link.get('href') for link in all_links[:10]]
+                        logger.info(f"Sample links: {sample_links}")
+
+                for recipe_url in recipe_urls[:3]:
+                    if len(all_recipes) >= max_recipes:
+                        break
+
+                    logger.info(f"Attempting to scrape recipe from: {recipe_url}")
+                    recipe_data = self._scrape_and_parse_recipe(recipe_url, ingredient)
+                    if recipe_data:
+                        all_recipes.append(recipe_data)
+                        logger.info(f"Successfully parsed recipe: {recipe_data.get('name', 'Unknown')}")
+                    else:
+                        logger.warning(f"Failed to parse recipe from: {recipe_url}")
+
+            if all_recipes:
+                logger.info(f"Found {len(all_recipes)} real recipes from {website}")
+                return all_recipes
             else:
-                # Generate generic results for variety
-                results.append({
-                    "name": recipe_info["ingredient"].title(),
-                    "source": "various",
-                    "description": recipe_info["description"],
-                    "url": f"https://example.com/recipe/{recipe_info['ingredient'].replace(' ', '-')}",
-                    "ingredients": self._get_ingredients_for_style("Classic"),
-                    "instructions": self._get_instructions_for_style("Classic"),
-                    "serving_size": 4,
-                    "prep_time": 20,
-                    "cook_time": 25,
-                    "genre": recipe_info["genre"],
-                    "notes": ["Popular recipe choice"],
-                    "dietary_restrictions": ["vegetarian"] if "chicken" not in recipe_info["ingredient"] else [],
-                    "cuisine_type": "varied"
-                })
+                logger.warning(f"Could not parse any real recipes from {website}, using fallback")
+                return self._generate_fallback_recipes_for_site(ingredient, website, criteria)
 
-        logger.info(f"Varied recipe generator returning {len(results)} total results")
-        return results
+        except Exception as e:
+            logger.error(f"Error searching {website}: {e}")
+            return self._generate_fallback_recipes_for_site(ingredient, website, criteria)
 
-    def _generate_pinterest_results(self, ingredient: str, criteria: Dict[str, Any], search_params: Dict[str, Any]) -> \
-            List[Dict]:
-        """Generate Pinterest-style results (visual, trendy)"""
-        results = []
+    def _search_multiple_sites(self, ingredient: str, criteria: Dict[str, Any]) -> List[Dict]:
+        """Search multiple sites for recipes"""
+        try:
+            popular_sites = ['allrecipes.com', 'foodnetwork.com', 'food.com']
+            all_recipes = []
+            max_recipes = 3
 
-        if ingredient == "recipe":
-            # Generate trendy, visual recipes for generic search
-            trendy_recipes = [
-                {"name": "Instagram-Perfect Rainbow Smoothie Bowl", "ingredient": "smoothie bowl",
-                 "genre": "breakfast"},
-                {"name": "Viral TikTok Baked Feta Pasta", "ingredient": "baked feta pasta", "genre": "dinner"},
-                {"name": "Pinterest-Famous Cloud Bread", "ingredient": "cloud bread", "genre": "snack"},
-                {"name": "Trending Dalgona Coffee Cookies", "ingredient": "dalgona cookies", "genre": "dessert"}
+            for site in popular_sites:
+                if len(all_recipes) >= max_recipes:
+                    break
+
+                site_recipes = self._search_website_for_recipes(ingredient, site, criteria)
+                if site_recipes and site_recipes[0].get('source') != 'fallback':
+                    all_recipes.extend(site_recipes[:1])
+
+            return all_recipes if all_recipes else self._generate_fallback_recipes_for_ingredient(ingredient, criteria)
+
+        except Exception as e:
+            logger.error(f"Error in multi-site search: {e}")
+            return self._generate_fallback_recipes_for_ingredient(ingredient, criteria)
+
+    def _build_search_urls(self, ingredient: str, website: str) -> List[str]:
+        """Build search URLs for different recipe websites"""
+        search_urls = []
+        clean_ingredient = ingredient.replace(' ', '%20')
+
+        if 'allrecipes.com' in website:
+            # Updated AllRecipes search URL format
+            search_urls.append(f"https://www.allrecipes.com/search?q={clean_ingredient}")
+        elif 'foodnetwork.com' in website:
+            # Updated Food Network search URL format
+            search_urls.append(f"https://www.foodnetwork.com/search/{clean_ingredient}")
+        elif 'food.com' in website:
+            search_urls.append(f"https://www.food.com/search/{clean_ingredient}")
+        elif 'epicurious.com' in website:
+            search_urls.append(f"https://www.epicurious.com/search?q={clean_ingredient}")
+        elif 'pinterest.com' in website:
+            search_urls.append(f"https://www.pinterest.com/search/pins/?q={clean_ingredient}%20recipe")
+        else:
+            # Generic fallback
+            search_urls.append(f"https://{website}/search?q={clean_ingredient}+recipe")
+
+        return search_urls
+
+    def _extract_recipe_urls_from_search(self, html_content: str, website: str) -> List[str]:
+        """Extract recipe URLs from search results page"""
+        try:
+            recipe_urls = []
+
+            if BS4_AVAILABLE:
+                soup = BeautifulSoup(html_content, 'html.parser')
+                links = soup.find_all('a', href=True)
+
+                # Website-specific URL extraction patterns
+                if 'allrecipes.com' in website:
+                    for link in links:
+                        href = link.get('href', '')
+                        # AllRecipes recipe URLs follow pattern: /recipe/[id]/recipe-name/
+                        if '/recipe/' in href and href.count('/') >= 3:
+                            if href.startswith('http'):
+                                recipe_urls.append(href)
+                            elif href.startswith('/'):
+                                recipe_urls.append(f"https://www.allrecipes.com{href}")
+                elif 'foodnetwork.com' in website:
+                    for link in links:
+                        href = link.get('href', '')
+                        if '/recipes/' in href:
+                            if href.startswith('http'):
+                                recipe_urls.append(href)
+                            elif href.startswith('/'):
+                                recipe_urls.append(f"https://www.foodnetwork.com{href}")
+                else:
+                    # Generic extraction for other sites
+                    for link in links:
+                        href = link.get('href', '')
+                        if '/recipe' in href.lower():
+                            if href.startswith('http'):
+                                recipe_urls.append(href)
+                            elif href.startswith('/'):
+                                recipe_urls.append(f"https://{website}{href}")
+            else:
+                # Fallback regex extraction
+                if 'allrecipes.com' in website:
+                    pattern = r'https?://(?:www\.)?allrecipes\.com/recipe/\d+/[^"\s<>]+'
+                else:
+                    pattern = rf'https?://{re.escape(website)}/[^"\s<>]*recipe[^"\s<>]*'
+
+                matches = re.findall(pattern, html_content)
+                recipe_urls.extend(matches)
+
+            # Remove duplicates and filter valid URLs
+            unique_urls = []
+            seen = set()
+            for url in recipe_urls:
+                if url not in seen and len(url) > 20:  # Basic URL validation
+                    seen.add(url)
+                    unique_urls.append(url)
+
+            # Limit results
+            unique_urls = unique_urls[:10]
+            logger.info(f"Extracted {len(unique_urls)} unique recipe URLs from {website}")
+            return unique_urls
+
+        except Exception as e:
+            logger.error(f"Error extracting recipe URLs: {e}")
+            return []
+
+    def _fetch_webpage_content(self, url: str) -> Optional[str]:
+        """Fetch webpage content with proper headers and retry logic"""
+        try:
+            # Rotate through different User-Agent strings to avoid blocking
+            user_agents = [
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15'
             ]
 
-            for i, recipe_info in enumerate(trendy_recipes):
-                results.append({
-                    "name": recipe_info["name"],
-                    "source": "pinterest.com",
-                    "description": f"This {recipe_info['name'].lower()} is taking Pinterest by storm! Perfect for sharing on social media with stunning visual appeal.",
-                    "url": f"https://pinterest.com/pin/{recipe_info['ingredient'].replace(' ', '-')}-recipe",
-                    "ingredients": self._get_ingredients_for_style("Trendy"),
-                    "instructions": self._get_instructions_for_style("Trendy", pinterest_style=True),
-                    "serving_size": 2 + (i * 2),
-                    "prep_time": 15 + (i * 5),
-                    "cook_time": 10 + (i * 3),
-                    "genre": recipe_info["genre"],
-                    "notes": ["Perfect for photos!", "Social media worthy", "Pin-worthy recipe"],
-                    "dietary_restrictions": ["vegetarian"],
-                    "cuisine_type": "trendy"
-                })
-        else:
-            # Generate specific ingredient results
-            styles = ["Instagram-Perfect", "Pinterest-Famous", "Viral", "Trending"]
+            import random
 
-            for i, style in enumerate(styles):
-                results.append({
-                    "name": f"{style} {ingredient.title()}",
-                    "source": "pinterest.com",
-                    "description": f"These {style.lower()} {ingredient} are taking Pinterest by storm! Beautiful, delicious, and perfect for sharing on social media.",
-                    "url": f"https://pinterest.com/pin/{style.lower()}-{ingredient.replace(' ', '-')}-recipe",
-                    "ingredients": self._get_ingredients_for_style(style),
-                    "instructions": self._get_instructions_for_style(style, pinterest_style=True),
-                    "serving_size": 20 + (i * 4),
-                    "prep_time": 20 + (i * 5),
-                    "cook_time": 12 + (i * 3),
-                    "genre": criteria.get('genre', 'dessert'),
-                    "notes": ["Perfect for photos!", "Social media worthy presentation", "Pin-worthy recipe"],
-                    "dietary_restrictions": ["vegetarian"],
-                    "cuisine_type": "trendy"
-                })
+            for attempt in range(3):  # Try up to 3 times
+                try:
+                    headers = {
+                        'User-Agent': random.choice(user_agents),
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Accept-Encoding': 'gzip, deflate, br',
+                        'Connection': 'keep-alive',
+                        'Upgrade-Insecure-Requests': '1',
+                        'Sec-Fetch-Dest': 'document',
+                        'Sec-Fetch-Mode': 'navigate',
+                        'Sec-Fetch-Site': 'none',
+                        'Cache-Control': 'max-age=0',
+                    }
 
-        logger.info(f"Pinterest generator returning {len(results)} results for ingredient: {ingredient}")
-        return results
+                    # Add a small delay between attempts to avoid rate limiting
+                    if attempt > 0:
+                        import time
+                        time.sleep(1)
 
-    def _generate_allrecipes_results(self, ingredient: str, criteria: Dict[str, Any], search_params: Dict[str, Any]) -> \
-            List[Dict]:
-        """Generate AllRecipes-style results (community tested)"""
-        if ingredient == "recipe":
-            # Generate popular community recipes for generic search
-            popular_recipes = [
-                {"name": "World's Best Lasagna", "ingredient": "lasagna", "genre": "dinner", "rating": 5.0},
-                {"name": "Perfect Chocolate Chip Cookies", "ingredient": "chocolate chip cookies", "genre": "dessert",
-                 "rating": 4.9},
-                {"name": "Fluffy Pancakes", "ingredient": "pancakes", "genre": "breakfast", "rating": 4.8},
-                {"name": "Classic Chicken Soup", "ingredient": "chicken soup", "genre": "dinner", "rating": 4.9}
-            ]
+                    response = requests.get(
+                        url,
+                        headers=headers,
+                        timeout=20,
+                        allow_redirects=True,
+                        verify=True
+                    )
 
-            results = []
-            for i, recipe_info in enumerate(popular_recipes):
-                results.append({
-                    "name": recipe_info["name"],
-                    "source": "allrecipes.com",
-                    "description": f"This {recipe_info['name'].lower()} has earned a {recipe_info['rating']}/5 star rating from our community! Tested and loved by thousands of home cooks.",
-                    "url": f"https://allrecipes.com/recipe/{recipe_info['ingredient'].replace(' ', '-')}",
-                    "ingredients": self._get_ingredients_for_style("Community Favorite"),
-                    "instructions": self._get_instructions_for_style("Community Favorite", community_tested=True),
-                    "serving_size": 6 + (i * 2),
-                    "prep_time": 20 + (i * 5),
-                    "cook_time": 25 + (i * 5),
-                    "genre": recipe_info["genre"],
-                    "notes": [f"{recipe_info['rating']}/5 stars from community", "Thousands of reviews",
-                              "Tested and approved"],
-                    "dietary_restrictions": ["vegetarian"] if "chicken" not in recipe_info["ingredient"] else [],
-                    "cuisine_type": "american"
-                })
-        else:
-            # Generate specific ingredient results
-            styles = ["5-Star", "Community Favorite", "Most Popular", "Highly Rated"]
-            results = []
+                    if response.status_code == 200:
+                        logger.info(f"Successfully fetched content from {url} (attempt {attempt + 1})")
+                        return response.text
+                    elif response.status_code == 403:
+                        logger.warning(f"Access forbidden (403) for {url} - trying different User-Agent")
+                        continue
+                    elif response.status_code == 404:
+                        logger.warning(f"Page not found (404) for {url}")
+                        return None
+                    else:
+                        logger.warning(f"HTTP {response.status_code} for {url} (attempt {attempt + 1})")
 
-            for i, style in enumerate(styles):
-                rating = 5.0 - (i * 0.2)
-                results.append({
-                    "name": f"{style} {ingredient.title()}",
-                    "source": "allrecipes.com",
-                    "description": f"This {style.lower()} {ingredient} recipe has been tested by our community and earned a {rating:.1f}/5 star rating. Trusted by home cooks everywhere!",
-                    "url": f"https://allrecipes.com/recipe/{style.lower().replace(' ', '-')}-{ingredient.replace(' ', '-')}",
-                    "ingredients": self._get_ingredients_for_style(style),
-                    "instructions": self._get_instructions_for_style(style, community_tested=True),
-                    "serving_size": 24,
-                    "prep_time": 15,
-                    "cook_time": 10 + i,
-                    "genre": criteria.get('genre', 'dessert'),
-                    "notes": [f"{rating:.1f}/5 stars from community", "Thousands of reviews", "Tested and approved"],
-                    "dietary_restrictions": ["vegetarian"],
-                    "cuisine_type": "american"
-                })
+                except requests.exceptions.RequestException as e:
+                    logger.warning(f"Request failed for {url} (attempt {attempt + 1}): {e}")
+                    continue
 
-        return results
+            logger.error(f"All attempts failed for {url}")
+            return None
 
-    def _generate_foodnetwork_results(self, ingredient: str, criteria: Dict[str, Any], search_params: Dict[str, Any]) -> \
-            List[Dict]:
-        """Generate Food Network-style results (chef recipes)"""
-        if ingredient == "recipe":
-            # Generate chef-inspired recipes for generic search
-            chef_recipes = [
-                {"name": "Bobby Flay's Perfect Grilled Steak", "ingredient": "grilled steak", "genre": "dinner"},
-                {"name": "Ina Garten's Lemon Bars", "ingredient": "lemon bars", "genre": "dessert"},
-                {"name": "Giada's Fresh Pasta Primavera", "ingredient": "pasta primavera", "genre": "dinner"},
-                {"name": "Emeril's Breakfast Hash", "ingredient": "breakfast hash", "genre": "breakfast"}
-            ]
+        except Exception as e:
+            logger.error(f"Error fetching webpage {url}: {e}")
+            return None
 
-            results = []
-            for i, recipe_info in enumerate(chef_recipes):
-                results.append({
-                    "name": recipe_info["name"],
-                    "source": "foodnetwork.com",
-                    "description": f"Learn to make this {recipe_info['name'].lower()} with professional techniques from Food Network's top chefs. Restaurant-quality results at home!",
-                    "url": f"https://foodnetwork.com/recipes/{recipe_info['ingredient'].replace(' ', '-')}",
-                    "ingredients": self._get_ingredients_for_style("Chef's Special", professional=True),
-                    "instructions": self._get_instructions_for_style("Chef's Special", professional=True),
-                    "serving_size": 4 + (i * 2),
-                    "prep_time": 25 + (i * 5),
-                    "cook_time": 20 + (i * 5),
-                    "genre": recipe_info["genre"],
-                    "notes": ["Professional chef techniques", "Restaurant-quality results", "Celebrity chef recipe"],
-                    "dietary_restrictions": ["vegetarian"] if "steak" not in recipe_info["ingredient"] else [],
-                    "cuisine_type": "professional"
-                })
-        else:
-            # Generate specific ingredient results
-            chefs = ["Chef's Special", "Professional", "Restaurant-Style", "Gourmet"]
-            results = []
+    def _scrape_and_parse_recipe(self, url: str, ingredient: str) -> Optional[Dict]:
+        """Scrape a recipe URL and parse it"""
+        try:
+            logger.info(f"Scraping recipe from: {url}")
 
-            for i, style in enumerate(chefs):
-                results.append({
-                    "name": f"{style} {ingredient.title()}",
-                    "source": "foodnetwork.com",
-                    "description": f"This {style.lower()} {ingredient} recipe brings professional techniques to your home kitchen. Learn from the experts!",
-                    "url": f"https://foodnetwork.com/recipes/{style.lower().replace(' ', '-')}-{ingredient.replace(' ', '-')}",
-                    "ingredients": self._get_ingredients_for_style(style, professional=True),
-                    "instructions": self._get_instructions_for_style(style, professional=True),
-                    "serving_size": 18 + (i * 2),
-                    "prep_time": 25 + (i * 5),
-                    "cook_time": 12 + (i * 2),
-                    "genre": criteria.get('genre', 'dessert'),
-                    "notes": ["Professional chef techniques", "Restaurant-quality results", "Expert tips included"],
-                    "dietary_restrictions": ["vegetarian"],
-                    "cuisine_type": "professional"
-                })
+            page_content = self._fetch_webpage_content(url)
+            if not page_content:
+                return None
 
-        return results
+            structured_data = self._extract_structured_recipe_data(page_content)
+            if structured_data:
+                structured_data['url'] = url
+                structured_data['source'] = self._extract_domain_name(url)
+                return structured_data
 
-    def _generate_food_com_results(self, ingredient: str, criteria: Dict[str, Any], search_params: Dict[str, Any]) -> \
-            List[Dict]:
-        """Generate Food.com-style results (home cook friendly)"""
-        if ingredient == "recipe":
-            # Generate beginner-friendly recipes for generic search
-            easy_recipes = [
-                {"name": "Easy 3-Ingredient Cookies", "ingredient": "3-ingredient cookies", "genre": "dessert"},
-                {"name": "Simple One-Pot Chicken and Rice", "ingredient": "chicken and rice", "genre": "dinner"},
-                {"name": "Quick Microwave Mug Cake", "ingredient": "mug cake", "genre": "dessert"},
-                {"name": "Beginner's Perfect Scrambled Eggs", "ingredient": "scrambled eggs", "genre": "breakfast"}
-            ]
+            # Try AI parsing if available (lazy import to avoid circular dependency)
+            try:
+                from ..utils.ai_helper import ai_helper
 
-            results = []
-            for i, recipe_info in enumerate(easy_recipes):
-                results.append({
-                    "name": recipe_info["name"],
-                    "source": "food.com",
-                    "description": f"This {recipe_info['name'].lower()} is perfect for beginners! Simple ingredients, clear instructions, and delicious results every time.",
-                    "url": f"https://food.com/recipe/{recipe_info['ingredient'].replace(' ', '-')}",
-                    "ingredients": self._get_ingredients_for_style("Easy", simple=True),
-                    "instructions": self._get_instructions_for_style("Easy", simple=True),
-                    "serving_size": 2 + (i * 2),
-                    "prep_time": 5 + (i * 3),
-                    "cook_time": 10 + (i * 5),
-                    "genre": recipe_info["genre"],
-                    "notes": ["Beginner-friendly", "Simple ingredients", "Family approved"],
-                    "dietary_restrictions": ["vegetarian"] if "chicken" not in recipe_info["ingredient"] else [],
-                    "cuisine_type": "home-style"
-                })
-        else:
-            # Generate specific ingredient results
-            styles = ["Easy", "Quick & Simple", "Family-Friendly", "Beginner-Perfect"]
-            results = []
+                if ai_helper and ai_helper.is_configured():
+                    clean_text = self._extract_clean_recipe_text(page_content)
 
-            for i, style in enumerate(styles):
-                results.append({
-                    "name": f"{style} {ingredient.title()}",
-                    "source": "food.com",
-                    "description": f"This {style.lower()} {ingredient} recipe is perfect for home cooks of all skill levels. Simple ingredients, great results!",
-                    "url": f"https://food.com/recipe/{style.lower().replace(' ', '-')}-{ingredient.replace(' ', '-')}",
-                    "ingredients": self._get_ingredients_for_style(style, simple=True),
-                    "instructions": self._get_instructions_for_style(style, simple=True),
-                    "serving_size": 24,
-                    "prep_time": 10 + (i * 3),
-                    "cook_time": 8 + (i * 2),
-                    "genre": criteria.get('genre', 'dessert'),
-                    "notes": ["Beginner-friendly", "Simple ingredients", "Family approved"],
-                    "dietary_restrictions": ["vegetarian"],
-                    "cuisine_type": "home-style"
-                })
+                    if clean_text and len(clean_text) > 100:
+                        try:
+                            response = ai_helper.client.chat.completions.create(
+                                model=ai_helper.model,
+                                messages=[
+                                    {"role": "system", "content": """Extract recipe information from webpage content and return as JSON.
+Extract these fields (return null if recipe not found):
+{
+  "name": "recipe title",
+  "description": "brief description", 
+  "ingredients": [{"name": "ingredient", "quantity": number, "unit": "cup|tablespoon|etc"}],
+  "instructions": ["step 1", "step 2", ...],
+  "serving_size": number,
+  "prep_time": minutes_as_number,
+  "cook_time": minutes_as_number,
+  "genre": "breakfast|lunch|dinner|snack|dessert|appetizer",
+  "notes": ["tip 1", "tip 2", ...],
+  "dietary_restrictions": ["gluten_free", "dairy_free", "egg_free"]
+}
+Return ONLY the JSON object."""},
+                                    {"role": "user", "content": f"Extract recipe from: {clean_text[:4000]}"}
+                                ],
+                                max_tokens=1200,
+                                temperature=0.0
+                            )
 
-        return results
+                            result_text = response.choices[0].message.content.strip()
+                            if result_text.startswith("```json"):
+                                result_text = result_text[7:-3]
+                            elif result_text.startswith("```"):
+                                result_text = result_text[3:-3]
 
-    def _generate_epicurious_results(self, ingredient: str, criteria: Dict[str, Any], search_params: Dict[str, Any]) -> \
-            List[Dict]:
-        """Generate Epicurious-style results (sophisticated)"""
-        if ingredient == "recipe":
-            # Generate sophisticated recipes for generic search
-            gourmet_recipes = [
-                {"name": "Sophisticated Coq au Vin", "ingredient": "coq au vin", "genre": "dinner"},
-                {"name": "Artisanal Sourdough Bread", "ingredient": "sourdough bread", "genre": "snack"},
-                {"name": "Refined Dark Chocolate Tart", "ingredient": "chocolate tart", "genre": "dessert"},
-                {"name": "Gourmet Mushroom Risotto", "ingredient": "mushroom risotto", "genre": "dinner"}
-            ]
+                            parsed_recipe = json.loads(result_text)
 
-            results = []
-            for i, recipe_info in enumerate(gourmet_recipes):
-                results.append({
-                    "name": recipe_info["name"],
-                    "source": "epicurious.com",
-                    "description": f"This {recipe_info['name'].lower()} elevates home cooking with sophisticated techniques and premium ingredients for the discerning palate.",
-                    "url": f"https://epicurious.com/recipes/food/views/{recipe_info['ingredient'].replace(' ', '-')}",
-                    "ingredients": self._get_ingredients_for_style("Sophisticated", gourmet=True),
-                    "instructions": self._get_instructions_for_style("Sophisticated", gourmet=True),
-                    "serving_size": 4 + (i * 2),
-                    "prep_time": 40 + (i * 10),
-                    "cook_time": 30 + (i * 10),
-                    "genre": recipe_info["genre"],
-                    "notes": ["Premium ingredients", "Sophisticated flavors", "Gourmet techniques"],
-                    "dietary_restrictions": ["vegetarian"],
-                    "cuisine_type": "gourmet"
-                })
-        else:
-            # Generate specific ingredient results
-            styles = ["Sophisticated", "Artisanal", "Gourmet", "Refined"]
-            results = []
+                            if parsed_recipe and parsed_recipe.get('name'):
+                                parsed_recipe['url'] = url
+                                parsed_recipe['source'] = self._extract_domain_name(url)
+                                return parsed_recipe
 
-            for i, style in enumerate(styles):
-                results.append({
-                    "name": f"{style} {ingredient.title()}",
-                    "source": "epicurious.com",
-                    "description": f"This {style.lower()} {ingredient} recipe elevates a classic with premium ingredients and refined techniques for discerning palates.",
-                    "url": f"https://epicurious.com/recipes/food/views/{style.lower()}-{ingredient.replace(' ', '-')}",
-                    "ingredients": self._get_ingredients_for_style(style, gourmet=True),
-                    "instructions": self._get_instructions_for_style(style, gourmet=True),
-                    "serving_size": 16 + (i * 2),
-                    "prep_time": 30 + (i * 5),
-                    "cook_time": 15 + (i * 3),
-                    "genre": criteria.get('genre', 'dessert'),
-                    "notes": ["Premium ingredients", "Sophisticated flavors", "Gourmet techniques"],
-                    "dietary_restrictions": ["vegetarian"],
-                    "cuisine_type": "gourmet"
-                })
+                        except (json.JSONDecodeError, KeyError) as e:
+                            logger.error(f"Error parsing AI response: {e}")
 
-        return results
+            except ImportError:
+                logger.warning("AI Helper not available for recipe parsing")
 
-    def _generate_generic_results(self, ingredient: str, criteria: Dict[str, Any], search_params: Dict[str, Any]) -> \
-            List[Dict]:
-        """Generate generic search results as fallback"""
-        return [
-            {
-                "name": f"Classic {ingredient.title()} Recipe",
-                "source": "allrecipes.com",
-                "description": f"A traditional {ingredient} recipe with proven results.",
-                "url": f"https://allrecipes.com/recipe/classic-{ingredient.replace(' ', '-')}",
-                "ingredients": self._get_ingredients_for_style("Classic"),
-                "instructions": self._get_instructions_for_style("Classic"),
-                "serving_size": 24,
-                "prep_time": 15,
-                "cook_time": 10,
-                "genre": criteria.get('genre', 'dessert'),
-                "notes": ["Tried and true recipe"],
-                "dietary_restrictions": ["vegetarian"],
-                "cuisine_type": "traditional"
+            # Fallback to basic recipe creation
+            return self._create_basic_recipe_from_page(page_content, url, ingredient)
+
+        except Exception as e:
+            logger.error(f"Error scraping recipe from {url}: {e}")
+            return None
+
+    def _extract_structured_recipe_data(self, html_content: str) -> Optional[Dict]:
+        """Extract recipe data from JSON-LD structured data"""
+        try:
+            if BS4_AVAILABLE:
+                soup = BeautifulSoup(html_content, 'html.parser')
+                json_scripts = soup.find_all('script', type='application/ld+json')
+
+                for script in json_scripts:
+                    try:
+                        data = json.loads(script.string)
+                        if isinstance(data, list):
+                            data = data[0] if data else {}
+
+                        if data.get('@type') == 'Recipe':
+                            return self._parse_recipe_schema(data)
+
+                        if 'graph' in data:
+                            for item in data['graph']:
+                                if item.get('@type') == 'Recipe':
+                                    return self._parse_recipe_schema(item)
+
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error extracting structured data: {e}")
+            return None
+
+    def _parse_recipe_schema(self, schema_data: Dict) -> Optional[Dict]:
+        """Parse Recipe schema data into our format"""
+        try:
+            recipe = {
+                'name': schema_data.get('name', ''),
+                'description': schema_data.get('description', ''),
+                'ingredients': [],
+                'instructions': [],
+                'serving_size': 4,
+                'prep_time': 0,
+                'cook_time': 0,
+                'genre': 'dinner',
+                'notes': [],
+                'dietary_restrictions': []
             }
-        ]
 
-    def _get_ingredients_for_style(self, style: str, **kwargs) -> List[str]:
-        """Get ingredients based on recipe style"""
-        base_ingredients = [
-            "2 cups all-purpose flour",
-            "1 cup butter, softened",
-            "3/4 cup granulated sugar",
-            "1/2 cup brown sugar",
-            "2 large eggs",
-            "1 teaspoon vanilla extract",
-            "1 teaspoon baking soda",
-            "1/2 teaspoon salt"
-        ]
+            recipe_ingredients = schema_data.get('recipeIngredient', [])
+            if isinstance(recipe_ingredients, list):
+                for ing_text in recipe_ingredients:
+                    parsed_ing = self._parse_ingredient_text(str(ing_text))
+                    if parsed_ing:
+                        recipe['ingredients'].append(parsed_ing)
 
-        if kwargs.get('gourmet'):
-            return [
-                "2 1/4 cups European cake flour",
-                "1 cup premium European butter",
-                "3/4 cup organic cane sugar",
-                "1/2 cup muscovado sugar",
-                "2 farm-fresh eggs",
-                "1 tablespoon Madagascar vanilla extract",
-                "1 teaspoon aluminum-free baking soda",
-                "1/2 teaspoon sea salt",
-                "8 oz high-quality dark chocolate, chopped"
-            ]
-        elif kwargs.get('professional'):
-            return base_ingredients + ["1 cup high-quality chocolate chips", "1/4 teaspoon cream of tartar"]
-        elif kwargs.get('simple'):
-            return [
-                "2 cups flour",
-                "1 cup butter",
-                "1 cup sugar",
-                "2 eggs",
-                "1 tsp vanilla",
-                "1 tsp baking soda",
-                "1/2 tsp salt",
-                "1 cup chocolate chips"
-            ]
-        elif style in ["Popular", "Trendy", "Community Favorite"]:
-            return base_ingredients + ["1 1/2 cups chocolate chips"]
-        else:
-            return base_ingredients + ["1 cup chocolate chips"]
+            instructions = schema_data.get('recipeInstructions', [])
+            if isinstance(instructions, list):
+                for inst in instructions:
+                    if isinstance(inst, str):
+                        recipe['instructions'].append(inst)
+                    elif isinstance(inst, dict):
+                        text = inst.get('text', inst.get('name', ''))
+                        if text:
+                            recipe['instructions'].append(text)
 
-    def _get_instructions_for_style(self, style: str, **kwargs) -> List[str]:
-        """Get instructions based on recipe style"""
-        if kwargs.get('pinterest_style'):
-            return [
-                "📸 Preheat oven to 375°F and line baking sheets with parchment",
-                "✨ Cream butter and sugars until light and fluffy (perfect for photos!)",
-                "🥚 Add eggs one at a time, then vanilla",
-                "🍪 Mix in dry ingredients until just combined",
-                "📌 Scoop dough onto prepared sheets using a cookie scoop for uniform size",
-                "⏰ Bake 9-11 minutes until golden edges",
-                "💫 Cool completely for the perfect Instagram shot!"
-            ]
-        elif kwargs.get('professional'):
-            return [
-                "Preheat oven to 375°F with racks in upper and lower thirds",
-                "Using a stand mixer, cream butter and sugars on medium speed for 5 minutes until very light",
-                "Add eggs one at a time, beating well after each addition, then vanilla",
-                "In a separate bowl, whisk together flour, baking soda, salt, and cream of tartar",
-                "On low speed, gradually add dry ingredients until just combined",
-                "Fold in chocolate chips by hand to avoid overmixing",
-                "Using a 1.5-inch scoop, portion dough 2 inches apart on parchment-lined sheets",
-                "Bake 9-11 minutes, rotating pans halfway through, until edges are set",
-                "Cool on pans for 5 minutes before transferring to wire racks"
-            ]
-        elif kwargs.get('simple'):
-            return [
-                "Heat oven to 375°F",
-                "Mix butter and sugar",
-                "Add eggs and vanilla",
-                "Mix in flour, baking soda, and salt",
-                "Stir in chocolate chips",
-                "Drop spoonfuls on cookie sheet",
-                "Bake 9-11 minutes",
-                "Cool and enjoy!"
-            ]
-        elif kwargs.get('gourmet'):
-            return [
-                "Preheat oven to 350°F and line baking sheets with silicone mats",
-                "Using a stand mixer with paddle attachment, cream butter and sugars for 8 minutes until very pale",
-                "Incorporate eggs one at a time, ensuring full emulsion, then add vanilla",
-                "Sift together flour, baking soda, and salt in a separate bowl",
-                "Fold dry ingredients into butter mixture using a wooden spoon until just combined",
-                "Gently fold in chopped chocolate pieces",
-                "Using a portion scoop, place dough 3 inches apart on prepared sheets",
-                "Bake 12-14 minutes until edges are lightly golden but centers remain soft",
-                "Allow to rest on baking sheets for 10 minutes before transferring to cooling racks"
-            ]
-        elif kwargs.get('community_tested'):
-            return [
-                "Preheat oven to 375°F (community recommended temperature)",
-                "Cream butter and sugars until fluffy - this step is crucial according to reviewers!",
-                "Beat in eggs one at a time, then vanilla (fresh vanilla makes a difference!)",
-                "Mix flour, baking soda, and salt in separate bowl",
-                "Gradually combine wet and dry ingredients (don't overmix!)",
-                "Fold in chocolate chips - use good quality ones as recommended by the community",
-                "Drop rounded spoonfuls onto ungreased sheets (2 inches apart)",
-                "Bake 9-11 minutes until edges are golden - watch carefully!",
-                "Cool on sheet for 5 minutes before transferring (prevents breaking)"
-            ]
-        elif style in ["Popular", "Trendy", "Community Favorite"]:
-            return [
-                "Preheat oven to 375°F",
-                "In a large bowl, cream together butter and sugars until light and fluffy",
-                "Beat in eggs one at a time, then add vanilla extract",
-                "In separate bowl, whisk together flour, baking soda, and salt",
-                "Gradually mix dry ingredients into wet ingredients until just combined",
-                "Fold in add-ins (chocolate chips, nuts, etc.)",
-                "Drop rounded tablespoons of dough onto lined baking sheets",
-                "Bake for 9-11 minutes until edges are golden brown",
-                "Cool on baking sheet for 5 minutes before transferring to wire rack"
-            ]
-        else:
-            return [
-                "Preheat oven to 375°F (190°C)",
-                "In a large bowl, cream together butter and sugars until light and fluffy",
-                "Beat in eggs one at a time, then add vanilla",
-                "In separate bowl, whisk together flour, baking soda, and salt",
-                "Gradually mix dry ingredients into wet ingredients",
-                "Stir in chocolate chips",
-                "Drop rounded tablespoons of dough onto ungreased baking sheets",
-                "Bake for 9-11 minutes until golden brown",
-                "Cool on baking sheet for 5 minutes before transferring to wire rack"
-            ]
+            prep_time = schema_data.get('prepTime', '')
+            cook_time = schema_data.get('cookTime', '')
+            recipe['prep_time'] = self._parse_iso_duration(prep_time)
+            recipe['cook_time'] = self._parse_iso_duration(cook_time)
 
-    def _build_search_query(self, criteria: Dict[str, Any], search_params: Dict[str, Any] = None) -> str:
-        """Build search query for external APIs"""
-        query_parts = []
+            recipe_yield = schema_data.get('recipeYield', schema_data.get('yield', ''))
+            if recipe_yield:
+                try:
+                    match = re.search(r'\d+', str(recipe_yield))
+                    if match:
+                        recipe['serving_size'] = int(match.group())
+                except:
+                    pass
 
-        if criteria and criteria.get('ingredient'):
-            query_parts.append(f"recipe {criteria['ingredient']}")
-        elif criteria and criteria.get('genre'):
-            query_parts.append(f"{criteria['genre']} recipe")
-        elif criteria and criteria.get('name'):
-            query_parts.append(criteria['name'])
-        else:
-            query_parts.append("cookie recipe")
+            if recipe['name'] and len(recipe['ingredients']) > 0 and len(recipe['instructions']) > 0:
+                return recipe
 
-        if search_params:
-            if search_params.get('cuisine_type'):
-                query_parts.append(search_params['cuisine_type'])
-            if search_params.get('difficulty_level'):
-                query_parts.append(search_params['difficulty_level'])
+            return None
 
-        return " ".join(query_parts) if query_parts else "cookie recipe"
+        except Exception as e:
+            logger.error(f"Error parsing recipe schema: {e}")
+            return None
+
+    def _extract_clean_recipe_text(self, html_content: str) -> str:
+        """Extract clean text content focusing on recipe-relevant sections"""
+        try:
+            if BS4_AVAILABLE:
+                soup = BeautifulSoup(html_content, 'html.parser')
+
+                for element in soup(['script', 'style', 'nav', 'footer', 'header', 'aside', 'ad']):
+                    element.decompose()
+
+                recipe_containers = soup.find_all(['div', 'section', 'article'],
+                                                  class_=re.compile(r'recipe|ingredient|instruction|direction', re.I))
+
+                if recipe_containers:
+                    recipe_text = ' '.join([container.get_text() for container in recipe_containers])
+                else:
+                    main_content = soup.find(['main', 'article', 'div'],
+                                             class_=re.compile(r'content|main|recipe', re.I))
+                    if main_content:
+                        recipe_text = main_content.get_text()
+                    else:
+                        recipe_text = soup.get_text()
+
+                recipe_text = re.sub(r'\s+', ' ', recipe_text).strip()
+                return recipe_text
+
+            else:
+                text = re.sub(r'<script.*?</script>', '', html_content, flags=re.DOTALL)
+                text = re.sub(r'<style.*?</style>', '', text, flags=re.DOTALL)
+                text = re.sub(r'<[^>]+>', '', text)
+                text = re.sub(r'\s+', ' ', text).strip()
+                return text
+
+        except Exception as e:
+            logger.error(f"Error extracting clean text: {e}")
+            return ""
+
+    def _create_basic_recipe_from_page(self, html_content: str, url: str, ingredient: str) -> Dict:
+        """Create a basic recipe when structured data isn't available"""
+        try:
+            title = "Recipe"
+            if BS4_AVAILABLE:
+                soup = BeautifulSoup(html_content, 'html.parser')
+                title_tag = soup.find('title')
+                if title_tag:
+                    title = title_tag.get_text().strip()
+                    title = re.sub(r'\s*\|\s*.*$', '', title)
+                    title = re.sub(r'\s*-\s*.*$', '', title)
+
+            return {
+                'name': title,
+                'description': f'Recipe found on {self._extract_domain_name(url)}',
+                'ingredients': [
+                    {'name': f'{ingredient} (see website for details)', 'quantity': 1, 'unit': 'recipe'}
+                ],
+                'instructions': [
+                    f'Visit the original recipe at {url} for complete instructions'
+                ],
+                'serving_size': 4,
+                'prep_time': 30,
+                'cook_time': 30,
+                'genre': 'dinner',
+                'notes': [f'Original recipe from {self._extract_domain_name(url)}'],
+                'dietary_restrictions': []
+            }
+
+        except Exception as e:
+            logger.error(f"Error creating basic recipe: {e}")
+            return self._generate_fallback_recipe(ingredient)[0]
+
+    def _parse_ingredient_text(self, text: str) -> Optional[Dict]:
+        """Parse ingredient text into quantity, unit, name"""
+        try:
+            pattern = r'^(\d+(?:\.\d+)?(?:/\d+)?)\s*(\w+)?\s+(.+)$'
+            match = re.match(pattern, text.strip())
+
+            if match:
+                quantity_str, unit, name = match.groups()
+
+                try:
+                    if '/' in quantity_str:
+                        parts = quantity_str.split('/')
+                        quantity = float(parts[0]) / float(parts[1])
+                    else:
+                        quantity = float(quantity_str)
+                except:
+                    quantity = 1.0
+
+                if not unit:
+                    unit = 'piece'
+
+                return {
+                    'name': name.strip(),
+                    'quantity': quantity,
+                    'unit': unit.lower()
+                }
+            else:
+                return {
+                    'name': text.strip(),
+                    'quantity': 1,
+                    'unit': 'piece'
+                }
+
+        except Exception as e:
+            logger.error(f"Error parsing ingredient text '{text}': {e}")
+            return None
+
+    def _parse_iso_duration(self, duration_str: str) -> int:
+        """Parse ISO 8601 duration or text duration to minutes"""
+        try:
+            if not duration_str:
+                return 0
+
+            duration_str = str(duration_str).upper()
+
+            if duration_str.startswith('PT'):
+                total_minutes = 0
+                hours_match = re.search(r'(\d+)H', duration_str)
+                if hours_match:
+                    total_minutes += int(hours_match.group(1)) * 60
+                minutes_match = re.search(r'(\d+)M', duration_str)
+                if minutes_match:
+                    total_minutes += int(minutes_match.group(1))
+                return total_minutes
+
+            total_minutes = 0
+            hours_match = re.search(r'(\d+)\s*(?:hour|hr)', duration_str, re.IGNORECASE)
+            if hours_match:
+                total_minutes += int(hours_match.group(1)) * 60
+            minutes_match = re.search(r'(\d+)\s*(?:minute|min)', duration_str, re.IGNORECASE)
+            if minutes_match:
+                total_minutes += int(minutes_match.group(1))
+            return total_minutes
+
+        except Exception as e:
+            logger.error(f"Error parsing duration '{duration_str}': {e}")
+            return 0
+
+    def _extract_domain_name(self, url: str) -> str:
+        """Extract clean domain name from URL"""
+        try:
+            domain = urlparse(url).netloc
+            return domain.replace('www.', '')
+        except:
+            return 'external'
+
+    def _generate_fallback_recipe(self, ingredient: str) -> List[Dict]:
+        """Generate a single fallback recipe when everything fails"""
+        return [{
+            "name": f"Classic {ingredient.title()} Recipe",
+            "source": "fallback",
+            "description": f"A reliable recipe for {ingredient} when search encounters issues.",
+            "url": "https://example.com/fallback-recipe",
+            "ingredients": [
+                {"name": "main ingredient", "quantity": 1, "unit": "cup"},
+                {"name": "supporting ingredients", "quantity": 2, "unit": "tablespoons"}
+            ],
+            "instructions": [
+                "Combine ingredients according to your preferred method",
+                "Cook as desired until done"
+            ],
+            "serving_size": 4,
+            "prep_time": 15,
+            "cook_time": 20,
+            "genre": "dinner",
+            "notes": ["Fallback recipe - please try searching again"],
+            "dietary_restrictions": [],
+            "cuisine_type": "general"
+        }]
+
+    def _generate_fallback_recipes_for_site(self, ingredient: str, website: str, criteria: Dict[str, Any]) -> List[
+        Dict]:
+        """Generate fallback recipes when site-specific search fails"""
+        website_name = website.replace('.com', '').title()
+
+        return [{
+            "name": f"{website_name} Style {ingredient.title()}",
+            "source": website,
+            "description": f"A {ingredient} recipe in the style of {website_name}. (Unable to fetch live data)",
+            "url": f"https://{website}/search?q={ingredient.replace(' ', '+')}",
+            "ingredients": [
+                {"name": ingredient.split()[0] if ingredient != 'recipe' else 'main ingredient', "quantity": 2,
+                 "unit": "cups"},
+                {"name": "additional ingredients", "quantity": 1, "unit": "cup"}
+            ],
+            "instructions": [
+                f"Follow {website_name}'s typical preparation method",
+                "Cook according to your preference"
+            ],
+            "serving_size": criteria.get('serving_size', 4),
+            "prep_time": 15,
+            "cook_time": 25,
+            "genre": criteria.get('genre', 'dinner'),
+            "notes": [f"Please visit {website} directly for the most current recipes"],
+            "dietary_restrictions": [],
+            "cuisine_type": "general"
+        }]
+
+    def test_search_url(self, ingredient: str, website: str) -> Dict[str, Any]:
+        """Test function to debug search URLs"""
+        try:
+            search_urls = self._build_search_urls(ingredient, website)
+            results = {}
+
+            for i, url in enumerate(search_urls):
+                logger.info(f"Testing URL {i + 1}: {url}")
+                content = self._fetch_webpage_content(url)
+
+                results[f"url_{i + 1}"] = {
+                    "url": url,
+                    "success": content is not None,
+                    "content_length": len(content) if content else 0,
+                    "has_recipe_links": False
+                }
+
+                if content:
+                    # Quick check for recipe-related content
+                    content_lower = content.lower()
+                    recipe_indicators = ['recipe', 'ingredient', 'instruction', 'cooking', 'baking']
+                    results[f"url_{i + 1}"]["has_recipe_content"] = any(
+                        word in content_lower for word in recipe_indicators)
+
+                    # Try to extract some URLs
+                    recipe_urls = self._extract_recipe_urls_from_search(content, website)
+                    results[f"url_{i + 1}"]["recipe_urls_found"] = len(recipe_urls)
+                    results[f"url_{i + 1}"]["sample_urls"] = recipe_urls[:3]
+
+            return results
+
+        except Exception as e:
+            return {"error": str(e)}
+        """Generate fallback recipes for multi-site search failures"""
+        return [{
+            "name": f"Popular {ingredient.title()} Recipe",
+            "source": "multiple sites",
+            "description": f"A well-loved {ingredient} recipe from across the web.",
+            "url": f"https://www.google.com/search?q={ingredient.replace(' ', '+')}+recipe",
+            "ingredients": [
+                {"name": ingredient if ingredient != 'recipe' else 'main ingredient', "quantity": 1, "unit": "cup"},
+                {"name": "complementary ingredients", "quantity": 2, "unit": "tablespoons"}
+            ],
+            "instructions": [
+                "Prepare ingredients as needed",
+                "Combine and cook according to standard methods"
+            ],
+            "serving_size": criteria.get('serving_size', 4),
+            "prep_time": 20,
+            "cook_time": 25,
+            "genre": criteria.get('genre', 'dinner'),
+            "notes": ["Recipe data temporarily unavailable - please try again"],
+            "dietary_restrictions": [],
+            "cuisine_type": "popular"
+        }]
+
+    def test_search_url(self, ingredient: str, website: str) -> Dict[str, Any]:
+        """Test function to debug search URLs"""
+        try:
+            search_urls = self._build_search_urls(ingredient, website)
+            results = {}
+
+            for i, url in enumerate(search_urls):
+                logger.info(f"Testing URL {i + 1}: {url}")
+                content = self._fetch_webpage_content(url)
+
+                results[f"url_{i + 1}"] = {
+                    "url": url,
+                    "success": content is not None,
+                    "content_length": len(content) if content else 0,
+                    "has_recipe_links": False
+                }
+
+                if content:
+                    # Quick check for recipe-related content
+                    content_lower = content.lower()
+                    recipe_indicators = ['recipe', 'ingredient', 'instruction', 'cooking', 'baking']
+                    results[f"url_{i + 1}"]["has_recipe_content"] = any(
+                        word in content_lower for word in recipe_indicators)
+
+                    # Try to extract some URLs
+                    recipe_urls = self._extract_recipe_urls_from_search(content, website)
+                    results[f"url_{i + 1}"]["recipe_urls_found"] = len(recipe_urls)
+                    results[f"url_{i + 1}"]["sample_urls"] = recipe_urls[:3]
+
+            return results
+
+        except Exception as e:
+            return {"error": str(e)}
 
 
 class DatabaseSearchTool:
@@ -789,7 +858,6 @@ class DatabaseSearchTool:
 
             query = {}
 
-            # Handle different search criteria
             if "genre" in criteria:
                 genre_term = criteria["genre"].lower()
                 genre_patterns = [genre_term]
@@ -803,23 +871,17 @@ class DatabaseSearchTool:
                 ingredient_term = criteria["ingredient"]
                 escaped_ingredient = re.escape(ingredient_term)
 
-                # Create multiple search patterns for better matching
                 search_patterns = [escaped_ingredient]
 
-                # Add singular/plural variations
                 if ingredient_term.endswith('s') and len(ingredient_term) > 3:
-                    # Remove 's' for singular (cookies -> cookie)
                     singular = ingredient_term[:-1]
                     search_patterns.append(re.escape(singular))
                 elif not ingredient_term.endswith('s'):
-                    # Add 's' for plural (cookie -> cookies)
                     plural = ingredient_term + 's'
                     search_patterns.append(re.escape(plural))
 
-                # Create flexible regex pattern (no word boundaries for partial matching)
                 pattern_string = "|".join(search_patterns)
 
-                # Search across multiple fields for comprehensive results
                 query["$or"] = [
                     {"ingredients.name": {"$regex": pattern_string, "$options": "i"}},
                     {"recipe_name": {"$regex": pattern_string, "$options": "i"}},
@@ -842,8 +904,6 @@ class DatabaseSearchTool:
                 query["dietary_restrictions"] = {"$in": criteria["dietary_restrictions"]}
 
             if "show_favorites" in criteria and criteria["show_favorites"]:
-                # Handle favorites stored in separate collection
-                # Get all favorited recipe_ids from the favorites collection
                 favorite_recipe_ids = []
                 try:
                     favorite_docs = list(db.favorites.find({}, {"recipe_id": 1}))
@@ -856,7 +916,6 @@ class DatabaseSearchTool:
                     logger.error(f"Error getting favorite recipe IDs: {e}")
 
                 if favorite_recipe_ids:
-                    # Convert string IDs to ObjectId if needed
                     object_ids = []
                     for fav_id in favorite_recipe_ids:
                         try:
@@ -865,25 +924,21 @@ class DatabaseSearchTool:
                             else:
                                 object_ids.append(fav_id)
                         except:
-                            object_ids.append(fav_id)  # Keep as-is if conversion fails
+                            object_ids.append(fav_id)
 
-                    # Search for recipes with these IDs
                     query["_id"] = {"$in": object_ids}
                 else:
-                    # No favorites found, return empty result
                     return []
 
             logger.info(f"Database search query: {query}")
             recipes = list(db.recipes.find(query).limit(50))
 
-            # Enhanced fallback: if no matches and ingredient has spaces, try individual words
             if len(recipes) == 0 and "ingredient" in criteria and " " in criteria["ingredient"]:
                 words = criteria["ingredient"].split()
                 word_patterns = []
 
                 for word in words:
                     word_patterns.append(re.escape(word))
-                    # Add singular/plural for each word too
                     if word.endswith('s') and len(word) > 3:
                         word_patterns.append(re.escape(word[:-1]))
                     elif not word.endswith('s'):
@@ -941,8 +996,6 @@ class DatabaseSearchTool:
                 query["dietary_restrictions"] = {"$in": criteria["dietary_restrictions"]}
 
             if "show_favorites" in criteria and criteria["show_favorites"]:
-                # Handle favorites stored in separate collection
-                # Get all favorited recipe_ids from the favorites collection
                 favorite_recipe_ids = []
                 try:
                     favorite_docs = list(db.favorites.find({}, {"recipe_id": 1}))
@@ -951,8 +1004,6 @@ class DatabaseSearchTool:
                     logger.error(f"Error getting favorite recipe IDs for count: {e}")
 
                 if favorite_recipe_ids:
-                    # Convert string IDs to ObjectId if needed
-                    from bson import ObjectId
                     object_ids = []
                     for fav_id in favorite_recipe_ids:
                         try:
@@ -961,12 +1012,10 @@ class DatabaseSearchTool:
                             else:
                                 object_ids.append(fav_id)
                         except:
-                            object_ids.append(fav_id)  # Keep as-is if conversion fails
+                            object_ids.append(fav_id)
 
-                    # Count recipes with these IDs
                     query["_id"] = {"$in": object_ids}
                 else:
-                    # No favorites found, return 0
                     return 0
 
             return db.recipes.count_documents(query)
@@ -995,8 +1044,7 @@ class DatabaseSearchTool:
             "dietary_restrictions": recipe.get("dietary_restrictions", []),
             "created_by": recipe["created_by"],
             "created_at": recipe["created_at"].strftime("%Y-%m-%d") if recipe.get("created_at") else "",
-            "source": "Your Recipe Database"
-        }
+            "source": "Your Recipe Database"}
 
 
 class IngredientSuggestionTool:
@@ -1017,7 +1065,6 @@ class IngredientSuggestionTool:
                 matching_recipes = DatabaseSearchTool().execute({"ingredient": ingredient})
                 recipes_with_ingredients.extend(matching_recipes)
 
-            # Remove duplicates
             unique_recipes = list({recipe['id']: recipe for recipe in recipes_with_ingredients}.values())
             return unique_recipes
 
@@ -1038,7 +1085,6 @@ class FileParsingTool:
         try:
             logger.info(f"Parsing file: {filename}, type: {file_type}")
 
-            # Extract text based on file type
             extracted_text = ""
 
             if file_type == "application/pdf" or file_extension == ".pdf":
@@ -1073,8 +1119,6 @@ class FileParsingTool:
     def _extract_text_from_pdf(self, file_content: bytes) -> str:
         """Extract text from PDF file"""
         try:
-            # Would use PyPDF2 or similar library
-            # For now, return placeholder
             return "PDF parsing not implemented yet"
         except Exception as e:
             logger.error(f"Error extracting text from PDF: {e}")
@@ -1083,8 +1127,6 @@ class FileParsingTool:
     def _extract_text_from_image(self, file_content: bytes) -> str:
         """Extract text from image using OCR"""
         try:
-            # Would use pytesseract or similar library
-            # For now, return placeholder
             return "Image OCR not implemented yet"
         except Exception as e:
             logger.error(f"Error extracting text from image: {e}")
@@ -1102,7 +1144,6 @@ class FileParsingTool:
             if not rows:
                 return csv_text
 
-            # Look for recipe-like columns
             headers = rows[0].keys() if rows else []
             recipe_columns = ['name', 'title', 'recipe', 'ingredients', 'instructions', 'directions', 'steps']
 
@@ -1151,7 +1192,6 @@ class RecipeFormatterTool:
                 "dietary_restrictions": []
             }
 
-            # Extract recipe name
             if "name" in raw_recipe_data:
                 formatted_recipe["recipe_name"] = raw_recipe_data["name"]
             elif "recipe_name" in raw_recipe_data:
@@ -1159,7 +1199,6 @@ class RecipeFormatterTool:
             elif "title" in raw_recipe_data:
                 formatted_recipe["recipe_name"] = raw_recipe_data["title"]
 
-            # Extract description
             if "description" in raw_recipe_data:
                 description = raw_recipe_data["description"]
                 if len(description) <= 500:
@@ -1167,7 +1206,6 @@ class RecipeFormatterTool:
                 else:
                     formatted_recipe["description"] = description[:497] + "..."
 
-            # Extract and format ingredients
             if "ingredients" in raw_recipe_data:
                 for ingredient in raw_recipe_data["ingredients"]:
                     if isinstance(ingredient, str):
@@ -1179,7 +1217,6 @@ class RecipeFormatterTool:
                         if formatted_ingredient:
                             formatted_recipe["ingredients"].append(formatted_ingredient)
 
-            # Extract instructions
             if "instructions" in raw_recipe_data:
                 instructions = raw_recipe_data["instructions"]
                 if isinstance(instructions, list):
@@ -1192,12 +1229,10 @@ class RecipeFormatterTool:
                     instruction_list = self._split_instructions(instructions)
                     formatted_recipe["instructions"].extend(instruction_list)
 
-            # Extract other fields
             for field in ["serving_size", "genre", "prep_time", "cook_time"]:
                 if field in raw_recipe_data:
                     formatted_recipe[field] = raw_recipe_data[field]
 
-            # Extract notes
             notes = []
             if "notes" in raw_recipe_data:
                 if isinstance(raw_recipe_data["notes"], list):
@@ -1206,7 +1241,6 @@ class RecipeFormatterTool:
                     notes.append(raw_recipe_data["notes"])
             formatted_recipe["notes"] = notes
 
-            # Extract dietary restrictions
             if "dietary_restrictions" in raw_recipe_data:
                 formatted_recipe["dietary_restrictions"] = raw_recipe_data["dietary_restrictions"]
 
@@ -1219,11 +1253,9 @@ class RecipeFormatterTool:
     def format_for_preview(self, recipe_data: Dict[str, Any]) -> Dict[str, Any]:
         """Format recipe data specifically for preview modal"""
         try:
-            # Get basic info
             recipe_name = recipe_data.get('name', recipe_data.get('recipe_name', 'Unknown Recipe'))
             description = recipe_data.get('description', '')
 
-            # Format ingredients for display
             ingredients = []
             if 'ingredients' in recipe_data:
                 for ing in recipe_data['ingredients']:
@@ -1238,17 +1270,14 @@ class RecipeFormatterTool:
                         elif name:
                             ingredients.append(name)
 
-            # Format instructions for display
             instructions = recipe_data.get('instructions', [])
             if isinstance(instructions, str):
                 instructions = self._split_instructions(instructions)
 
-            # Calculate total time
             prep_time = recipe_data.get('prep_time', 0)
             cook_time = recipe_data.get('cook_time', 0)
             total_time = prep_time + cook_time
 
-            # Format for preview display
             preview_data = {
                 "recipe_name": recipe_name,
                 "description": description,
@@ -1285,7 +1314,6 @@ class RecipeFormatterTool:
 
     def _parse_ingredient_string(self, ingredient_str: str) -> Optional[Dict]:
         """Parse ingredient string into structured format"""
-        # Simple parsing logic - can be enhanced
         parts = ingredient_str.strip().split(' ', 2)
         if len(parts) >= 3:
             try:
@@ -1296,7 +1324,6 @@ class RecipeFormatterTool:
             except ValueError:
                 pass
 
-        # Fallback: treat as name with default values
         return {"name": ingredient_str.strip(), "quantity": 1, "unit": "piece"}
 
     def _format_structured_ingredient(self, ingredient: Dict) -> Optional[Dict]:
@@ -1315,9 +1342,354 @@ class RecipeFormatterTool:
 
     def _split_instructions(self, instructions: str) -> List[str]:
         """Split instruction string into list"""
-        # Split by common delimiters
         steps = re.split(r'\d+\.\s*|\n\s*', instructions)
         return [step.strip() for step in steps if step.strip()]
+
+
+class RecipeScalingTool:
+    """Tool for scaling recipe ingredients up or down"""
+
+    def __init__(self):
+        self.name = "scale_recipe"
+        self.description = "Scale recipe ingredients for different serving sizes"
+
+    def execute(self, recipe: Dict[str, Any], new_serving_size: int) -> Optional[Dict[str, Any]]:
+        """Scale a recipe to a new serving size"""
+        try:
+            if not recipe or new_serving_size <= 0:
+                return None
+
+            original_serving_size = recipe.get('serving_size', 4)
+            if original_serving_size <= 0:
+                original_serving_size = 4
+
+            scaling_factor = new_serving_size / original_serving_size
+
+            logger.info(
+                f"Scaling recipe '{recipe.get('name', 'Unknown')}' from {original_serving_size} to {new_serving_size} servings (factor: {scaling_factor})")
+
+            scaled_recipe = recipe.copy()
+            scaled_recipe['serving_size'] = new_serving_size
+            scaled_recipe['original_serving_size'] = original_serving_size
+            scaled_recipe['scaling_factor'] = scaling_factor
+
+            if 'ingredients' in recipe:
+                scaled_ingredients = []
+                for ingredient in recipe['ingredients']:
+                    if isinstance(ingredient, dict):
+                        scaled_ingredient = ingredient.copy()
+                        if 'quantity' in ingredient:
+                            original_quantity = ingredient['quantity']
+                            scaled_quantity = self._scale_quantity(original_quantity, scaling_factor)
+                            scaled_ingredient['quantity'] = scaled_quantity
+                        scaled_ingredients.append(scaled_ingredient)
+                    elif isinstance(ingredient, str):
+                        scaled_ingredient_str = self._scale_ingredient_string(ingredient, scaling_factor)
+                        scaled_ingredients.append(scaled_ingredient_str)
+                    else:
+                        scaled_ingredients.append(ingredient)
+
+                scaled_recipe['ingredients'] = scaled_ingredients
+
+            original_name = recipe.get('name', recipe.get('recipe_name', 'Unknown Recipe'))
+            scaled_recipe['name'] = f"{original_name} (Scaled for {new_serving_size})"
+            if 'recipe_name' in scaled_recipe:
+                scaled_recipe['recipe_name'] = scaled_recipe['name']
+
+            notes = scaled_recipe.get('notes', []).copy()
+            notes.append(f"Scaled from {original_serving_size} to {new_serving_size} servings")
+            scaled_recipe['notes'] = notes
+
+            logger.info(f"Successfully scaled recipe to {new_serving_size} servings")
+            return scaled_recipe
+
+        except Exception as e:
+            logger.error(f"Error scaling recipe: {e}")
+            return None
+
+    def _scale_quantity(self, quantity: float, scaling_factor: float) -> float:
+        """Scale a numeric quantity and round appropriately"""
+        try:
+            scaled = quantity * scaling_factor
+
+            if scaled < 0.1:
+                return round(scaled, 3)
+            elif scaled < 1:
+                return round(scaled, 2)
+            elif scaled < 10:
+                return round(scaled, 1)
+            else:
+                return round(scaled)
+
+        except (ValueError, TypeError):
+            return quantity
+
+    def _scale_ingredient_string(self, ingredient_str: str, scaling_factor: float) -> str:
+        """Scale an ingredient string by parsing and scaling the quantity"""
+        try:
+            parts = ingredient_str.strip().split(' ', 2)
+            if len(parts) >= 2:
+                quantity_part = parts[0]
+
+                if '/' in quantity_part:
+                    fraction_parts = quantity_part.split('/')
+                    if len(fraction_parts) == 2:
+                        try:
+                            numerator = float(fraction_parts[0])
+                            denominator = float(fraction_parts[1])
+                            original_quantity = numerator / denominator
+                            scaled_quantity = self._scale_quantity(original_quantity, scaling_factor)
+                            scaled_fraction = self._convert_to_fraction(scaled_quantity)
+                            return f"{scaled_fraction} {' '.join(parts[1:])}"
+                        except ValueError:
+                            pass
+
+                try:
+                    original_quantity = float(quantity_part)
+                    scaled_quantity = self._scale_quantity(original_quantity, scaling_factor)
+                    scaled_display = self._convert_to_fraction(scaled_quantity)
+                    return f"{scaled_display} {' '.join(parts[1:])}"
+                except ValueError:
+                    pass
+
+            return ingredient_str
+
+        except Exception as e:
+            logger.warning(f"Could not scale ingredient string '{ingredient_str}': {e}")
+            return ingredient_str
+
+    def _convert_to_fraction(self, decimal_value: float) -> str:
+        """Convert decimal to fraction when it makes sense, otherwise return decimal"""
+        try:
+            common_fractions = {
+                0.125: "1/8",
+                0.25: "1/4",
+                0.333: "1/3",
+                0.5: "1/2",
+                0.667: "2/3",
+                0.75: "3/4",
+                1.25: "1 1/4",
+                1.333: "1 1/3",
+                1.5: "1 1/2",
+                1.667: "1 2/3",
+                1.75: "1 3/4",
+                2.25: "2 1/4",
+                2.333: "2 1/3",
+                2.5: "2 1/2",
+                2.667: "2 2/3",
+                2.75: "2 3/4"
+            }
+
+            for frac_decimal, frac_str in common_fractions.items():
+                if abs(decimal_value - frac_decimal) < 0.05:
+                    return frac_str
+
+            if decimal_value < 1:
+                return f"{decimal_value:.2f}"
+            elif decimal_value < 10:
+                return f"{decimal_value:.1f}"
+            else:
+                return f"{int(decimal_value)}" if decimal_value == int(decimal_value) else f"{decimal_value:.1f}"
+
+        except Exception:
+            return str(decimal_value)
+
+    def detect_scaling_request(self, user_message: str) -> Optional[Dict[str, Any]]:
+        """Detect if user is requesting recipe scaling and extract details"""
+        try:
+            user_lower = user_message.lower().strip()
+
+            scaling_patterns = [
+                r'scale.*(?:for|to)\s*(\d+)',
+                r'make.*(?:for|to)\s*(\d+)',
+                r'adjust.*(?:for|to)\s*(\d+)',
+                r'resize.*(?:for|to)\s*(\d+)',
+                r'change.*(?:for|to)\s*(\d+)',
+                r'scale.*(?:this|them|it).*(?:for|to)\s*(\d+)',
+                r'scale.*(?:this|them|it).*(\d+)',
+                r'make.*(?:this|them|it).*(?:for|to)\s*(\d+)',
+                r'double.*recipe',
+                r'half.*recipe',
+                r'triple.*recipe',
+                r'double.*(?:this|them|it)',
+                r'half.*(?:this|them|it)',
+                r'triple.*(?:this|them|it)'
+            ]
+
+            for pattern in scaling_patterns:
+                match = re.search(pattern, user_lower)
+                if match:
+                    context_words = ['this', 'them', 'it']
+                    is_context_dependent = any(word in user_lower for word in context_words)
+
+                    if 'double' in user_lower:
+                        return {'new_serving_size': None, 'action': 'double', 'context_dependent': is_context_dependent}
+                    elif 'half' in user_lower or 'halve' in user_lower:
+                        return {'new_serving_size': None, 'action': 'half', 'context_dependent': is_context_dependent}
+                    elif 'triple' in user_lower:
+                        return {'new_serving_size': None, 'action': 'triple', 'context_dependent': is_context_dependent}
+                    else:
+                        try:
+                            new_size = int(match.group(1))
+                            return {'new_serving_size': new_size, 'action': 'scale',
+                                    'context_dependent': is_context_dependent}
+                        except (ValueError, IndexError):
+                            pass
+
+            scaling_context_words = ['scale', 'make', 'adjust', 'resize', 'change', 'this', 'them', 'it']
+            if any(keyword in user_lower for keyword in scaling_context_words):
+                serving_patterns = [
+                    r'(\d+)\s*(?:people|person|serving|servings)',
+                    r'(?:people|person|serving|servings).*?(\d+)',
+                    r'for\s*(\d+)',
+                    r'feeds?\s*(\d+)'
+                ]
+
+                for pattern in serving_patterns:
+                    match = re.search(pattern, user_lower)
+                    if match:
+                        try:
+                            new_size = int(match.group(1))
+                            if new_size > 0 and new_size <= 50:
+                                context_words = ['this', 'them', 'it']
+                                is_context_dependent = any(word in user_lower for word in context_words)
+                                return {'new_serving_size': new_size, 'action': 'scale',
+                                        'context_dependent': is_context_dependent}
+                        except (ValueError, IndexError):
+                            pass
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error detecting scaling request: {e}")
+            return None
+
+
+class CookingTechniqueExplainerTool:
+    """Tool for explaining cooking techniques and terms using ChatGPT with Rupert's personality"""
+
+    def __init__(self):
+        self.name = "explain_cooking_technique"
+        self.description = "Explain cooking techniques and culinary terms with Rupert's goofy personality"
+
+    def detect_technique_question(self, user_message: str) -> Optional[str]:
+        """Detect if user is asking about a cooking technique or term"""
+        user_lower = user_message.lower().strip()
+
+        question_indicators = [
+            'what is', 'what does', 'how do i', 'how do you', 'how to', 'explain', 'define',
+            'meaning of', 'technique', 'method', 'term', '?'
+        ]
+
+        has_question_pattern = any(indicator in user_lower for indicator in question_indicators)
+
+        if not has_question_pattern:
+            return None
+
+        technique_map = {
+            'sauté': ['saute', 'sautee', 'sautte', 'sauttee', 'sautteing', 'sauteing', 'sautéing'],
+            'sautéing': ['sauteing', 'sautteing', 'sauteeing', 'sautting'],
+            'braise': ['braising', 'braze', 'brazing'],
+            'braising': ['brasing', 'brazing'],
+            'julienne': ['julianne', 'julian', 'juliennes'],
+            'dice': ['dicing', 'diced'],
+            'chop': ['chopping', 'chopped'],
+            'mince': ['mincing', 'minced'],
+            'blanch': ['blanching', 'blanched'],
+            'poach': ['poaching', 'poached'],
+            'roast': ['roasting', 'roasted'],
+            'grill': ['grilling', 'grilled'],
+            'steam': ['steaming', 'steamed'],
+            'fry': ['frying', 'fried'],
+            'bake': ['baking', 'baked'],
+            'broil': ['broiling', 'broiled'],
+            'confit': ['confits', 'confiting'],
+            'emulsify': ['emulsification', 'emulsifying'],
+            'deglaze': ['deglazing', 'deglazed'],
+            'roux': ['rouxs'],
+            'mise en place': ['mise', 'mise-en-place', 'miseinplace'],
+            'reduction': ['reduce', 'reducing'],
+            'caramelize': ['caramelizing', 'caramelized', 'carmelize', 'carmelizing'],
+            'sear': ['searing', 'seared'],
+            'simmer': ['simmering', 'simmered'],
+            'fold': ['folding', 'folded'],
+            'whip': ['whipping', 'whipped'],
+            'knead': ['kneading', 'kneaded'],
+            'proof': ['proofing', 'proofed', 'prove', 'proving'],
+            'tempering': ['temper', 'tempered'],
+            'flambé': ['flambe', 'flaming', 'flame'],
+            'sous vide': ['sousvide', 'sous-vide'],
+            'marinade': ['marinating', 'marinated', 'marinate']
+        }
+
+        for base_technique, variations in technique_map.items():
+            all_terms = [base_technique] + variations
+            for term in all_terms:
+                if term in user_lower:
+                    logger.info(
+                        f"Detected technique '{base_technique}' from term '{term}' in message: '{user_message}'")
+                    return base_technique
+
+        cooking_actions = [
+            'cook', 'cooking', 'prepare', 'preparing', 'cut', 'cutting', 'heat', 'heating',
+            'mix', 'mixing', 'stir', 'stirring', 'season', 'seasoning', 'salt', 'pepper'
+        ]
+
+        for action in cooking_actions:
+            if action in user_lower and len(user_lower.split()) <= 6:
+                logger.info(f"Detected cooking action '{action}' in question: '{user_message}'")
+                return action
+
+        return None
+
+    async def execute(self, technique_term: str, user_message: str, openai_client) -> Optional[str]:
+        """Generate explanation for cooking technique using ChatGPT"""
+        try:
+            if not openai_client:
+                return None
+
+            system_prompt = f"""You are Rupert, a jovial, warm, and delightfully goofy cooking assistant AI for the Ondek Recipe app.
+
+The user is asking about the cooking technique/term: "{technique_term}"
+
+Your job is to explain this cooking technique in Rupert's signature style:
+- Be educational but fun and engaging
+- Use goofy analogies and metaphors (food-related when possible)
+- Show enthusiasm and warmth
+- Include practical tips that are actually helpful
+- Use emojis sparingly but effectively
+- Keep it informative but not overwhelming
+- Make cooking feel approachable and fun
+
+Structure your response like this:
+1. A fun, goofy explanation of what the technique is
+2. Why it's useful or when to use it
+3. A couple of practical tips
+4. Maybe mention what dishes use this technique
+
+Keep Rupert's personality: jovial, warm, goofy, encouraging, and passionate about making cooking accessible!"""
+
+            user_prompt = f"""The user asked: "{user_message}"
+
+They want to know about the cooking technique/term: "{technique_term}"
+
+Explain this cooking technique with your signature Rupert personality - be educational, fun, and goofy!"""
+
+            response = openai_client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=400,
+                temperature=0.8
+            )
+
+            return response.choices[0].message.content.strip()
+
+        except Exception as e:
+            logger.error(f"Error generating technique explanation: {e}")
+            return None
 
 
 class ButtonCreatorTool:
@@ -1327,7 +1699,6 @@ class ButtonCreatorTool:
         self.name = "create_action_buttons"
         self.description = "Create action buttons with preview and website selection functionality"
 
-        # Website configuration - centralized for easy maintenance
         self.supported_websites = [
             {
                 "name": "Pinterest",
@@ -1381,7 +1752,6 @@ class ButtonCreatorTool:
         buttons = []
 
         if recipe_type == "internal":
-            # View button for internal recipes
             buttons.append({
                 "type": "action_button",
                 "text": f"View {recipe['name']}",
@@ -1396,7 +1766,6 @@ class ButtonCreatorTool:
                 }
             })
         else:
-            # Add button for external recipes - CRITICAL: Use the URL if provided by AI helper
             button_data = {
                 "type": "action_button",
                 "text": f"Add {recipe.get('name', 'Recipe')}",
@@ -1409,23 +1778,19 @@ class ButtonCreatorTool:
                 }
             }
 
-            # IMPORTANT: Use the URL that AI helper set up if available
             if 'url' in recipe:
                 button_data['url'] = recipe['url']
             else:
-                # Fallback to generic add recipe page if no URL
                 button_data['url'] = "/add-recipe"
 
             buttons.append(button_data)
 
-        # Preview button for all recipes
         preview_metadata = {
             "recipe_name": recipe.get('name', 'Unknown Recipe'),
             "type": "preview_recipe",
             "source": recipe_type
         }
 
-        # Add recipe_id for internal recipes so favorite button can work
         if recipe_type == "internal" and 'id' in recipe:
             preview_metadata['recipe_id'] = recipe['id']
 
@@ -1457,7 +1822,6 @@ class ButtonCreatorTool:
     def create_search_permission_buttons(self, search_criteria: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Create fun Yes/No buttons for search permission"""
 
-        # Determine what they're searching for to customize button text
         ingredient = search_criteria.get('ingredient', 'recipes')
         if ingredient == 'recipe':
             ingredient = 'recipes'
@@ -1496,7 +1860,7 @@ class ButtonCreatorTool:
             button = {
                 "type": "website_selection_button",
                 "text": f"{website['icon']} {website['name']}",
-                "action": "search_website",  # CRITICAL: This must be "search_website"
+                "action": "search_website",
                 "style": "website",
                 "metadata": {
                     "website": website['url'],
@@ -1543,380 +1907,6 @@ class ButtonCreatorTool:
         }
 
 
-class RecipeScalingTool:
-    """Tool for scaling recipe ingredients up or down"""
-
-    def __init__(self):
-        self.name = "scale_recipe"
-        self.description = "Scale recipe ingredients for different serving sizes"
-
-    def execute(self, recipe: Dict[str, Any], new_serving_size: int) -> Optional[Dict[str, Any]]:
-        """Scale a recipe to a new serving size"""
-        try:
-            if not recipe or new_serving_size <= 0:
-                return None
-
-            original_serving_size = recipe.get('serving_size', 4)
-            if original_serving_size <= 0:
-                original_serving_size = 4  # Default fallback
-
-            # Calculate scaling factor
-            scaling_factor = new_serving_size / original_serving_size
-
-            logger.info(
-                f"Scaling recipe '{recipe.get('name', 'Unknown')}' from {original_serving_size} to {new_serving_size} servings (factor: {scaling_factor})")
-
-            # Create scaled recipe copy
-            scaled_recipe = recipe.copy()
-            scaled_recipe['serving_size'] = new_serving_size
-            scaled_recipe['original_serving_size'] = original_serving_size
-            scaled_recipe['scaling_factor'] = scaling_factor
-
-            # Scale ingredients
-            if 'ingredients' in recipe:
-                scaled_ingredients = []
-                for ingredient in recipe['ingredients']:
-                    if isinstance(ingredient, dict):
-                        # Structured ingredient format
-                        scaled_ingredient = ingredient.copy()
-                        if 'quantity' in ingredient:
-                            original_quantity = ingredient['quantity']
-                            scaled_quantity = self._scale_quantity(original_quantity, scaling_factor)
-                            scaled_ingredient['quantity'] = scaled_quantity
-                        scaled_ingredients.append(scaled_ingredient)
-                    elif isinstance(ingredient, str):
-                        # String format - need to parse and scale
-                        scaled_ingredient_str = self._scale_ingredient_string(ingredient, scaling_factor)
-                        scaled_ingredients.append(scaled_ingredient_str)
-                    else:
-                        # Keep as-is if we can't parse
-                        scaled_ingredients.append(ingredient)
-
-                scaled_recipe['ingredients'] = scaled_ingredients
-
-            # Update recipe name to indicate scaling
-            original_name = recipe.get('name', recipe.get('recipe_name', 'Unknown Recipe'))
-            scaled_recipe['name'] = f"{original_name} (Scaled for {new_serving_size})"
-            if 'recipe_name' in scaled_recipe:
-                scaled_recipe['recipe_name'] = scaled_recipe['name']
-
-            # Add scaling note
-            notes = scaled_recipe.get('notes', []).copy()
-            notes.append(f"Scaled from {original_serving_size} to {new_serving_size} servings")
-            scaled_recipe['notes'] = notes
-
-            logger.info(f"Successfully scaled recipe to {new_serving_size} servings")
-            return scaled_recipe
-
-        except Exception as e:
-            logger.error(f"Error scaling recipe: {e}")
-            return None
-
-    def _scale_quantity(self, quantity: float, scaling_factor: float) -> float:
-        """Scale a numeric quantity and round appropriately"""
-        try:
-            scaled = quantity * scaling_factor
-
-            # Smart rounding based on size
-            if scaled < 0.1:
-                return round(scaled, 3)  # Keep more precision for very small amounts
-            elif scaled < 1:
-                return round(scaled, 2)  # 2 decimal places for fractional amounts
-            elif scaled < 10:
-                return round(scaled, 1)  # 1 decimal place for single digits
-            else:
-                return round(scaled)  # Whole numbers for larger amounts
-
-        except (ValueError, TypeError):
-            return quantity  # Return original if scaling fails
-
-    def _scale_ingredient_string(self, ingredient_str: str, scaling_factor: float) -> str:
-        """Scale an ingredient string by parsing and scaling the quantity"""
-        try:
-            # Try to parse quantity from the beginning of the string
-            parts = ingredient_str.strip().split(' ', 2)
-            if len(parts) >= 2:
-                quantity_part = parts[0]
-
-                # Handle fractions like "1/2", "1/4", etc.
-                if '/' in quantity_part:
-                    fraction_parts = quantity_part.split('/')
-                    if len(fraction_parts) == 2:
-                        try:
-                            numerator = float(fraction_parts[0])
-                            denominator = float(fraction_parts[1])
-                            original_quantity = numerator / denominator
-                            scaled_quantity = self._scale_quantity(original_quantity, scaling_factor)
-                            scaled_fraction = self._convert_to_fraction(scaled_quantity)
-                            return f"{scaled_fraction} {' '.join(parts[1:])}"
-                        except ValueError:
-                            pass
-
-                # Handle decimal numbers
-                try:
-                    original_quantity = float(quantity_part)
-                    scaled_quantity = self._scale_quantity(original_quantity, scaling_factor)
-
-                    # Convert back to fraction if it makes sense
-                    scaled_display = self._convert_to_fraction(scaled_quantity)
-                    return f"{scaled_display} {' '.join(parts[1:])}"
-                except ValueError:
-                    pass
-
-            # If we can't parse, return the original
-            return ingredient_str
-
-        except Exception as e:
-            logger.warning(f"Could not scale ingredient string '{ingredient_str}': {e}")
-            return ingredient_str
-
-    def _convert_to_fraction(self, decimal_value: float) -> str:
-        """Convert decimal to fraction when it makes sense, otherwise return decimal"""
-        try:
-            # Common cooking fractions
-            common_fractions = {
-                0.125: "1/8",
-                0.25: "1/4",
-                0.333: "1/3",
-                0.5: "1/2",
-                0.667: "2/3",
-                0.75: "3/4",
-                1.25: "1 1/4",
-                1.333: "1 1/3",
-                1.5: "1 1/2",
-                1.667: "1 2/3",
-                1.75: "1 3/4",
-                2.25: "2 1/4",
-                2.333: "2 1/3",
-                2.5: "2 1/2",
-                2.667: "2 2/3",
-                2.75: "2 3/4"
-            }
-
-            # Check if the decimal is close to a common fraction
-            for frac_decimal, frac_str in common_fractions.items():
-                if abs(decimal_value - frac_decimal) < 0.05:  # Allow small tolerance
-                    return frac_str
-
-            # If no common fraction matches, return as decimal with appropriate precision
-            if decimal_value < 1:
-                return f"{decimal_value:.2f}"
-            elif decimal_value < 10:
-                return f"{decimal_value:.1f}"
-            else:
-                return f"{int(decimal_value)}" if decimal_value == int(decimal_value) else f"{decimal_value:.1f}"
-
-        except Exception:
-            return str(decimal_value)
-
-    def detect_scaling_request(self, user_message: str) -> Optional[Dict[str, Any]]:
-        """Detect if user is requesting recipe scaling and extract details"""
-        try:
-            user_lower = user_message.lower().strip()
-
-            # Scaling keywords and patterns - IMPROVED to catch "scale this/them/it" type requests
-            scaling_patterns = [
-                r'scale.*(?:for|to)\s*(\d+)',
-                r'make.*(?:for|to)\s*(\d+)',
-                r'adjust.*(?:for|to)\s*(\d+)',
-                r'resize.*(?:for|to)\s*(\d+)',
-                r'change.*(?:for|to)\s*(\d+)',
-                r'scale.*(?:this|them|it).*(?:for|to)\s*(\d+)',  # NEW: "scale this/them/it to 4"
-                r'scale.*(?:this|them|it).*(\d+)',  # NEW: "scale this/them/it 4"
-                r'make.*(?:this|them|it).*(?:for|to)\s*(\d+)',  # NEW: "make this/them/it for 4"
-                r'double.*recipe',
-                r'half.*recipe',
-                r'triple.*recipe',
-                r'double.*(?:this|them|it)',  # NEW: "double this/them/it"
-                r'half.*(?:this|them|it)',  # NEW: "half this/them/it"
-                r'triple.*(?:this|them|it)'  # NEW: "triple this/them/it"
-            ]
-
-            # Check for explicit serving size requests
-            for pattern in scaling_patterns:
-                match = re.search(pattern, user_lower)
-                if match:
-                    context_words = ['this', 'them', 'it']
-                    is_context_dependent = any(word in user_lower for word in context_words)
-
-                    if 'double' in user_lower:
-                        return {'new_serving_size': None, 'action': 'double', 'context_dependent': is_context_dependent}
-                    elif 'half' in user_lower or 'halve' in user_lower:
-                        return {'new_serving_size': None, 'action': 'half', 'context_dependent': is_context_dependent}
-                    elif 'triple' in user_lower:
-                        return {'new_serving_size': None, 'action': 'triple', 'context_dependent': is_context_dependent}
-                    else:
-                        try:
-                            new_size = int(match.group(1))
-                            return {'new_serving_size': new_size, 'action': 'scale',
-                                    'context_dependent': is_context_dependent}
-                        except (ValueError, IndexError):
-                            pass
-
-            # Check for serving/people keywords with numbers - only if scaling context exists
-            scaling_context_words = ['scale', 'make', 'adjust', 'resize', 'change', 'this', 'them', 'it']
-            if any(keyword in user_lower for keyword in scaling_context_words):
-                serving_patterns = [
-                    r'(\d+)\s*(?:people|person|serving|servings)',
-                    r'(?:people|person|serving|servings).*?(\d+)',
-                    r'for\s*(\d+)',
-                    r'feeds?\s*(\d+)'
-                ]
-
-                for pattern in serving_patterns:
-                    match = re.search(pattern, user_lower)
-                    if match:
-                        try:
-                            new_size = int(match.group(1))
-                            if new_size > 0 and new_size <= 50:  # Reasonable limits
-                                context_words = ['this', 'them', 'it']
-                                is_context_dependent = any(word in user_lower for word in context_words)
-                                return {'new_serving_size': new_size, 'action': 'scale',
-                                        'context_dependent': is_context_dependent}
-                        except (ValueError, IndexError):
-                            pass
-
-            return None
-
-        except Exception as e:
-            logger.error(f"Error detecting scaling request: {e}")
-            return None
-
-
-class CookingTechniqueExplainerTool:
-    """Tool for explaining cooking techniques and terms using ChatGPT with Rupert's personality"""
-
-    def __init__(self):
-        self.name = "explain_cooking_technique"
-        self.description = "Explain cooking techniques and culinary terms with Rupert's goofy personality"
-
-    def detect_technique_question(self, user_message: str) -> Optional[str]:
-        """Detect if user is asking about a cooking technique or term"""
-        user_lower = user_message.lower().strip()
-
-        # First check for clear question patterns
-        question_indicators = [
-            'what is', 'what does', 'how do i', 'how do you', 'how to', 'explain', 'define',
-            'meaning of', 'technique', 'method', 'term', '?'
-        ]
-
-        has_question_pattern = any(indicator in user_lower for indicator in question_indicators)
-
-        if not has_question_pattern:
-            return None
-
-        # Comprehensive cooking techniques with common misspellings and variations
-        technique_map = {
-            # Sautéing variations
-            'sauté': ['saute', 'sautee', 'sautte', 'sauttee', 'sautteing', 'sauteing', 'sautéing'],
-            'sautéing': ['sauteing', 'sautteing', 'sauteeing', 'sautting'],
-
-            # Other techniques with variations
-            'braise': ['braising', 'braze', 'brazing'],
-            'braising': ['brasing', 'brazing'],
-            'julienne': ['julianne', 'julian', 'juliennes'],
-            'dice': ['dicing', 'diced'],
-            'chop': ['chopping', 'chopped'],
-            'mince': ['mincing', 'minced'],
-            'blanch': ['blanching', 'blanched'],
-            'poach': ['poaching', 'poached'],
-            'roast': ['roasting', 'roasted'],
-            'grill': ['grilling', 'grilled'],
-            'steam': ['steaming', 'steamed'],
-            'fry': ['frying', 'fried'],
-            'bake': ['baking', 'baked'],
-            'broil': ['broiling', 'broiled'],
-            'confit': ['confits', 'confiting'],
-            'emulsify': ['emulsification', 'emulsifying'],
-            'deglaze': ['deglazing', 'deglazed'],
-            'roux': ['rouxs'],
-            'mise en place': ['mise', 'mise-en-place', 'miseinplace'],
-            'reduction': ['reduce', 'reducing'],
-            'caramelize': ['caramelizing', 'caramelized', 'carmelize', 'carmelizing'],
-            'sear': ['searing', 'seared'],
-            'simmer': ['simmering', 'simmered'],
-            'fold': ['folding', 'folded'],
-            'whip': ['whipping', 'whipped'],
-            'knead': ['kneading', 'kneaded'],
-            'proof': ['proofing', 'proofed', 'prove', 'proving'],
-            'tempering': ['temper', 'tempered'],
-            'flambé': ['flambe', 'flaming', 'flame'],
-            'sous vide': ['sousvide', 'sous-vide'],
-            'marinade': ['marinating', 'marinated', 'marinate']
-        }
-
-        # Check for any technique matches (including variations)
-        for base_technique, variations in technique_map.items():
-            all_terms = [base_technique] + variations
-            for term in all_terms:
-                if term in user_lower:
-                    logger.info(
-                        f"Detected technique '{base_technique}' from term '{term}' in message: '{user_message}'")
-                    return base_technique
-
-        # Fallback: check for common cooking action words with question context
-        cooking_actions = [
-            'cook', 'cooking', 'prepare', 'preparing', 'cut', 'cutting', 'heat', 'heating',
-            'mix', 'mixing', 'stir', 'stirring', 'season', 'seasoning', 'salt', 'pepper'
-        ]
-
-        for action in cooking_actions:
-            if action in user_lower and len(user_lower.split()) <= 6:  # Keep it short and specific
-                logger.info(f"Detected cooking action '{action}' in question: '{user_message}'")
-                return action
-
-        return None
-
-    async def execute(self, technique_term: str, user_message: str, openai_client) -> Optional[str]:
-        """Generate explanation for cooking technique using ChatGPT"""
-        try:
-            if not openai_client:
-                return None
-
-            system_prompt = f"""You are Rupert, a jovial, warm, and delightfully goofy cooking assistant AI for the Ondek Recipe app.
-
-The user is asking about the cooking technique/term: "{technique_term}"
-
-Your job is to explain this cooking technique in Rupert's signature style:
-- Be educational but fun and engaging
-- Use goofy analogies and metaphors (food-related when possible)
-- Show enthusiasm and warmth
-- Include practical tips that are actually helpful
-- Use emojis sparingly but effectively
-- Keep it informative but not overwhelming
-- Make cooking feel approachable and fun
-
-Structure your response like this:
-1. A fun, goofy explanation of what the technique is
-2. Why it's useful or when to use it
-3. A couple of practical tips
-4. Maybe mention what dishes use this technique
-
-Keep Rupert's personality: jovial, warm, goofy, encouraging, and passionate about making cooking accessible!"""
-
-            user_prompt = f"""The user asked: "{user_message}"
-
-They want to know about the cooking technique/term: "{technique_term}"
-
-Explain this cooking technique with your signature Rupert personality - be educational, fun, and goofy!"""
-
-            response = openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                max_tokens=400,
-                temperature=0.8  # Higher temperature for more creative, goofy responses
-            )
-
-            return response.choices[0].message.content.strip()
-
-        except Exception as e:
-            logger.error(f"Error generating technique explanation: {e}")
-            return None
-
-
 # Tool registry for easy access
 TOOLS = {
     'search_external_recipes': RecipeSearchTool(),
@@ -1926,7 +1916,7 @@ TOOLS = {
     'format_recipe_data': RecipeFormatterTool(),
     'create_action_buttons': ButtonCreatorTool(),
     'scale_recipe': RecipeScalingTool(),
-    'explain_cooking_technique': CookingTechniqueExplainerTool()  # ADD THIS LINE
+    'explain_cooking_technique': CookingTechniqueExplainerTool()
 }
 
 

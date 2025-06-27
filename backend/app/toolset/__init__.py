@@ -1,9 +1,3 @@
-# backend/app/__init__.py
-"""
-Ondek Recipe App Package
-"""
-
-# backend/app/toolset/__init__.py
 """
 Toolset package for Rupert's tools
 """
@@ -15,6 +9,8 @@ from .tools import (
     FileParsingTool,
     RecipeFormatterTool,
     ButtonCreatorTool,
+    RecipeScalingTool,
+    CookingTechniqueExplainerTool,
     TOOLS,
     get_tool,
     list_available_tools
@@ -27,6 +23,8 @@ __all__ = [
     'FileParsingTool',
     'RecipeFormatterTool',
     'ButtonCreatorTool',
+    'RecipeScalingTool',
+    'CookingTechniqueExplainerTool',
     'TOOLS',
     'get_tool',
     'list_available_tools'

@@ -993,44 +993,86 @@ class RupertAIHelper:
     # === BUTTON CREATION (using ButtonCreatorTool) ===
 
     def create_recipe_buttons(self, recipe: Dict[str, Any], recipe_type: str = "internal") -> List[Dict[str, Any]]:
-        """Create buttons for a recipe (action + preview) using ButtonCreatorTool"""
-        button_creator = get_tool('create_action_buttons')
+        """Create both action and preview buttons for a recipe with quality indicators"""
+        formatter = get_tool('format_recipe_data')
+        if formatter:
+            preview_data = formatter.format_for_preview(recipe)
+        else:
+            preview_data = recipe
 
-        if not button_creator:
-            # Fallback to simple buttons
-            buttons = []
+        buttons = []
 
-            if recipe_type == "internal":
-                buttons.append({
-                    "type": "action_button",
-                    "text": f"View {recipe['name']}",
-                    "action": "view_recipe",
-                    "url": f"/recipes/{recipe['id']}",
-                    "style": "primary"
-                })
+        if recipe_type == "internal":
+            # View button for internal recipes
+            buttons.append({
+                "type": "action_button",
+                "text": f"View {recipe['name']}",
+                "action": "view_recipe",
+                "url": f"/recipes/{recipe['id']}",
+                "style": "primary",
+                "metadata": {
+                    "recipe_id": recipe['id'],
+                    "recipe_name": recipe['name'],
+                    "type": "view_recipe",
+                    "source": "internal"
+                }
+            })
+        else:
+            # Enhanced add button for external recipes with quality indicator
+            button_text = f"Add {recipe.get('name', 'Recipe')}"
+
+            # Add quality indicator to button text
+            if recipe.get('data_quality') == 'real':
+                button_text += " ✨"  # Sparkle for real data
+
+            button_data = {
+                "type": "action_button",
+                "text": button_text,
+                "action": "create_recipe",
+                "style": "primary",
+                "metadata": {
+                    "recipe_name": recipe.get('name', 'Unknown Recipe'),
+                    "type": "add_recipe",
+                    "source": "external",
+                    "data_quality": recipe.get('data_quality', 'unknown')
+                }
+            }
+
+            # Use the URL that was set up during scraping
+            if 'url' in recipe:
+                button_data['url'] = recipe['url']
             else:
-                buttons.append({
-                    "type": "action_button",
-                    "text": f"Add {recipe.get('name', 'Recipe')}",
-                    "action": "create_recipe",
-                    "style": "primary"
-                })
+                # Fallback to generic add recipe page if no URL
+                button_data['url'] = "/add-recipe"
 
-            return buttons
+            buttons.append(button_data)
 
-        # If external recipe, store it temporarily first
-        if recipe_type == "external":
-            formatter_tool = get_tool('format_recipe_data')
-            if formatter_tool:
-                formatted_recipe = formatter_tool.execute(recipe)
-                if formatted_recipe:
-                    temp_id = self.store_temp_recipe(formatted_recipe)
-                    # Add temp_id to recipe for button creation
-                    recipe['temp_id'] = temp_id
-                    # Add URL to the action button
-                    recipe['url'] = f"/add-recipe?temp_id={temp_id}"
+        # Enhanced preview button with quality indicator
+        preview_text = "📋 Preview"
+        if recipe_type == "external" and recipe.get('data_quality') == 'real':
+            preview_text += " ✨"
 
-        return button_creator.create_recipe_buttons(recipe, recipe_type)
+        preview_metadata = {
+            "recipe_name": recipe.get('name', 'Unknown Recipe'),
+            "type": "preview_recipe",
+            "source": recipe_type,
+            "data_quality": recipe.get('data_quality', 'unknown')
+        }
+
+        # Add recipe_id for internal recipes so favorite button can work
+        if recipe_type == "internal" and 'id' in recipe:
+            preview_metadata['recipe_id'] = recipe['id']
+
+        buttons.append({
+            "type": "preview_button",
+            "text": preview_text,
+            "action": "preview_recipe",
+            "style": "secondary",
+            "preview_data": preview_data,
+            "metadata": preview_metadata
+        })
+
+        return buttons
 
     def create_simple_add_button(self) -> Dict[str, Any]:
         """Create a simple add recipe button using ButtonCreatorTool"""
@@ -1538,21 +1580,21 @@ Would you like me to search for something specific?"""
 
     async def handle_website_search_action(self, website: str, website_name: str,
                                            search_criteria: Dict[str, Any]) -> str:
-        """Handle when user selects a specific website to search"""
-        response = None  # Initialize response variable
+        """Handle when user selects a specific website to search - WITH REAL SCRAPING"""
+        response = None
 
         try:
             logger.info(f"User selected {website_name} for search with criteria: {search_criteria}")
 
-            # Perform the external search with specific website
+            # Get the real recipe search tool
             external_search_tool = get_tool('search_external_recipes')
             if not external_search_tool:
                 return "Sorry, the external search tool is not available right now."
 
-            # Always ensure we have search parameters with the selected website
+            # Ensure we have search parameters with the selected website
             search_params = {"specific_websites": [website]}
 
-            # Handle generic "recipe" searches by providing varied results
+            # Handle different types of searches
             if search_criteria.get('ingredient') == 'recipe' or not search_criteria:
                 logger.info(f"Performing generic recipe search on {website_name}")
                 # For generic searches, search with "recipe" ingredient
@@ -1562,53 +1604,50 @@ Would you like me to search for something specific?"""
                 # For specific searches, use the provided criteria
                 external_recipes = external_search_tool.execute(search_criteria, search_params)
 
-            logger.info(f"Search returned {len(external_recipes) if external_recipes else 0} recipes")
+            logger.info(f"Real scraping returned {len(external_recipes) if external_recipes else 0} recipes")
 
-            # If no results, try a reliable fallback
-            if not external_recipes:
-                logger.warning(f"No results from {website_name}, trying fallback search")
-                # Try a fallback search with chocolate chip cookies (always works)
-                fallback_criteria = {"ingredient": "chocolate chip cookies", "genre": "dessert"}
-                external_recipes = external_search_tool.execute(fallback_criteria, search_params)
+            # Enhanced response generation based on real vs fallback data
+            if external_recipes:
+                real_recipe_count = sum(1 for recipe in external_recipes
+                                        if recipe.get('source') != 'fallback'
+                                        and not any(
+                    note.startswith('Fallback recipe') for note in recipe.get('notes', [])))
 
-                if external_recipes:
-                    response = f"🎉 I found some popular recipes on {website_name}! Here they are:"
-                else:
-                    # If even fallback fails, return a helpful message without looping
-                    return f"I'm having trouble connecting to {website_name} right now. Please try a different website or search again later."
+                fallback_count = len(external_recipes) - real_recipe_count
 
-            if not external_recipes:
-                # This should rarely happen now with the fallback
-                return f"I couldn't find any recipes on {website_name} at the moment. Please try again or choose a different website."
-
-            total_recipes = len(external_recipes)
-            show_initial = min(4, total_recipes)  # Show 4 recipes initially
-            recipes_to_show = external_recipes[:show_initial]
-
-            # Create response with website branding if not already set
-            if not response:
-                if search_criteria.get('ingredient') == 'recipe' or not search_criteria:
-                    response = f"🎉 Excellent! I found some fantastic recipes on {website_name}! Here are {show_initial} popular options:"
-                else:
-                    criteria_text = ""
-                    if search_criteria.get('ingredient') and search_criteria.get('genre'):
-                        criteria_text = f"{search_criteria['genre']} recipes with {search_criteria['ingredient']}"
-                    elif search_criteria.get('ingredient'):
-                        criteria_text = f"recipes with {search_criteria['ingredient']}"
-                    elif search_criteria.get('genre'):
-                        criteria_text = f"{search_criteria['genre']} recipes"
+                # Generate appropriate response based on data quality
+                if real_recipe_count > 0:
+                    if fallback_count == 0:
+                        response = f"🎉 Excellent! I found {real_recipe_count} real recipes from {website_name}!"
                     else:
-                        criteria_text = "recipes"
+                        response = f"🎉 Great! I found {real_recipe_count} real recipes from {website_name}"
+                        if fallback_count > 0:
+                            response += f" (plus {fallback_count} backup suggestions)"
+                    response += f" Here they are:"
+                else:
+                    response = f"I had some trouble getting live data from {website_name} right now, but here are some {len(external_recipes)} recipe suggestions that should help:"
+            else:
+                return f"I'm having trouble connecting to {website_name} right now. Please try again or choose a different website."
 
-                    response = f"🎉 Great choice! I found {total_recipes} amazing {criteria_text} on {website_name}! Here are the first {show_initial}:"
+            # Process recipes for display
+            total_recipes = len(external_recipes)
+            show_initial = min(4, total_recipes)
+            recipes_to_show = external_recipes[:show_initial]
 
             # Add action + preview buttons for external recipes
             for recipe in recipes_to_show:
+                # Enhance recipe metadata to indicate data source quality
+                if recipe.get('source') != 'fallback' and not any(
+                        note.startswith('Fallback recipe') for note in recipe.get('notes', [])):
+                    recipe['data_quality'] = 'real'
+                else:
+                    recipe['data_quality'] = 'fallback'
+
                 buttons = self.create_recipe_buttons(recipe, "external")
                 for button in buttons:
                     response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
 
-            # If there are more than 4 external recipes, add "Show All" button
+            # Add "Show All" button if there are more recipes
             if total_recipes > 4:
                 temp_id = self.store_temp_recipe_list(external_recipes, search_criteria)
                 button_creator = get_tool('create_action_buttons')
@@ -1619,13 +1658,27 @@ Would you like me to search for something specific?"""
                     )
                     response += f"\n\n[ACTION_BUTTON:{json.dumps(show_all_button)}]"
 
+            # Add helpful note about data quality
+            real_count = sum(1 for recipe in external_recipes
+                             if recipe.get('data_quality') == 'real')
+            if real_count > 0:
+                response += f"\n\n✨ {real_count} of these recipes contain real data scraped from {website_name}!"
+
             logger.info(f"Successfully returning {show_initial} recipes from {website_name}")
             return response
 
         except Exception as e:
             logger.error(f"Error handling website search action: {e}")
-            # On any error, provide a helpful fallback instead of failing
-            return f"I found some great recipes on {website_name}! Let me search for some popular chocolate chip cookie recipes for you."
+            # Provide helpful fallback with direct link to search
+            search_term = search_criteria.get('ingredient', 'recipes')
+            return f"""I encountered an error while searching {website_name} for {search_term}. 
+
+    You can try:
+    • Searching again in a moment
+    • Choosing a different website  
+    • Visiting {website_name} directly: https://{website}/search?q={search_term.replace(' ', '+')}
+
+    Would you like me to try a different recipe website instead?"""
 
     # === MAIN CHAT FUNCTION ===
 
