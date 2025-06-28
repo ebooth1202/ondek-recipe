@@ -1,6 +1,8 @@
 from .base_imports import *
 from .recipe_cache import recipe_cache
 from .allrecipescom_search_tool import AllRecipesComSearchTool
+from .food_network_search_tool import FoodNetworkSearchTool
+from .food_com_search_tool import FoodComSearchTool
 
 
 class RecipeSearchTool:
@@ -10,6 +12,8 @@ class RecipeSearchTool:
         self.name = "search_external_recipes"
         self.description = "Search the internet for recipes from various cooking websites"
         self.allrecipes_tool = AllRecipesComSearchTool()
+        self.foodnetwork_tool = FoodNetworkSearchTool()
+        self.food_com_tool = FoodComSearchTool()
 
     def execute(self, criteria: Dict[str, Any], search_params: Dict[str, Any] = None) -> List[Dict]:
         """Search for recipes from external sources with enhanced error handling"""
@@ -121,6 +125,10 @@ class RecipeSearchTool:
             if 'allrecipes.com' in website:
                 logger.info(f"Delegating to AllRecipes tool for {website}")
                 return self.allrecipes_tool.search_recipes(ingredient, criteria)
+            # Delegate to Food.com tool if it's Food.com
+            if 'food.com' in website:
+                logger.info(f"Delegating to Food.com tool for {website}")
+                return self.food_com_tool.search_recipes(ingredient, criteria)
 
             # Handle other websites with the existing logic
             search_urls = self._build_search_urls(ingredient, website)
