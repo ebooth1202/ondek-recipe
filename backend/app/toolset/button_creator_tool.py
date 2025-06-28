@@ -17,20 +17,20 @@ class ButtonCreatorTool:
                 "color": "#bd081c",
                 "description": "Visual recipe discovery platform"
             },
-            {
-                "name": "AllRecipes",
-                "url": "allrecipes.com",
-                "icon": "🥄",
-                "color": "#e43125",
-                "description": "Trusted recipe community"
-            },
-            {
-                "name": "Food Network",
-                "url": "foodnetwork.com",
-                "icon": "📺",
-                "color": "#fa6918",
-                "description": "Professional chef recipes"
-            },
+            # {
+            #     "name": "AllRecipes",
+            #     "url": "allrecipes.com",
+            #     "icon": "🥄",
+            #     "color": "#e43125",
+            #     "description": "Trusted recipe community"
+            # },
+            # {
+            #     "name": "Food Network",
+            #     "url": "foodnetwork.com",
+            #     "icon": "📺",
+            #     "color": "#fa6918",
+            #     "description": "Professional chef recipes"
+            # },
             {
                 "name": "Food.com",
                 "url": "food.com",
@@ -45,13 +45,13 @@ class ButtonCreatorTool:
                 "color": "#333333",
                 "description": "Gourmet cooking magazine"
             },
-            {
-                "name": "Google",
-                "url": "google.com",
-                "icon": "🔍",
-                "color": "#4285f4",
-                "description": "Search across all recipe sites"
-            }
+            # {
+            #     "name": "Google",
+            #     "url": "google.com",
+            #     "icon": "🔍",
+            #     "color": "#4285f4",
+            #     "description": "Search across all recipe sites"
+            # }
         ]
 
     def create_recipe_buttons(self, recipe: Dict[str, Any], recipe_type: str = "internal") -> List[Dict[str, Any]]:
