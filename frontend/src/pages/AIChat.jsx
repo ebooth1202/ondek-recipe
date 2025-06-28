@@ -1447,10 +1447,12 @@ const RecipePreviewModal = ({ recipe, show, onClose, buttonMetadata }) => {
                   👋 Welcome! I'm Rupert, your Recipe Assistant!
                 </h3>
                 <p>
-                  I can help you find recipes, suggest cooking ideas, and parse recipes from uploaded files.
+                  I can help you find recipes, suggest cooking ideas, and actively learning to parse recipes from uploaded files.
                 </p>
                 <p style={{ marginTop: '1rem', fontSize: '14px', fontStyle: 'italic' }}>
-                  Try asking me something like "Show me chicken recipes" or upload a recipe file!
+                  Try asking me something like "Show me cookie recipes",<br />
+                  or ask if I can help you scale a recipe size up or down,<br />
+                  or we can exchange some world-class jokes!
                 </p>
               </div>
             ) : (
