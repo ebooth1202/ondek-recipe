@@ -33,6 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from .routes.issues import router as issues_router
 from .middleware.error_tracking import ErrorTrackingMiddleware
 from .middleware.auth import get_current_user, require_role, create_access_token
+from .utils.email_service import email_service
 
 # Load environment variables first
 # load_dotenv()
@@ -65,6 +66,7 @@ if not env_loaded:
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logger.info(f"Email service configured: {email_service.is_configured}")
 
 # Try to import database - with error handling
 try:

@@ -68,3 +68,14 @@ def scale_quantity(quantity: Union[str, float], factor: float) -> float:
     """Scale a quantity by a factor"""
     qty = quantity if isinstance(quantity, float) else parse_fraction(quantity)
     return qty * factor
+
+# Import email service to ensure it's initialized at startup
+from .email_service import email_service
+
+# Expose email service through the utils package
+__all__ = [
+    'parse_fraction',
+    'format_fraction',
+    'scale_quantity',
+    'email_service'
+]
