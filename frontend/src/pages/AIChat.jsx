@@ -522,7 +522,57 @@ Please try:
     }
   };
 
-  // Function to handle button clicks
+  // Function to handle adding external recipe to database
+  const handleAddExternalRecipe = async (button) => {
+  const tempId = button.metadata?.temp_id;
+  const recipeName = button.metadata?.recipe_name || 'Unknown Recipe';
+
+  if (!tempId) {
+    console.error('No temp_id found in button metadata');
+    const errorMessage = {
+      id: Date.now() + 1,
+      type: 'error',
+      content: 'Sorry, there was an issue with the recipe data. Please try searching again.',
+      timestamp: new Date(),
+      actionButtons: []
+    };
+    setMessages(prev => [...prev, errorMessage]);
+    return;
+  }
+
+  try {
+    setIsLoading(true);
+
+    // Show user message indicating they're being taken to the form
+    const actionMessage = {
+      id: Date.now(),
+      type: 'user',
+      content: `📝 Opening "${recipeName}" in recipe form for review...`,
+      timestamp: new Date(),
+      actionButtons: [],
+      isAction: true
+    };
+    setMessages(prev => [...prev, actionMessage]);
+
+    // Navigate to add recipe form with temp_id
+    navigate(`/add-recipe?temp_id=${tempId}`);
+
+  } catch (error) {
+    console.error('Error navigating to recipe form:', error);
+    const errorMessage = {
+      id: Date.now() + 1,
+      type: 'error',
+      content: 'Sorry, I encountered an error while opening the recipe form. Please try again.',
+      timestamp: new Date(),
+      actionButtons: []
+    };
+    setMessages(prev => [...prev, errorMessage]);
+  } finally {
+    setIsLoading(false);
+  }
+};
+
+  // Function to handle button clicks - UPDATED
   const handleButtonClick = (button) => {
     console.log('Button clicked:', button); // Debug logging
 
@@ -533,6 +583,9 @@ Please try:
         recipe: button.preview_data,
         buttonMetadata: button.metadata
       });
+    } else if (button.action === 'add_external_recipe') {
+      // NEW: Handle adding external recipe to database
+      handleAddExternalRecipe(button);
     } else if (button.action === 'show_all_recipes' || button.action === 'show_all_external_recipes') {
       // Handle show all action
       handleShowAllRecipes(button);
@@ -555,10 +608,7 @@ Please try:
     }
   };
 
-  // Recipe Preview Modal Component
-  // Recipe Preview Modal Component
-// Recipe Preview Modal Component
-// Recipe Preview Modal Component
+
 // Recipe Preview Modal Component
 const RecipePreviewModal = ({ recipe, show, onClose, buttonMetadata }) => {
   const [isFavorited, setIsFavorited] = useState(false);

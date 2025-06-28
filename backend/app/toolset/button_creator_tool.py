@@ -76,22 +76,22 @@ class ButtonCreatorTool:
                 }
             })
         else:
+            # FIXED: For external recipes, include the full recipe data for adding to database
             button_data = {
                 "type": "action_button",
                 "text": f"Add {recipe.get('name', 'Recipe')}",
-                "action": "create_recipe",
+                "action": "add_external_recipe",  # Changed from "create_recipe" to be more specific
                 "style": "primary",
                 "metadata": {
                     "recipe_name": recipe.get('name', 'Unknown Recipe'),
-                    "type": "add_recipe",
-                    "source": "external"
+                    "type": "add_external_recipe",
+                    "source": "external",
+                    "recipe_data": recipe,  # Include the full recipe data
+                    "original_url": recipe.get('url', '')  # Keep original URL for reference
                 }
             }
-
-            if 'url' in recipe:
-                button_data['url'] = recipe['url']
-            else:
-                button_data['url'] = "/add-recipe"
+            # REMOVED: No longer setting button URL to external recipe URL
+            # This ensures the button triggers an action instead of navigating to external URL
 
             buttons.append(button_data)
 

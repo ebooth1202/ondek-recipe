@@ -993,7 +993,10 @@ class RupertAIHelper:
     # === BUTTON CREATION (using ButtonCreatorTool) ===
 
     def create_recipe_buttons(self, recipe: Dict[str, Any], recipe_type: str = "internal") -> List[Dict[str, Any]]:
-        """Create both action and preview buttons for a recipe with quality indicators"""
+        """Create both action and preview buttons for a recipe with quality indicators and temp storage"""
+
+        # Import the formatter tool
+        from ..toolset.tools import get_tool
         formatter = get_tool('format_recipe_data')
         if formatter:
             preview_data = formatter.format_for_preview(recipe)
@@ -1018,34 +1021,59 @@ class RupertAIHelper:
                 }
             })
         else:
+            # CRITICAL FIX: For external recipes, store in temp storage and use temp_id
+            temp_id = self.store_temp_recipe(recipe)
+
             # Enhanced add button for external recipes with quality indicator
             button_text = f"Add {recipe.get('name', 'Recipe')}"
 
-            # Add quality indicator to button text
-            if recipe.get('data_quality') == 'real':
-                button_text += " ✨"  # Sparkle for real data
+            # Add quality indicator to button text if available
+            if recipe.get('data_quality') == 'excellent':
+                button_text += " ✨"
 
             button_data = {
                 "type": "action_button",
                 "text": button_text,
-                "action": "create_recipe",
+                "action": "add_external_recipe",
                 "style": "primary",
                 "metadata": {
-                    "recipe_name": recipe.get('name', 'Unknown Recipe'),
-                    "type": "add_recipe",
+                    "recipe_name": str(recipe.get('name', 'Unknown Recipe'))[:100],
+                    "type": "add_external_recipe",
                     "source": "external",
-                    "data_quality": recipe.get('data_quality', 'unknown')
+                    "data_quality": recipe.get('data_quality', 'unknown'),
+                    "temp_id": temp_id,  # CRITICAL: This is what was missing!
+                    "original_url": str(recipe.get('url', ''))[:200]
                 }
             }
 
-            # Use the URL that was set up during scraping
-            if 'url' in recipe:
-                button_data['url'] = recipe['url']
-            else:
-                # Fallback to generic add recipe page if no URL
-                button_data['url'] = "/add-recipe"
-
             buttons.append(button_data)
+
+        # Enhanced preview button with quality indicator
+        preview_text = "📋 Preview"
+        if recipe_type == "external" and recipe.get('data_quality') == 'excellent':
+            preview_text += " ✨"
+
+        preview_metadata = {
+            "recipe_name": recipe.get('name', 'Unknown Recipe'),
+            "type": "preview_recipe",
+            "source": recipe_type,
+            "data_quality": recipe.get('data_quality', 'unknown')
+        }
+
+        # Add recipe_id for internal recipes so favorite button can work
+        if recipe_type == "internal" and 'id' in recipe:
+            preview_metadata['recipe_id'] = recipe['id']
+
+        buttons.append({
+            "type": "preview_button",
+            "text": preview_text,
+            "action": "preview_recipe",
+            "style": "secondary",
+            "preview_data": preview_data,
+            "metadata": preview_metadata
+        })
+
+        return buttons
 
         # Enhanced preview button with quality indicator
         preview_text = "📋 Preview"
@@ -1276,8 +1304,9 @@ class RupertAIHelper:
 
             response = f"I searched the internet and found {total_recipes} recipes! Here are the first {show_initial}:"
 
-            # Add action + preview buttons for external recipes
+            # CRITICAL FIX: Use AI helper's button creation instead of ButtonCreatorTool
             for recipe in recipes_to_show:
+                # Use the AI helper's create_recipe_buttons method which handles temp_id creation
                 buttons = self.create_recipe_buttons(recipe, "external")
                 for button in buttons:
                     response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
@@ -1580,7 +1609,7 @@ Would you like me to search for something specific?"""
 
     async def handle_website_search_action(self, website: str, website_name: str,
                                            search_criteria: Dict[str, Any]) -> str:
-        """Handle when user selects a specific website to search - WITH REAL SCRAPING"""
+        """Handle when user selects a specific website to search - WITH REAL SCRAPING AND TEMP ID CREATION"""
         response = None
 
         try:
@@ -1634,15 +1663,16 @@ Would you like me to search for something specific?"""
             show_initial = min(4, total_recipes)
             recipes_to_show = external_recipes[:show_initial]
 
-            # Add action + preview buttons for external recipes
+            # CRITICAL FIX: Use AI helper's button creation to ensure temp_id generation
             for recipe in recipes_to_show:
                 # Enhance recipe metadata to indicate data source quality
                 if recipe.get('source') != 'fallback' and not any(
                         note.startswith('Fallback recipe') for note in recipe.get('notes', [])):
-                    recipe['data_quality'] = 'real'
+                    recipe['data_quality'] = 'excellent'
                 else:
-                    recipe['data_quality'] = 'fallback'
+                    recipe['data_quality'] = 'basic'
 
+                # Use AI helper's create_recipe_buttons method which creates temp_ids
                 buttons = self.create_recipe_buttons(recipe, "external")
                 for button in buttons:
                     response += f"\n\n[ACTION_BUTTON:{json.dumps(button)}]"
@@ -1660,7 +1690,7 @@ Would you like me to search for something specific?"""
 
             # Add helpful note about data quality
             real_count = sum(1 for recipe in external_recipes
-                             if recipe.get('data_quality') == 'real')
+                             if recipe.get('data_quality') == 'excellent')
             if real_count > 0:
                 response += f"\n\n✨ {real_count} of these recipes contain real data scraped from {website_name}!"
 
