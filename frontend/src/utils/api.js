@@ -1,10 +1,26 @@
-// frontend/src/utils/api.js - Updated for production deployment
+// frontend/src/utils/api.js - Fixed for production deployment
 import axios from 'axios';
 
-// API Configuration - Updated to work in both development and production
-export const API_BASE_URL = process.env.NODE_ENV === 'production'
-  ? window.location.origin  // Use same domain in production
-  : 'http://127.0.0.1:8000'; // Local development
+// API Configuration - For Heroku backend deployment
+export const API_BASE_URL = (() => {
+  // Priority 1: Use explicit environment variable if set
+  if (process.env.REACT_APP_API_URL) {
+    return process.env.REACT_APP_API_URL;
+  }
+
+  // Priority 2: Detect production environment
+  const isProduction = process.env.NODE_ENV === 'production' ||
+                      window.location.hostname.includes('ondekrecipe.com');
+
+  if (isProduction) {
+    // Your Heroku backend URL - this should match your actual Heroku app
+    // You can get this from: https://dashboard.heroku.com/apps/YOUR_APP_NAME/settings
+    return 'https://ondek-recipe-testing-2777bc2152f6.herokuapp.com';
+  } else {
+    // Local development
+    return 'http://127.0.0.1:8000';
+  }
+})();
 
 // API endpoints
 export const API_ENDPOINTS = {
@@ -89,7 +105,7 @@ apiClient.interceptors.response.use(
     return Promise.reject(error);
   }
 );
-//Test
+
 // Connection test helper
 export const testConnection = async () => {
   console.log('🔍 Testing backend connection...');

@@ -105,8 +105,9 @@ app.add_middleware(
         "http://localhost:8000",
         "http://127.0.0.1:8000",
         # Production origins
-        settings.frontend_url,  # https://yourdomain.com
-        settings.base_url,      # https://api.yourdomain.com
+        settings.frontend_url,  # https://ondekrecipe.com
+        settings.base_url,      # https://ondekrecipe.com
+        "https://www.ondekrecipe.com",  # ADD THIS - handles www subdomain
         # Backup Heroku URL
         f"https://{os.getenv('HEROKU_APP_NAME', 'ondek-recipe-testing-2777bc2152f6')}.herokuapp.com"
     ],
