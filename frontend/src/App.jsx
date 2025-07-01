@@ -12,7 +12,8 @@ import RecipeDetail from './pages/RecipeDetail';
 import Users from './pages/Users';
 import UserManagement from './components/user/UserManagement';
 import AIChat from './pages/AIChat';
-import AdminIssues from './pages/AdminIssues'; // ADD THIS LINE
+import AdminIssues from './pages/AdminIssues';
+import AdminTracker from './pages/AdminTracker'; // ADD THIS LINE
 
 function App() {
   return (
@@ -32,7 +33,8 @@ function App() {
               <Route path="/users" element={<Users />} />
               <Route path="/user-management" element={<UserManagement />} />
               <Route path="/ai-chat" element={<AIChat />} />
-              <Route path="/admin/issues" element={<AdminIssues />} /> {/* ADD THIS LINE */}
+              <Route path="/admin/issues" element={<AdminIssues />} />
+              <Route path="/admin/activities" element={<AdminTracker />} /> {/* ADD THIS LINE */}
             </Routes>
           </main>
         </div>

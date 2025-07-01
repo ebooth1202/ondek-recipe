@@ -437,19 +437,19 @@ const Dashboard = () => {
               gap: '1.5rem'
             }}>
               <div style={{
-                background: '#fff3cd',
+                background: '#d1ecf1',
                 padding: '1.5rem',
                 borderRadius: '10px',
                 textAlign: 'center',
-                border: '1px solid #856404',
+                border: '1px solid #0c5460',
                 cursor: 'pointer'
               }}
-              onClick={() => navigate('/user-management')}>
-                <h4 style={{ color: '#856404', marginBottom: '0.5rem' }}>
-                  👥 Manage Users
+              onClick={() => navigate('/admin/activities')}>
+                <h4 style={{ color: '#0c5460', marginBottom: '0.5rem' }}>
+                  📊 Activity Tracker
                 </h4>
-                <p style={{ color: '#856404', fontSize: '0.9rem', margin: 0 }}>
-                  Add, edit, or remove user accounts
+                <p style={{ color: '#0c5460', fontSize: '0.9rem', margin: 0 }}>
+                  Monitor user activities and system usage
                 </p>
               </div>
 
