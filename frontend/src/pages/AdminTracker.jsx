@@ -6,7 +6,8 @@ import { apiClient } from '../utils/api';
 const AdminTracker = () => {
   const navigate = useNavigate();
   const { user, hasRole, isAuthenticated } = useAuth();
-  const [sessions, setSessions] = useState([]);
+  const [allSessions, setAllSessions] = useState([]); // NEW: Store all sessions for stats
+  const [sessions, setSessions] = useState([]); // Filtered sessions for display
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -28,6 +29,12 @@ const AdminTracker = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [activityToDelete, setActivityToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Session deletion state
+  const [showSessionDeleteConfirm, setShowSessionDeleteConfirm] = useState(false);
+  const [sessionToDelete, setSessionToDelete] = useState(null);
+  const [deletingSession, setDeletingSession] = useState(false);
+  const [deletionProgress, setDeletionProgress] = useState({ current: 0, total: 0 });
 
   // Manual completion state
   const [manuallyCompletedSessions, setManuallyCompletedSessions] = useState(new Set());
@@ -76,7 +83,10 @@ const AdminTracker = () => {
       // Group activities into sessions
       const groupedSessions = groupActivitiesIntoSessions(response.data);
 
-      // Filter sessions by status (treat expired as completed)
+      // Store all sessions for stats calculation
+      setAllSessions(groupedSessions);
+
+      // Filter sessions by status for display
       const filteredSessions = groupedSessions.filter(session => {
         if (filters.status && filters.status !== '') {
           if (filters.status === 'completed') {
@@ -263,6 +273,78 @@ const AdminTracker = () => {
     setManuallyCompletedSessions(prev => new Set([...prev, sessionId]));
     setSuccessMessage('Session marked as completed');
     setTimeout(() => setSuccessMessage(''), 3000);
+  };
+
+  // NEW SESSION DELETION FUNCTIONS
+  const handleSessionDeleteClick = (session, event) => {
+    event.stopPropagation();
+    setSessionToDelete(session);
+    setShowSessionDeleteConfirm(true);
+  };
+
+  const confirmSessionDelete = async () => {
+    if (!sessionToDelete || !hasRole(['owner'])) {
+      setError('Only owners can delete sessions');
+      return;
+    }
+
+    setDeletingSession(true);
+    setDeletionProgress({ current: 0, total: sessionToDelete.activities.length });
+
+    let deletedCount = 0;
+    let failedCount = 0;
+    const failedActivities = [];
+
+    try {
+      // Delete each activity in the session
+      for (let i = 0; i < sessionToDelete.activities.length; i++) {
+        const activity = sessionToDelete.activities[i];
+        setDeletionProgress({ current: i + 1, total: sessionToDelete.activities.length });
+
+        try {
+          await apiClient.delete(`/activities/${activity.id}`);
+          deletedCount++;
+        } catch (error) {
+          console.error(`Failed to delete activity ${activity.id}:`, error);
+          failedCount++;
+          failedActivities.push(activity);
+        }
+      }
+
+      // Show results
+      if (failedCount === 0) {
+        setSuccessMessage(`Session deleted successfully! Removed ${deletedCount} activities.`);
+      } else {
+        setSuccessMessage(`Session partially deleted: ${deletedCount} deleted, ${failedCount} failed.`);
+        if (failedCount > 0) {
+          console.warn('Failed to delete activities:', failedActivities);
+        }
+      }
+
+      // Close modals and refresh
+      setShowSessionDeleteConfirm(false);
+      setSessionToDelete(null);
+      setShowActivityModal(false);
+
+      // Refresh the activities list
+      await fetchActivities();
+
+      // Clear success message after 5 seconds
+      setTimeout(() => setSuccessMessage(''), 5000);
+
+    } catch (error) {
+      console.error('Error during session deletion:', error);
+      setError('Failed to delete session. Please try again.');
+      setTimeout(() => setError(''), 5000);
+    } finally {
+      setDeletingSession(false);
+      setDeletionProgress({ current: 0, total: 0 });
+    }
+  };
+
+  const cancelSessionDelete = () => {
+    setShowSessionDeleteConfirm(false);
+    setSessionToDelete(null);
   };
 
   // Helper functions
@@ -465,7 +547,7 @@ const AdminTracker = () => {
     boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)'
   };
 
-  if (loading && sessions.length === 0) {
+  if (loading && allSessions.length === 0) {
     return (
       <div style={containerStyle}>
         <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
@@ -537,9 +619,9 @@ const AdminTracker = () => {
           <div style={statsContainerStyle}>
             <div style={statCardStyle}>
               <h3 style={{ color: '#003366', fontSize: '2rem', margin: '0' }}>
-                {sessions.length}
+                {allSessions.length}
               </h3>
-              <p style={{ color: '#666', margin: '0.5rem 0 0 0' }}>User Sessions</p>
+              <p style={{ color: '#666', margin: '0.5rem 0 0 0' }}>Total Sessions</p>
             </div>
             <div style={statCardStyle}>
               <h3 style={{ color: '#007bff', fontSize: '2rem', margin: '0' }}>
@@ -549,13 +631,13 @@ const AdminTracker = () => {
             </div>
             <div style={statCardStyle}>
               <h3 style={{ color: '#28a745', fontSize: '2rem', margin: '0' }}>
-                {sessions.filter(s => s.status === 'active').length}
+                {allSessions.filter(s => s.status === 'active').length}
               </h3>
               <p style={{ color: '#666', margin: '0.5rem 0 0 0' }}>Currently Active</p>
             </div>
             <div style={statCardStyle}>
               <h3 style={{ color: '#ffc107', fontSize: '2rem', margin: '0' }}>
-                {sessions.filter(s => s.status === 'completed').length}
+                {allSessions.filter(s => s.status === 'completed' || s.status === 'expired').length}
               </h3>
               <p style={{ color: '#666', margin: '0.5rem 0 0 0' }}>Completed Sessions</p>
             </div>
@@ -767,6 +849,24 @@ const AdminTracker = () => {
                 {getActivityIcon('login')} Session Details - {selectedSession.username}
               </h2>
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                {/* Delete Session Button - Only show for owners */}
+                {hasRole(['owner']) && (
+                  <button
+                    onClick={(e) => handleSessionDeleteClick(selectedSession, e)}
+                    style={{
+                      backgroundColor: '#dc3545',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '0.5rem 1rem',
+                      cursor: 'pointer',
+                      fontSize: '0.9rem'
+                    }}
+                    title="Delete entire session"
+                  >
+                    🗑️ Delete Session
+                  </button>
+                )}
                 {/* Mark as Completed Button - Only show for non-completed sessions and for owners/admins */}
                 {selectedSession.status !== 'completed' && hasRole(['admin', 'owner']) && (
                   <button
@@ -958,6 +1058,94 @@ const AdminTracker = () => {
                 }}
               >
                 {deleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SESSION DELETE CONFIRMATION MODAL */}
+      {showSessionDeleteConfirm && (
+        <div style={modalBackdropStyle}>
+          <div style={{
+            ...modalContentStyle,
+            maxWidth: '500px',
+            textAlign: 'center'
+          }}>
+            <h3 style={{ color: '#dc3545', marginBottom: '1rem' }}>
+              🗑️ Delete Entire Session
+            </h3>
+            <p style={{ marginBottom: '1.5rem' }}>
+              Are you sure you want to delete this entire session?
+            </p>
+            {sessionToDelete && (
+              <div style={{ fontSize: '0.9rem', color: '#666', marginBottom: '1.5rem', textAlign: 'left' }}>
+                <strong>Session Details:</strong>
+                <br />• User: {sessionToDelete.username}
+                <br />• Duration: {formatDuration(sessionToDelete.duration)}
+                <br />• Activities: {sessionToDelete.activities.length} total
+                <br />• Started: {formatDateTime(sessionToDelete.startTime)}
+                <br />
+                <br />
+                <span style={{ color: '#dc3545', fontWeight: 'bold' }}>
+                  This will permanently delete all {sessionToDelete.activities.length} activities in this session.
+                </span>
+              </div>
+            )}
+
+            {/* Progress indicator during deletion */}
+            {deletingSession && (
+              <div style={{ marginBottom: '1.5rem' }}>
+                <div style={{ color: '#007bff', marginBottom: '0.5rem' }}>
+                  Deleting activities... {deletionProgress.current} of {deletionProgress.total}
+                </div>
+                <div style={{
+                  width: '100%',
+                  height: '8px',
+                  backgroundColor: '#e9ecef',
+                  borderRadius: '4px',
+                  overflow: 'hidden'
+                }}>
+                  <div style={{
+                    width: `${(deletionProgress.current / deletionProgress.total) * 100}%`,
+                    height: '100%',
+                    backgroundColor: '#007bff',
+                    transition: 'width 0.3s ease'
+                  }}></div>
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+              <button
+                onClick={cancelSessionDelete}
+                disabled={deletingSession}
+                style={{
+                  backgroundColor: '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '0.75rem 1.5rem',
+                  cursor: deletingSession ? 'not-allowed' : 'pointer',
+                  opacity: deletingSession ? 0.6 : 1
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmSessionDelete}
+                disabled={deletingSession}
+                style={{
+                  backgroundColor: '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '0.75rem 1.5rem',
+                  cursor: deletingSession ? 'not-allowed' : 'pointer',
+                  opacity: deletingSession ? 0.6 : 1
+                }}
+              >
+                {deletingSession ? 'Deleting...' : `Delete Session (${sessionToDelete?.activities.length || 0} activities)`}
               </button>
             </div>
           </div>
