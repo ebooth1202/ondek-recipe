@@ -7,6 +7,8 @@ from enum import Enum
 class ActivityType(str, Enum):
     LOGIN = "login"
     LOGOUT = "logout"
+    PAGE_NAVIGATION = "page_navigation"  # ADD THIS NEW TYPE
+    # Keep existing types for backwards compatibility
     CREATE_RECIPE = "create_recipe"
     UPDATE_RECIPE = "update_recipe"
     DELETE_RECIPE = "delete_recipe"
@@ -26,6 +28,8 @@ class ActivityType(str, Enum):
 
 class ActivityCategory(str, Enum):
     AUTHENTICATION = "authentication"
+    NAVIGATION = "navigation"  # ADD THIS NEW CATEGORY
+    # Keep existing categories
     RECIPE_MANAGEMENT = "recipe_management"
     USER_MANAGEMENT = "user_management"
     SEARCH_BROWSE = "search_browse"

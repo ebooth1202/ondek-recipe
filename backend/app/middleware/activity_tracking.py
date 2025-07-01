@@ -1,7 +1,7 @@
 import time
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Callable, Optional, Dict, Any
 from urllib.parse import parse_qs, urlparse
 from fastapi import Request, Response
@@ -36,12 +36,8 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
         }
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        # Add this debug line at the very start
-        print(f"🔍 MIDDLEWARE DEBUG: Processing {request.method} {request.url}")
-
         # Skip tracking for excluded endpoints
         if self._should_exclude_endpoint(request.url.path):
-            print(f"🚫 MIDDLEWARE DEBUG: Excluding {request.url.path}")
             return await call_next(request)
 
         start_time = time.time()
@@ -50,22 +46,27 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
         try:
             # Get user info before processing request
             user_info = await self._get_user_info(request)
-            print(f"👤 MIDDLEWARE DEBUG: User info: {user_info.username if user_info else 'No user'}")
 
             # Process the request
             response = await call_next(request)
 
             # Track the activity after successful response
             if user_info and user_info.user_id != "anonymous":
+                # EXCLUDE OWNER USERS FROM ALL TRACKING
+                if user_info.role.lower() == "owner":
+                    print(f"🚫 TRACKING DEBUG: Skipping tracking for owner user: {user_info.username}")
+                    return response
+
                 processing_time = int((time.time() - start_time) * 1000)
-                print(f"📝 MIDDLEWARE DEBUG: About to track activity for {user_info.username}")
                 await self._track_activity(request, response, user_info, processing_time)
-                print(f"✅ MIDDLEWARE DEBUG: Activity tracked successfully")
 
             return response
 
         except Exception as e:
-            print(f"❌ MIDDLEWARE DEBUG: Error in middleware: {e}")
+            # Still try to track the activity even if request failed (but not for owners)
+            if 'user_info' in locals() and user_info and user_info.user_id != "anonymous" and user_info.role.lower() != "owner":
+                processing_time = int((time.time() - start_time) * 1000)
+                await self._track_activity(request, None, user_info, processing_time, error=str(e))
 
             raise
 
@@ -79,16 +80,13 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
             # Try to get user from authorization header
             authorization = request.headers.get("Authorization")
             if not authorization:
-                print(f"🔍 AUTH DEBUG: No Authorization header found")
                 return self._get_anonymous_user()
 
             try:
                 scheme, token = authorization.split()
                 if scheme.lower() != "bearer":
-                    print(f"🔍 AUTH DEBUG: Invalid auth scheme: {scheme}")
                     return self._get_anonymous_user()
             except ValueError:
-                print(f"🔍 AUTH DEBUG: Invalid authorization format")
                 return self._get_anonymous_user()
 
             # Import here to avoid circular imports
@@ -103,33 +101,24 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
                 payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
                 username = payload.get("sub")
                 if not username:
-                    print(f"🔍 AUTH DEBUG: No username in token")
                     return self._get_anonymous_user()
 
-                print(f"🔍 AUTH DEBUG: Decoded username: {username}")
-
             except jwt.PyJWTError as e:
-                print(f"🔍 AUTH DEBUG: JWT decode error: {e}")
                 return self._get_anonymous_user()
 
             # Get user from database
             if db is not None:
                 user = db.users.find_one({"username": username})
                 if user:
-                    print(f"✅ AUTH DEBUG: Found user in database: {user['username']}")
                     return UserInfo(
                         user_id=str(user["_id"]),
                         username=user["username"],
                         role=user["role"],
                         email=user.get("email")
                     )
-                else:
-                    print(f"❌ AUTH DEBUG: User not found in database: {username}")
-            else:
-                print(f"❌ AUTH DEBUG: Database not available")
 
         except Exception as e:
-            print(f"❌ AUTH DEBUG: Error extracting user info: {e}")
+            logger.debug(f"Could not extract user info: {e}")
 
         return self._get_anonymous_user()
 
@@ -153,7 +142,7 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
             browser=browser,
             page=str(request.url.path),
             referrer=request.headers.get("referer"),
-            session_id=request.headers.get("x-session-id"),  # If you track sessions
+            session_id=request.headers.get("x-session-id"),
             timestamp=datetime.now()
         )
 
@@ -189,7 +178,7 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
 
     async def _track_activity(self, request: Request, response: Optional[Response],
                               user_info: UserInfo, processing_time: int, error: Optional[str] = None):
-        """Track the user activity"""
+        """Track the user activity with deduplication"""
         try:
             # Determine activity type and category
             activity_type, category = self._determine_activity_type(request, response)
@@ -197,11 +186,18 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
             if not activity_type:
                 return  # Skip tracking if we can't determine activity type
 
+            # For page navigation, implement deduplication
+            if activity_type == ActivityType.PAGE_NAVIGATION:
+                if await self._is_duplicate_navigation(user_info.user_id, request.url.path):
+                    print(
+                        f"🔄 TRACKING DEBUG: Skipping duplicate navigation to {request.url.path} for {user_info.username}")
+                    return
+
             # Get activity context
             context = self._get_activity_context(request)
 
-            # Build activity details
-            details = await self._build_activity_details(request, response, processing_time, error)
+            # Build activity details (simplified)
+            details = self._build_simplified_activity_details(request, response, processing_time, error)
 
             # Create activity record
             activity_create = ActivityCreate(
@@ -210,9 +206,9 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
                 context=context,
                 details=details,
                 category=category,
-                description=self._generate_description(activity_type, details),
-                tags=self._generate_tags(request, activity_type, category),
-                metadata={"tracked_by": "middleware", "version": "1.0"}
+                description=self._generate_simplified_description(activity_type, details),
+                tags=self._generate_simplified_tags(request, activity_type, category),
+                metadata={"tracked_by": "middleware", "version": "2.0"}
             )
 
             # Save to database
@@ -223,215 +219,118 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
 
     def _determine_activity_type(self, request: Request, response: Optional[Response]) -> tuple[
         Optional[ActivityType], Optional[ActivityCategory]]:
-        """Determine activity type and category based on request"""
+        """Determine activity type and category based on request - SIMPLIFIED VERSION"""
         method = request.method.upper()
         path = request.url.path.lower()
 
-        # Authentication activities
+        # Authentication activities (always track)
         if "/auth/login" in path and method == "POST":
             return ActivityType.LOGIN, ActivityCategory.AUTHENTICATION
         elif "/auth/logout" in path:
             return ActivityType.LOGOUT, ActivityCategory.AUTHENTICATION
 
-        # Recipe management activities
-        elif "/recipes" in path:
-            if method == "POST" and path == "/recipes":
-                return ActivityType.CREATE_RECIPE, ActivityCategory.RECIPE_MANAGEMENT
-            elif method in ["PUT", "PATCH"] and "/recipes/" in path:
-                return ActivityType.UPDATE_RECIPE, ActivityCategory.RECIPE_MANAGEMENT
-            elif method == "DELETE" and "/recipes/" in path:
-                return ActivityType.DELETE_RECIPE, ActivityCategory.RECIPE_MANAGEMENT
-            elif method == "GET" and "/recipes/" in path and not path.endswith("/recipes"):
-                return ActivityType.VIEW_RECIPE, ActivityCategory.RECIPE_MANAGEMENT
-            elif method == "GET" and "/recipes" in path:
-                return ActivityType.SEARCH_RECIPES, ActivityCategory.SEARCH_BROWSE
+        # Page navigation (only for GET requests to main pages)
+        elif method == "GET" and response and response.status_code == 200:
+            # Only track navigation to main application pages
+            if self._is_main_page(path):
+                return ActivityType.PAGE_NAVIGATION, ActivityCategory.NAVIGATION
 
-        # Favorite activities
-        elif "/favorite" in path:
-            if method in ["POST", "PUT"]:
-                return ActivityType.FAVORITE_RECIPE, ActivityCategory.RECIPE_MANAGEMENT
-            elif method == "DELETE":
-                return ActivityType.UNFAVORITE_RECIPE, ActivityCategory.RECIPE_MANAGEMENT
-
-        # User management activities
-        elif "/users" in path:
-            if method == "POST":
-                return ActivityType.CREATE_USER, ActivityCategory.USER_MANAGEMENT
-            elif method in ["PUT", "PATCH"]:
-                return ActivityType.UPDATE_USER, ActivityCategory.USER_MANAGEMENT
-            elif method == "DELETE":
-                return ActivityType.DELETE_USER, ActivityCategory.USER_MANAGEMENT
-
-        # Admin activities
-        elif "/admin" in path or "/issues" in path:
-            return ActivityType.VIEW_ADMIN, ActivityCategory.ADMIN_ACTION
-
-        # File operations
-        elif "/upload" in path or "files" in path:
-            return ActivityType.UPLOAD_FILE, ActivityCategory.FILE_OPERATION
-
-        # Export operations
-        elif "/export" in path:
-            return ActivityType.EXPORT_DATA, ActivityCategory.ADMIN_ACTION
-
-        # General API access for other endpoints
-        elif method == "GET":
-            return ActivityType.API_ACCESS, ActivityCategory.SEARCH_BROWSE
-
+        # Don't track other activities (like API calls, individual recipe views, etc.)
         return None, None
 
-    async def _build_activity_details(self, request: Request, response: Optional[Response],
-                                      processing_time: int, error: Optional[str] = None) -> ActivityDetails:
-        """Build detailed activity information"""
+    def _is_main_page(self, path: str) -> bool:
+        """Check if this is a main application page worth tracking"""
+        main_pages = [
+            "/",  # Dashboard/Home
+            "/recipes",  # Recipe list page
+            "/favorites",  # Favorites page
+            "/admin",  # Admin dashboard
+            "/admin/activities",  # Activity tracker
+            "/admin/issues",  # Issue tracker
+        ]
 
-        # Parse query parameters
-        query_params = dict(request.query_params) if request.query_params else None
+        # Check exact matches for main pages
+        for main_page in main_pages:
+            if path == main_page or (path.startswith(main_page) and main_page != "/"):
+                return True
 
-        # Get request data (sanitized)
-        request_data = await self._get_sanitized_request_data(request)
+        return False
 
-        # Extract resource information from path
-        resource_id, resource_type = self._extract_resource_info(request.url.path)
+    async def _is_duplicate_navigation(self, user_id: str, current_path: str) -> bool:
+        """Check if this is a duplicate navigation for the user"""
+        try:
+            # Look for the user's last page navigation within the last 30 minutes
+            thirty_minutes_ago = datetime.now() - timedelta(minutes=30)
+
+            last_navigation = db.activities.find_one(
+                {
+                    "user_info.user_id": user_id,
+                    "activity_type": "page_navigation",
+                    "details.endpoint": current_path,
+                    "created_at": {"$gte": thirty_minutes_ago}
+                },
+                sort=[("created_at", -1)]
+            )
+
+            return last_navigation is not None
+
+        except Exception as e:
+            logger.error(f"Error checking navigation duplication: {e}")
+            return False  # If error, don't skip tracking
+
+    def _build_simplified_activity_details(self, request: Request, response: Optional[Response],
+                                           processing_time: int, error: Optional[str] = None) -> ActivityDetails:
+        """Build simplified activity details"""
 
         return ActivityDetails(
             method=request.method.upper(),
             endpoint=request.url.path,
-            resource_id=resource_id,
-            resource_type=resource_type,
-            query_params=query_params,
-            request_data=request_data,
             response_status=response.status_code if response else None,
-            response_time_ms=processing_time,
-            file_info=self._extract_file_info(request) if "/upload" in request.url.path else None
+            response_time_ms=processing_time
+            # Remove other verbose details like query_params, request_data, etc.
         )
 
-    async def _get_sanitized_request_data(self, request: Request) -> Optional[Dict[str, Any]]:
-        """Get sanitized request data (excluding sensitive fields)"""
-        try:
-            # Only capture request body for non-GET requests
-            if request.method.upper() == "GET":
-                return None
-
-            # Try to get JSON body
-            try:
-                body = await request.body()
-                if not body:
-                    return None
-
-                # Parse JSON if possible
-                try:
-                    data = json.loads(body.decode())
-                    return self._sanitize_data(data)
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    # If not JSON, just log that we had body data
-                    return {"_body_size": len(body), "_content_type": request.headers.get("content-type")}
-
-            except Exception:
-                return None
-
-        except Exception as e:
-            logger.debug(f"Could not extract request data: {e}")
-            return None
-
-    def _sanitize_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Remove sensitive fields from data"""
-        if not isinstance(data, dict):
-            return data
-
-        sanitized = {}
-        for key, value in data.items():
-            if key.lower() in self.sensitive_fields:
-                sanitized[key] = "[REDACTED]"
-            elif isinstance(value, dict):
-                sanitized[key] = self._sanitize_data(value)
-            elif isinstance(value, list):
-                sanitized[key] = [self._sanitize_data(item) if isinstance(item, dict) else item for item in value]
-            else:
-                sanitized[key] = value
-
-        return sanitized
-
-    def _extract_resource_info(self, path: str) -> tuple[Optional[str], Optional[str]]:
-        """Extract resource ID and type from URL path"""
-        path_parts = path.strip("/").split("/")
-
-        if "recipes" in path_parts:
-            idx = path_parts.index("recipes")
-            resource_type = "recipe"
-            if len(path_parts) > idx + 1 and path_parts[idx + 1]:
-                resource_id = path_parts[idx + 1]
-                return resource_id, resource_type
-            return None, resource_type
-
-        elif "users" in path_parts:
-            idx = path_parts.index("users")
-            resource_type = "user"
-            if len(path_parts) > idx + 1 and path_parts[idx + 1] != "me":
-                resource_id = path_parts[idx + 1]
-                return resource_id, resource_type
-            return None, resource_type
-
-        return None, None
-
-    def _extract_file_info(self, request: Request) -> Optional[Dict[str, str]]:
-        """Extract file information for upload operations"""
-        try:
-            content_type = request.headers.get("content-type", "")
-            if "multipart/form-data" in content_type:
-                return {
-                    "content_type": content_type,
-                    "content_length": request.headers.get("content-length", "unknown")
-                }
-        except Exception:
-            pass
-        return None
-
-    def _generate_description(self, activity_type: ActivityType, details: ActivityDetails) -> str:
-        """Generate human-readable description"""
+    def _generate_simplified_description(self, activity_type: ActivityType, details: ActivityDetails) -> str:
+        """Generate simple, readable descriptions"""
         descriptions = {
             ActivityType.LOGIN: "User logged in",
             ActivityType.LOGOUT: "User logged out",
-            ActivityType.CREATE_RECIPE: f"Created recipe via {details.endpoint}",
-            ActivityType.UPDATE_RECIPE: f"Updated recipe {details.resource_id or 'unknown'}",
-            ActivityType.DELETE_RECIPE: f"Deleted recipe {details.resource_id or 'unknown'}",
-            ActivityType.VIEW_RECIPE: f"Viewed recipe {details.resource_id or 'unknown'}",
-            ActivityType.FAVORITE_RECIPE: f"Favorited recipe {details.resource_id or 'unknown'}",
-            ActivityType.UNFAVORITE_RECIPE: f"Unfavorited recipe {details.resource_id or 'unknown'}",
-            ActivityType.SEARCH_RECIPES: "Searched for recipes",
-            ActivityType.UPLOAD_FILE: "Uploaded file",
-            ActivityType.VIEW_ADMIN: "Accessed admin area",
-            ActivityType.API_ACCESS: f"Accessed {details.endpoint}"
+            ActivityType.PAGE_NAVIGATION: f"Visited {self._get_page_name(details.endpoint)}"
         }
 
         return descriptions.get(activity_type, f"Performed {activity_type.value} action")
 
-    def _generate_tags(self, request: Request, activity_type: ActivityType, category: ActivityCategory) -> list[str]:
-        """Generate tags for the activity"""
-        tags = ["auto-tracked", category.value]
+    def _get_page_name(self, path: str) -> str:
+        """Convert path to friendly page name"""
+        page_names = {
+            "/": "Dashboard",
+            "/recipes": "Recipes",
+            "/favorites": "Favorites",
+            "/admin": "Admin Dashboard",
+            "/admin/activities": "Activity Tracker",
+            "/admin/issues": "Issue Tracker"
+        }
 
-        # Add method tag
-        tags.append(request.method.lower())
+        return page_names.get(path, path)
 
-        # Add specific tags based on activity type
-        if activity_type in [ActivityType.CREATE_RECIPE, ActivityType.UPDATE_RECIPE, ActivityType.DELETE_RECIPE]:
-            tags.append("recipe-modification")
-        elif activity_type in [ActivityType.FAVORITE_RECIPE, ActivityType.UNFAVORITE_RECIPE]:
-            tags.append("user-preference")
-        elif activity_type == ActivityType.SEARCH_RECIPES:
-            tags.append("search")
+    def _generate_simplified_tags(self, request: Request, activity_type: ActivityType, category: ActivityCategory) -> \
+    list[str]:
+        """Generate simple tags"""
+        tags = ["navigation-tracking", category.value]
+
+        if activity_type == ActivityType.LOGIN:
+            tags.append("session-start")
+        elif activity_type == ActivityType.LOGOUT:
+            tags.append("session-end")
+        elif activity_type == ActivityType.PAGE_NAVIGATION:
+            tags.append("page-visit")
 
         return tags
 
     async def _save_activity(self, activity_create: ActivityCreate):
         """Save activity to database"""
         try:
-            print(f"💾 MIDDLEWARE DEBUG: Attempting to save activity to database")
-            print(f"🔍 ACTIVITY DEBUG: activity_create object: {activity_create}")
-            print(f"🔍 ACTIVITY DEBUG: activity_type: {activity_create.activity_type}")
-            print(f"🔍 ACTIVITY DEBUG: user_info: {activity_create.user_info}")
-
             if db is None:
-                print(f"❌ MIDDLEWARE DEBUG: Database not available")
                 logger.warning("Database not available for activity tracking")
                 return
 
@@ -447,22 +346,14 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
                 "created_at": datetime.now()
             }
 
-            print(f"📊 MIDDLEWARE DEBUG: Activity document: {activity_doc}")
-
-            print(f"📊 MIDDLEWARE DEBUG: Activity document: {activity_doc}")
-
             # Insert into activities collection
             result = db.activities.insert_one(activity_doc)
 
             if result.inserted_id:
-                print(f"✅ MIDDLEWARE DEBUG: Activity saved with ID: {result.inserted_id}")
                 logger.debug(
                     f"Activity tracked: {activity_create.activity_type.value} by {activity_create.user_info.username}")
-            else:
-                print(f"❌ MIDDLEWARE DEBUG: Failed to save activity - no inserted_id")
 
         except Exception as e:
-            print(f"❌ MIDDLEWARE DEBUG: Failed to save activity: {e}")
             logger.error(f"Failed to save activity to database: {e}")
 
 

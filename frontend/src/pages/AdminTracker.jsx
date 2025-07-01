@@ -103,52 +103,55 @@ const AdminTracker = () => {
 
   // Helper functions
   const getActivityIcon = (type) => {
-    switch (type) {
-      case 'login': return '🔑';
-      case 'logout': return '👋';
-      case 'create_recipe': return '➕';
-      case 'update_recipe': return '✏️';
-      case 'delete_recipe': return '🗑️';
-      case 'view_recipe': return '👀';
-      case 'favorite_recipe': return '❤️';
-      case 'unfavorite_recipe': return '💔';
-      case 'search_recipes': return '🔍';
-      case 'upload_file': return '📤';
-      case 'view_admin': return '👑';
-      case 'api_access': return '🔌';
-      default: return '📊';
-    }
-  };
+  switch (type) {
+    case 'login': return '🔑';
+    case 'logout': return '👋';
+    case 'page_navigation': return '🧭';  // ADD THIS NEW ICON
+    case 'create_recipe': return '➕';
+    case 'update_recipe': return '✏️';
+    case 'delete_recipe': return '🗑️';
+    case 'view_recipe': return '👀';
+    case 'favorite_recipe': return '❤️';
+    case 'unfavorite_recipe': return '💔';
+    case 'search_recipes': return '🔍';
+    case 'upload_file': return '📤';
+    case 'view_admin': return '👑';
+    case 'api_access': return '🔌';
+    default: return '📊';
+  }
+};
 
   const getActivityLabel = (type) => {
-    switch (type) {
-      case 'login': return 'Login';
-      case 'logout': return 'Logout';
-      case 'create_recipe': return 'Created Recipe';
-      case 'update_recipe': return 'Updated Recipe';
-      case 'delete_recipe': return 'Deleted Recipe';
-      case 'view_recipe': return 'Viewed Recipe';
-      case 'favorite_recipe': return 'Favorited Recipe';
-      case 'unfavorite_recipe': return 'Unfavorited Recipe';
-      case 'search_recipes': return 'Searched Recipes';
-      case 'upload_file': return 'Uploaded File';
-      case 'view_admin': return 'Admin Access';
-      case 'api_access': return 'API Access';
-      default: return type.replace('_', ' ');
-    }
-  };
+  switch (type) {
+    case 'login': return 'Login';
+    case 'logout': return 'Logout';
+    case 'page_navigation': return 'Page Visit';  // ADD THIS NEW LABEL
+    case 'create_recipe': return 'Created Recipe';
+    case 'update_recipe': return 'Updated Recipe';
+    case 'delete_recipe': return 'Deleted Recipe';
+    case 'view_recipe': return 'Viewed Recipe';
+    case 'favorite_recipe': return 'Favorited Recipe';
+    case 'unfavorite_recipe': return 'Unfavorited Recipe';
+    case 'search_recipes': return 'Searched Recipes';
+    case 'upload_file': return 'Uploaded File';
+    case 'view_admin': return 'Admin Access';
+    case 'api_access': return 'API Access';
+    default: return type.replace('_', ' ');
+  }
+};
 
   const getCategoryColor = (category) => {
-    switch (category) {
-      case 'authentication': return '#007bff';
-      case 'recipe_management': return '#28a745';
-      case 'search_browse': return '#ffc107';
-      case 'admin_action': return '#dc3545';
-      case 'file_operation': return '#6f42c1';
-      case 'user_management': return '#fd7e14';
-      default: return '#6c757d';
-    }
-  };
+  switch (category) {
+    case 'authentication': return '#007bff';
+    case 'navigation': return '#17a2b8';  // ADD THIS NEW COLOR (teal)
+    case 'recipe_management': return '#28a745';
+    case 'search_browse': return '#ffc107';
+    case 'admin_action': return '#dc3545';
+    case 'file_operation': return '#6f42c1';
+    case 'user_management': return '#fd7e14';
+    default: return '#6c757d';
+  }
+};
 
   const formatDateTime = (dateString) => {
     return new Date(dateString).toLocaleString();
@@ -360,6 +363,7 @@ const AdminTracker = () => {
                 <option value="search_recipes">Search Recipes</option>
                 <option value="upload_file">Upload File</option>
                 <option value="view_admin">Admin Access</option>
+                <option value="page_navigation">Page Visit</option>
               </select>
             </div>
 
@@ -384,6 +388,7 @@ const AdminTracker = () => {
                 <option value="admin_action">Admin Action</option>
                 <option value="file_operation">File Operation</option>
                 <option value="user_management">User Management</option>
+                <option value="navigation">Navigation</option>
               </select>
             </div>
 
