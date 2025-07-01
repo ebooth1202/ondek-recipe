@@ -329,7 +329,7 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
             logical_page = page_groups.get(current_path, current_path)
 
             # Look for recent navigation to the same logical page
-            five_minutes_ago = datetime.now() - timedelta(minutes=5)
+            five_minutes_ago = datetime.now() - timedelta(minutes=15)
 
             # Check for any API endpoint that maps to the same logical page
             recent_paths = []

@@ -14,9 +14,7 @@ const AdminTracker = () => {
 
   // Filtering state
   const [filters, setFilters] = useState({
-    activity_type: '',
-    category: '',
-    user_id: '',
+    status: 'active', // NEW: Default to showing only active sessions
     username: '',
     date_from: '',
     date_to: ''
@@ -25,6 +23,14 @@ const AdminTracker = () => {
   // Modal state
   const [selectedSession, setSelectedSession] = useState(null);
   const [showActivityModal, setShowActivityModal] = useState(false);
+
+  // Delete confirmation state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [activityToDelete, setActivityToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
+  // Manual completion state
+  const [manuallyCompletedSessions, setManuallyCompletedSessions] = useState(new Set());
 
   // Check authentication and permissions
   useEffect(() => {
@@ -53,12 +59,9 @@ const AdminTracker = () => {
     try {
       setLoading(true);
 
-      // Build query parameters
+      // Build query parameters (removed activity_type and category)
       const params = new URLSearchParams();
 
-      if (filters.activity_type) params.append('activity_type', filters.activity_type);
-      if (filters.category) params.append('category', filters.category);
-      if (filters.user_id) params.append('user_id', filters.user_id);
       if (filters.username) params.append('username', filters.username);
       if (filters.date_from) params.append('date_from', filters.date_from);
       if (filters.date_to) params.append('date_to', filters.date_to);
@@ -72,7 +75,21 @@ const AdminTracker = () => {
 
       // Group activities into sessions
       const groupedSessions = groupActivitiesIntoSessions(response.data);
-      setSessions(groupedSessions);
+
+      // Filter sessions by status (treat expired as completed)
+      const filteredSessions = groupedSessions.filter(session => {
+        if (filters.status && filters.status !== '') {
+          if (filters.status === 'completed') {
+            // Show both completed and expired sessions when "Completed" is selected
+            return session.status === 'completed' || session.status === 'expired';
+          } else {
+            return session.status === filters.status;
+          }
+        }
+        return true;
+      });
+
+      setSessions(filteredSessions);
 
     } catch (error) {
       console.error('Error fetching activities:', error.response || error);
@@ -144,9 +161,13 @@ const AdminTracker = () => {
     sessions.forEach(session => {
       const hasLogout = session.activities.some(a => a.activity_type === 'logout');
       const lastActivityAge = Date.now() - new Date(session.lastActivity);
-      const ACTIVE_THRESHOLD = 30 * 60 * 1000; // 30 minutes
+      const ACTIVE_THRESHOLD = 10 * 60 * 1000; // 10 minutes (CHANGED FROM 30)
 
-      if (hasLogout) {
+      // Check if manually completed
+      if (manuallyCompletedSessions.has(session.id)) {
+        session.status = 'completed';
+        session.endTime = session.lastActivity;
+      } else if (hasLogout) {
         session.status = 'completed';
         session.endTime = session.lastActivity;
       } else if (lastActivityAge > ACTIVE_THRESHOLD) {
@@ -195,6 +216,53 @@ const AdminTracker = () => {
   const handleActivityClick = (session) => {
     setSelectedSession(session);
     setShowActivityModal(true);
+  };
+
+  // NEW DELETE FUNCTIONS
+  const handleDeleteClick = (activity, event) => {
+    event.stopPropagation(); // Prevent triggering the session click
+    setActivityToDelete(activity);
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!activityToDelete || !hasRole(['owner'])) {
+      setError('Only owners can delete activities');
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      await apiClient.delete(`/activities/${activityToDelete.id}`);
+      setSuccessMessage('Activity deleted successfully');
+      setShowDeleteConfirm(false);
+      setActivityToDelete(null);
+      setShowActivityModal(false);
+
+      // Refresh the activities list
+      await fetchActivities();
+
+      // Clear success message after 3 seconds
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (error) {
+      console.error('Error deleting activity:', error);
+      setError(error.response?.data?.detail || 'Failed to delete activity');
+      setTimeout(() => setError(''), 5000);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const cancelDelete = () => {
+    setShowDeleteConfirm(false);
+    setActivityToDelete(null);
+  };
+
+  // NEW MANUAL COMPLETION FUNCTION
+  const markSessionAsCompleted = (sessionId) => {
+    setManuallyCompletedSessions(prev => new Set([...prev, sessionId]));
+    setSuccessMessage('Session marked as completed');
+    setTimeout(() => setSuccessMessage(''), 3000);
   };
 
   // Helper functions
@@ -500,11 +568,11 @@ const AdminTracker = () => {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
             <div>
               <label style={{ display: 'block', marginBottom: '0.5rem', color: '#003366', fontWeight: '500' }}>
-                Activity Type
+                Status
               </label>
               <select
-                value={filters.activity_type}
-                onChange={(e) => handleFilterChange('activity_type', e.target.value)}
+                value={filters.status}
+                onChange={(e) => handleFilterChange('status', e.target.value)}
                 style={{
                   width: '100%',
                   padding: '0.5rem',
@@ -512,30 +580,9 @@ const AdminTracker = () => {
                   border: '1px solid #ccc'
                 }}
               >
-                <option value="">All Types</option>
-                <option value="login">Login</option>
-                <option value="logout">Logout</option>
-                <option value="page_navigation">Page Visit</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={{ display: 'block', marginBottom: '0.5rem', color: '#003366', fontWeight: '500' }}>
-                Category
-              </label>
-              <select
-                value={filters.category}
-                onChange={(e) => handleFilterChange('category', e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '0.5rem',
-                  borderRadius: '5px',
-                  border: '1px solid #ccc'
-                }}
-              >
-                <option value="">All Categories</option>
-                <option value="authentication">Authentication</option>
-                <option value="navigation">Navigation</option>
+                <option value="">All Status</option>
+                <option value="active">Active</option>
+                <option value="completed">Completed</option>
               </select>
             </div>
 
@@ -594,9 +641,7 @@ const AdminTracker = () => {
             <div style={{ display: 'flex', alignItems: 'end' }}>
               <button
                 onClick={() => setFilters({
-                  activity_type: '',
-                  category: '',
-                  user_id: '',
+                  status: 'active', // Reset to active (default view)
                   username: '',
                   date_from: '',
                   date_to: ''
@@ -721,18 +766,38 @@ const AdminTracker = () => {
               <h2 style={{ color: '#003366', margin: 0 }}>
                 {getActivityIcon('login')} Session Details - {selectedSession.username}
               </h2>
-              <button
-                onClick={() => setShowActivityModal(false)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '1.5rem',
-                  cursor: 'pointer',
-                  color: '#666'
-                }}
-              >
-                ✕
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                {/* Mark as Completed Button - Only show for non-completed sessions and for owners/admins */}
+                {selectedSession.status !== 'completed' && hasRole(['admin', 'owner']) && (
+                  <button
+                    onClick={() => markSessionAsCompleted(selectedSession.id)}
+                    style={{
+                      backgroundColor: '#28a745',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '0.5rem 1rem',
+                      cursor: 'pointer',
+                      fontSize: '0.9rem'
+                    }}
+                    title="Mark this session as completed"
+                  >
+                    ✅ Mark Completed
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowActivityModal(false)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '1.5rem',
+                    cursor: 'pointer',
+                    color: '#666'
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
             <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
@@ -803,6 +868,24 @@ const AdminTracker = () => {
                       {activity.details.response_time_ms}ms
                     </span>
                   )}
+                  {/* DELETE BUTTON - Only show for owners */}
+                  {hasRole(['owner']) && (
+                    <button
+                      onClick={(e) => handleDeleteClick(activity, e)}
+                      style={{
+                        backgroundColor: '#dc3545',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        padding: '0.25rem 0.5rem',
+                        cursor: 'pointer',
+                        fontSize: '0.8rem'
+                      }}
+                      title="Delete this activity"
+                    >
+                      🗑️
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -820,6 +903,61 @@ const AdminTracker = () => {
                 }}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {showDeleteConfirm && (
+        <div style={modalBackdropStyle}>
+          <div style={{
+            ...modalContentStyle,
+            maxWidth: '400px',
+            textAlign: 'center'
+          }}>
+            <h3 style={{ color: '#dc3545', marginBottom: '1rem' }}>
+              🗑️ Confirm Delete
+            </h3>
+            <p style={{ marginBottom: '1.5rem' }}>
+              Are you sure you want to delete this activity?
+            </p>
+            <p style={{ fontSize: '0.9rem', color: '#666', marginBottom: '1.5rem' }}>
+              <strong>Activity:</strong> {activityToDelete && getActivityLabel(activityToDelete.activity_type)}
+              <br />
+              <strong>Time:</strong> {activityToDelete && formatDateTime(activityToDelete.created_at)}
+            </p>
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+              <button
+                onClick={cancelDelete}
+                disabled={deleting}
+                style={{
+                  backgroundColor: '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '0.75rem 1.5rem',
+                  cursor: deleting ? 'not-allowed' : 'pointer',
+                  opacity: deleting ? 0.6 : 1
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                disabled={deleting}
+                style={{
+                  backgroundColor: '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '0.75rem 1.5rem',
+                  cursor: deleting ? 'not-allowed' : 'pointer',
+                  opacity: deleting ? 0.6 : 1
+                }}
+              >
+                {deleting ? 'Deleting...' : 'Delete'}
               </button>
             </div>
           </div>
