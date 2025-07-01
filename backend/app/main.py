@@ -127,11 +127,11 @@ app.add_middleware(
 
 # Include issue tracking router
 app.include_router(issues_router)
+app.include_router(activities_router)
 
 # Add error tracking middleware (ADD THIS HERE)
 app.add_middleware(ErrorTrackingMiddleware, track_performance=True)
 
-app.include_router(activities_router)
 app.add_middleware(ActivityTrackingMiddleware)
 
 # Configuration
@@ -381,6 +381,10 @@ def fix_photo_url(photo_url: Optional[str]) -> Optional[str]:
         return f"{base_url}/photos/{filename}"
 
     return photo_url
+
+@app.get("/test-middleware")
+async def test_middleware():
+    return {"message": "If middleware is working, this should create an activity"}
 
 
 # Photo serving route - MUST BE BEFORE OTHER ROUTES

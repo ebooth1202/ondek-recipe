@@ -36,8 +36,12 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
         }
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        # Add this debug line at the very start
+        print(f"🔍 MIDDLEWARE DEBUG: Processing {request.method} {request.url}")
+
         # Skip tracking for excluded endpoints
         if self._should_exclude_endpoint(request.url.path):
+            print(f"🚫 MIDDLEWARE DEBUG: Excluding {request.url.path}")
             return await call_next(request)
 
         start_time = time.time()
@@ -46,6 +50,7 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
         try:
             # Get user info before processing request
             user_info = await self._get_user_info(request)
+            print(f"👤 MIDDLEWARE DEBUG: User info: {user_info.username if user_info else 'No user'}")
 
             # Process the request
             response = await call_next(request)
@@ -53,15 +58,14 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
             # Track the activity after successful response
             if user_info and user_info.user_id != "anonymous":
                 processing_time = int((time.time() - start_time) * 1000)
+                print(f"📝 MIDDLEWARE DEBUG: About to track activity for {user_info.username}")
                 await self._track_activity(request, response, user_info, processing_time)
+                print(f"✅ MIDDLEWARE DEBUG: Activity tracked successfully")
 
             return response
 
         except Exception as e:
-            # Still try to track the activity even if request failed
-            if 'user_info' in locals() and user_info and user_info.user_id != "anonymous":
-                processing_time = int((time.time() - start_time) * 1000)
-                await self._track_activity(request, None, user_info, processing_time, error=str(e))
+            print(f"❌ MIDDLEWARE DEBUG: Error in middleware: {e}")
 
             raise
 
@@ -73,20 +77,64 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
         """Extract user info from request"""
         try:
             # Try to get user from authorization header
-            from ..middleware.auth import get_current_user_from_request
+            authorization = request.headers.get("Authorization")
+            if not authorization:
+                print(f"🔍 AUTH DEBUG: No Authorization header found")
+                return self._get_anonymous_user()
 
-            user = await get_current_user_from_request(request)
-            if user:
-                return UserInfo(
-                    user_id=str(user["_id"]),
-                    username=user["username"],
-                    role=user["role"],
-                    email=user.get("email")
-                )
+            try:
+                scheme, token = authorization.split()
+                if scheme.lower() != "bearer":
+                    print(f"🔍 AUTH DEBUG: Invalid auth scheme: {scheme}")
+                    return self._get_anonymous_user()
+            except ValueError:
+                print(f"🔍 AUTH DEBUG: Invalid authorization format")
+                return self._get_anonymous_user()
+
+            # Import here to avoid circular imports
+            from jose import jwt
+            from ..database import db
+            import os
+
+            SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key")
+
+            # Decode token
+            try:
+                payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+                username = payload.get("sub")
+                if not username:
+                    print(f"🔍 AUTH DEBUG: No username in token")
+                    return self._get_anonymous_user()
+
+                print(f"🔍 AUTH DEBUG: Decoded username: {username}")
+
+            except jwt.PyJWTError as e:
+                print(f"🔍 AUTH DEBUG: JWT decode error: {e}")
+                return self._get_anonymous_user()
+
+            # Get user from database
+            if db is not None:
+                user = db.users.find_one({"username": username})
+                if user:
+                    print(f"✅ AUTH DEBUG: Found user in database: {user['username']}")
+                    return UserInfo(
+                        user_id=str(user["_id"]),
+                        username=user["username"],
+                        role=user["role"],
+                        email=user.get("email")
+                    )
+                else:
+                    print(f"❌ AUTH DEBUG: User not found in database: {username}")
+            else:
+                print(f"❌ AUTH DEBUG: Database not available")
+
         except Exception as e:
-            logger.debug(f"Could not extract user info: {e}")
+            print(f"❌ AUTH DEBUG: Error extracting user info: {e}")
 
-        # Return anonymous user for unauthenticated requests
+        return self._get_anonymous_user()
+
+    def _get_anonymous_user(self) -> UserInfo:
+        """Return anonymous user info"""
         return UserInfo(
             user_id="anonymous",
             username="anonymous",
@@ -377,7 +425,13 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
     async def _save_activity(self, activity_create: ActivityCreate):
         """Save activity to database"""
         try:
+            print(f"💾 MIDDLEWARE DEBUG: Attempting to save activity to database")
+            print(f"🔍 ACTIVITY DEBUG: activity_create object: {activity_create}")
+            print(f"🔍 ACTIVITY DEBUG: activity_type: {activity_create.activity_type}")
+            print(f"🔍 ACTIVITY DEBUG: user_info: {activity_create.user_info}")
+
             if db is None:
+                print(f"❌ MIDDLEWARE DEBUG: Database not available")
                 logger.warning("Database not available for activity tracking")
                 return
 
@@ -385,22 +439,30 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
                 "activity_type": activity_create.activity_type.value,
                 "category": activity_create.category.value if activity_create.category else None,
                 "user_info": activity_create.user_info.dict(),
-                "context": activity_create.context.dict(),
-                "details": activity_create.details.dict(),
+                "context": activity_create.context.dict() if activity_create.context else None,
+                "details": activity_create.details.dict() if activity_create.details else None,
                 "description": activity_create.description,
                 "tags": activity_create.tags,
                 "metadata": activity_create.metadata,
                 "created_at": datetime.now()
             }
 
+            print(f"📊 MIDDLEWARE DEBUG: Activity document: {activity_doc}")
+
+            print(f"📊 MIDDLEWARE DEBUG: Activity document: {activity_doc}")
+
             # Insert into activities collection
             result = db.activities.insert_one(activity_doc)
 
             if result.inserted_id:
+                print(f"✅ MIDDLEWARE DEBUG: Activity saved with ID: {result.inserted_id}")
                 logger.debug(
                     f"Activity tracked: {activity_create.activity_type.value} by {activity_create.user_info.username}")
+            else:
+                print(f"❌ MIDDLEWARE DEBUG: Failed to save activity - no inserted_id")
 
         except Exception as e:
+            print(f"❌ MIDDLEWARE DEBUG: Failed to save activity: {e}")
             logger.error(f"Failed to save activity to database: {e}")
 
 
