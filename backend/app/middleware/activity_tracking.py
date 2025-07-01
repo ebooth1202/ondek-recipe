@@ -181,6 +181,8 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
         """Track the user activity with deduplication"""
         try:
             # Determine activity type and category
+            print(
+                f"🔍 PATH DEBUG: {request.method} {request.url.path} - Main page: {self._is_main_page(request.url.path)}")
             activity_type, category = self._determine_activity_type(request, response)
 
             if not activity_type:
@@ -229,29 +231,85 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
         elif "/auth/logout" in path:
             return ActivityType.LOGOUT, ActivityCategory.AUTHENTICATION
 
-        # Page navigation (only for GET requests to main pages)
+        # Page navigation indicators (API calls that indicate page visits)
         elif method == "GET" and response and response.status_code == 200:
-            # Only track navigation to main application pages
+            # Direct page routes
             if self._is_main_page(path):
                 return ActivityType.PAGE_NAVIGATION, ActivityCategory.NAVIGATION
 
-        # Don't track other activities (like API calls, individual recipe views, etc.)
+            # API patterns that indicate specific page visits
+            elif "/ai/status" in path:  # AI Chat page indicator
+                return ActivityType.PAGE_NAVIGATION, ActivityCategory.NAVIGATION
+            elif "/measuring-units" in path or "/genres" in path:  # Add Recipe page indicators
+                return ActivityType.PAGE_NAVIGATION, ActivityCategory.NAVIGATION
+            elif "/users/me/favorites" in path:  # Favorites page indicator
+                return ActivityType.PAGE_NAVIGATION, ActivityCategory.NAVIGATION
+
+        # Don't track other activities
         return None, None
+
 
     def _is_main_page(self, path: str) -> bool:
         """Check if this is a main application page worth tracking"""
-        main_pages = [
+
+        # First, exclude obvious API endpoints
+        if self._is_api_endpoint(path):
+            return False
+
+        # Define exact main pages to track
+        main_pages = {
             "/",  # Dashboard/Home
-            "/recipes",  # Recipe list page
+            "/recipes",  # Recipe list page (exact match only)
             "/favorites",  # Favorites page
             "/admin",  # Admin dashboard
             "/admin/activities",  # Activity tracker
             "/admin/issues",  # Issue tracker
+            "/ai-chat",  # AI Chat page
+            "/add-recipe",  # Add Recipe page
+        }
+
+        # Only track exact matches to main pages
+        return path in main_pages
+
+    def _is_api_endpoint(self, path: str) -> bool:
+        """Check if this is an API endpoint that should not be tracked as page navigation"""
+
+        # Patterns that indicate API endpoints
+        api_patterns = [
+            "/favorite-status",
+            "/ratings",
+            "/favorite",
+            "/auth/me",
+            "/users/me/",
+            "favorite-status",  # Any path containing this
+            "/api/",
         ]
 
-        # Check exact matches for main pages
-        for main_page in main_pages:
-            if path == main_page or (path.startswith(main_page) and main_page != "/"):
+        # Check for API patterns
+        for pattern in api_patterns:
+            if pattern in path:
+                return True
+
+        # Check for paths with IDs (UUIDs, ObjectIds, etc.)
+        # Pattern: /something/long-id-string/something
+        path_parts = path.strip("/").split("/")
+        if len(path_parts) >= 2:
+            for part in path_parts:
+                # Check if any part looks like a database ID
+                if len(part) >= 20 and part.replace("-", "").replace("_", "").isalnum():
+                    return True
+
+        # Check for common API endpoint suffixes
+        api_suffixes = [
+            "/stats",
+            "/summary",
+            "/status",
+            "/info",
+            "/data"
+        ]
+
+        for suffix in api_suffixes:
+            if path.endswith(suffix):
                 return True
 
         return False
@@ -259,15 +317,35 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
     async def _is_duplicate_navigation(self, user_id: str, current_path: str) -> bool:
         """Check if this is a duplicate navigation for the user"""
         try:
-            # Look for the user's last page navigation within the last 30 minutes
-            thirty_minutes_ago = datetime.now() - timedelta(minutes=30)
+            # Map API endpoints to logical pages
+            page_groups = {
+                "/ai/status": "ai-chat",
+                "/measuring-units": "add-recipe",
+                "/genres": "add-recipe",
+                "/users/me/favorites": "favorites"
+            }
+
+            # Get the logical page name
+            logical_page = page_groups.get(current_path, current_path)
+
+            # Look for recent navigation to the same logical page
+            five_minutes_ago = datetime.now() - timedelta(minutes=5)
+
+            # Check for any API endpoint that maps to the same logical page
+            recent_paths = []
+            for api_path, page_name in page_groups.items():
+                if page_name == logical_page:
+                    recent_paths.append(api_path)
+
+            if current_path not in page_groups:
+                recent_paths = [current_path]
 
             last_navigation = db.activities.find_one(
                 {
                     "user_info.user_id": user_id,
                     "activity_type": "page_navigation",
-                    "details.endpoint": current_path,
-                    "created_at": {"$gte": thirty_minutes_ago}
+                    "details.endpoint": {"$in": recent_paths},
+                    "created_at": {"$gte": five_minutes_ago}
                 },
                 sort=[("created_at", -1)]
             )
@@ -276,7 +354,8 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
 
         except Exception as e:
             logger.error(f"Error checking navigation duplication: {e}")
-            return False  # If error, don't skip tracking
+            return False
+
 
     def _build_simplified_activity_details(self, request: Request, response: Optional[Response],
                                            processing_time: int, error: Optional[str] = None) -> ActivityDetails:
@@ -308,7 +387,11 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
             "/favorites": "Favorites",
             "/admin": "Admin Dashboard",
             "/admin/activities": "Activity Tracker",
-            "/admin/issues": "Issue Tracker"
+            "/admin/issues": "Issue Tracker",
+            "/ai/status": "AI Chat",  # ADD THIS
+            "/measuring-units": "Add Recipe",  # ADD THIS
+            "/genres": "Add Recipe",  # ADD THIS
+            "/users/me/favorites": "Favorites"
         }
 
         return page_names.get(path, path)
